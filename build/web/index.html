@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base href="/">
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="终末地 AIC 工业规划工具">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <link rel="manifest" href="manifest.json">
+  <title>终末地 AIC 规划工具</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%; overflow: hidden;
+      background-color: #1A1A1A;
+    }
+    #loading {
+      display: flex; align-items: center; justify-content: center;
+      width: 100%; height: 100%; position: absolute; top: 0; left: 0;
+      background-color: #1A1A1A; z-index: 1000; flex-direction: column;
+    }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid #333333;
+      border-top: 3px solid #FFCC00;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .load-text {
+      color: #888888; font-family: sans-serif; font-size: 14px; margin-top: 16px;
+    }
+  </style>
+  <script>
+    window.addEventListener('load', function(ev) {
+      var loading = document.querySelector('#loading');
+      loading.style.display = 'none';
+    });
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</head>
+<body>
+  <div id="loading"><div class="spinner"></div><div class="load-text">AIC 规划工具加载中...</div></div>
+</body>
+</html>
