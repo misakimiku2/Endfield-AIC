@@ -387,7 +387,7 @@ class _EditorPageState extends State<EditorPage> {
                   Positioned(
                     left: 0,
                     right: 0,
-                    bottom: 8,
+                    bottom: 0,
                     child: Center(
                       child: EquipmentDock(
                         dataLoader: widget.dataLoader,

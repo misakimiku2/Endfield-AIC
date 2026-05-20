@@ -76,6 +76,140 @@
       "outputs": [
         {"item_id": "industrial_control_unit", "amount": 1}
       ]
+    },
+    "refine_origocrust": {
+      "id": "refine_origocrust",
+      "name": "晶体外壳精炼",
+      "allowed_buildings": ["refining_unit_3x3"],
+      "process_time_seconds": 2.0,
+      "inputs": [
+        {"item_id": "originium_ore", "amount": 1}
+      ],
+      "outputs": [
+        {"item_id": "origocrust", "amount": 1}
+      ]
+    },
+    "refine_origocrust_from_powder": {
+      "id": "refine_origocrust_from_powder",
+      "name": "晶体外壳粉末精炼",
+      "allowed_buildings": ["refining_unit_3x3"],
+      "process_time_seconds": 2.0,
+      "inputs": [
+        {"item_id": "origocrust_powder", "amount": 1}
+      ],
+      "outputs": [
+        {"item_id": "origocrust", "amount": 1}
+      ]
+    },
+    "refine_ferrium": {
+      "id": "refine_ferrium",
+      "name": "蓝铁块精炼",
+      "allowed_buildings": ["refining_unit_3x3"],
+      "process_time_seconds": 2.0,
+      "inputs": [
+        {"item_id": "ferrium_ore", "amount": 1}
+      ],
+      "outputs": [
+        {"item_id": "ferrium", "amount": 1}
+      ]
+    },
+    "refine_amethyst_fiber": {
+      "id": "refine_amethyst_fiber",
+      "name": "紫晶纤维精炼",
+      "allowed_buildings": ["refining_unit_3x3"],
+      "process_time_seconds": 2.0,
+      "inputs": [
+        {"item_id": "amethyst_ore", "amount": 1}
+      ],
+      "outputs": [
+        {"item_id": "amethyst_fiber", "amount": 1}
+      ]
+    },
+    "refine_packed_origocrust": {
+      "id": "refine_packed_origocrust",
+      "name": "密制晶体精炼",
+      "allowed_buildings": ["refining_unit_3x3"],
+      "process_time_seconds": 2.0,
+      "inputs": [
+        {"item_id": "dense_origocrust_powder", "amount": 1}
+      ],
+      "outputs": [
+        {"item_id": "packed_origocrust", "amount": 1}
+      ]
+    },
+    "refine_steel": {
+      "id": "refine_steel",
+      "name": "钢块精炼",
+      "allowed_buildings": ["refining_unit_3x3"],
+      "process_time_seconds": 2.0,
+      "inputs": [
+        {"item_id": "dense_ferrium_powder", "amount": 1}
+      ],
+      "outputs": [
+        {"item_id": "steel", "amount": 1}
+      ]
+    },
+    "refine_cryston_fiber": {
+      "id": "refine_cryston_fiber",
+      "name": "高晶纤维精炼",
+      "allowed_buildings": ["refining_unit_3x3"],
+      "process_time_seconds": 2.0,
+      "inputs": [
+        {"item_id": "cryston_powder", "amount": 1}
+      ],
+      "outputs": [
+        {"item_id": "cryston_fiber", "amount": 1}
+      ]
+    },
+    "refine_stabilized_carbon": {
+      "id": "refine_stabilized_carbon",
+      "name": "稳定碳块精炼",
+      "allowed_buildings": ["refining_unit_3x3"],
+      "process_time_seconds": 2.0,
+      "inputs": [
+        {"item_id": "dense_carbon_powder", "amount": 1}
+      ],
+      "outputs": [
+        {"item_id": "stabilized_carbon", "amount": 1}
+      ]
+    },
+    "refine_dense_origocrust_powder": {
+      "id": "refine_dense_origocrust_powder",
+      "name": "致密晶体粉末精炼",
+      "allowed_buildings": ["refining_unit_3x3"],
+      "process_time_seconds": 2.0,
+      "inputs": [
+        {"item_id": "dense_originium_powder", "amount": 1}
+      ],
+      "outputs": [
+        {"item_id": "dense_origocrust_powder", "amount": 1}
+      ]
+    },
+    "refine_carbon": {
+      "id": "refine_carbon",
+      "name": "碳块烧制",
+      "allowed_buildings": ["refining_unit_3x3"],
+      "process_time_seconds": 2.0,
+      "inputs": [
+        {"item_id": "special_crop", "amount": 1}
+      ],
+      "outputs": [
+        {"item_id": "carbon", "amount": 1}
+      ]
+    },
+    "refine_cuprium": {
+      "id": "refine_cuprium",
+      "name": "赤铜块精炼",
+      "allowed_buildings": ["refining_unit_3x3"],
+      "process_time_seconds": 2.0,
+      "inputs": [
+        {"item_id": "cuprium_ore", "amount": 1},
+        {"item_id": "clean_water", "amount": 1}
+      ],
+      "outputs": [
+        {"item_id": "cuprium", "amount": 1},
+        {"item_id": "waste_water", "amount": 1}
+      ]
     }
   }
 }

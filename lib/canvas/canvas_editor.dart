@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'dart:developer' as developer;
 import '../models/building.dart';
 import '../models/recipe.dart';
 import '../models/project.dart';
@@ -146,7 +145,6 @@ class CanvasEditorState extends State<CanvasEditor>
   }
 
   void _onTick(Duration elapsed) {
-    final frameStart = DateTime.now();
     const lerpFactor = 0.2;
     final newScale =
         _displayScale + (_targetScale - _displayScale) * lerpFactor;
@@ -168,19 +166,6 @@ class CanvasEditorState extends State<CanvasEditor>
     final rotationDone = angleDiff.abs() < 0.005;
     _displayAngle = rotationDone ? _targetAngle : _displayAngle + angleDiff * lerpFactor;
 
-    final isRotating = !rotationDone;
-    if (isRotating) {
-      final frameMs = frameStart.millisecondsSinceEpoch;
-      developer.Timeline.startSync('CanvasRotationFrame', arguments: {
-        'scale': _displayScale.toStringAsFixed(3),
-        'angle': (_displayAngle * 180 / math.pi).toStringAsFixed(1),
-        'targetAngle': (_targetAngle * 180 / math.pi).toStringAsFixed(1),
-        'buildings': _project.buildings.length.toString(),
-        'conveyors': _project.conveyors.length.toString(),
-        'frameTime': frameMs.toString(),
-      });
-    }
-
     if (scaleDone && offsetXDone && offsetYDone && rotationDone) {
       _animating = false;
       _ticker.stop();
@@ -190,10 +175,6 @@ class CanvasEditorState extends State<CanvasEditor>
     }
 
     setState(() {});
-
-    if (isRotating) {
-      developer.Timeline.finishSync();
-    }
   }
 
   void _startAnimation() {
@@ -205,9 +186,6 @@ class CanvasEditorState extends State<CanvasEditor>
 
   void rotateCanvas90() {
     _targetAngle += math.pi / 2;
-    debugPrint('[旋转] 触发90°旋转 | 当前scale=${_displayScale.toStringAsFixed(3)} | '
-        '目标角度=${(_targetAngle * 180 / math.pi).toStringAsFixed(1)}° | '
-        '设备=${_project.buildings.length} 传送带=${_project.conveyors.length}');
     _startAnimation();
   }
 
@@ -269,9 +247,6 @@ class CanvasEditorState extends State<CanvasEditor>
     _targetOffsetY =
         (localPos.dy + _targetOffsetY) * newScale / oldScale - localPos.dy;
     _targetScale = newScale;
-
-    debugPrint('[缩放] ${oldScale.toStringAsFixed(3)} → ${newScale.toStringAsFixed(3)} | '
-        '设备=${_project.buildings.length} 传送带=${_project.conveyors.length}');
 
     _startAnimation();
   }
@@ -444,28 +419,20 @@ class CanvasEditorState extends State<CanvasEditor>
     final building = widget.placingBuilding;
 
     if (building != null) {
-      debugPrint('[放置设备] screen=(${screenPos.dx.toStringAsFixed(1)}, ${screenPos.dy.toStringAsFixed(1)}) → grid=(${gridPos.dx.toInt()}, ${gridPos.dy.toInt()}) | building=${building.name}');
       _placeBuilding(building, gridPos);
       return;
     }
 
     if (widget.conveyorMode) {
-      // Don't allow clicking on occupied cells as anchors
       if (_isCellOccupied(gridPos)) {
-        debugPrint('[传送带] 点击了已占用的格子 (${gridPos.dx.toInt()}, ${gridPos.dy.toInt()})，忽略');
         return;
       }
-
-      debugPrint('[传送带] screen=(${screenPos.dx.toStringAsFixed(1)}, ${screenPos.dy.toStringAsFixed(1)}) → grid=(${gridPos.dx.toInt()}, ${gridPos.dy.toInt()})');
 
       if (_conveyorAnchors.isNotEmpty && _conveyorAnchors.last != gridPos) {
         final segment = _calculateConveyorPath(_conveyorAnchors.last, gridPos);
         if (segment.length >= 1) {
           final fullPath = <Offset>[_conveyorAnchors.last, ...segment];
-          debugPrint('[传送带] 创建传送带段: ${fullPath.length} 个格子, 从 (${fullPath.first.dx.toInt()},${fullPath.first.dy.toInt()}) 到 (${fullPath.last.dx.toInt()},${fullPath.last.dy.toInt()})');
           _placeConveyorPath(fullPath);
-        } else {
-          debugPrint('[传送带] 路径被占用截断，无法创建传送带段');
         }
       }
 
@@ -480,7 +447,6 @@ class CanvasEditorState extends State<CanvasEditor>
         _conveyorPreviewOccupied = null;
       }
 
-      debugPrint('[传送带] 当前锚点数: ${_conveyorAnchors.length}, 已创建传送带数: ${_project.conveyors.length}');
       setState(() {});
       return;
     }
@@ -540,7 +506,6 @@ class CanvasEditorState extends State<CanvasEditor>
   }
 
   void _finishConveyor() {
-    debugPrint('[传送带] 完成创建, 锚点数: ${_conveyorAnchors.length}, 总传送带数: ${_project.conveyors.length}');
     _conveyorAnchors = [];
     _conveyorPreviewPath = null;
     _conveyorPreviewOccupied = null;
@@ -724,9 +689,6 @@ class _EditorPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paintStart = Stopwatch()..start();
-    final isRotating = displayAngle % (math.pi / 2) != 0;
-
     // 计算可见世界区域（视口裁剪用）
     final viewport = _computeViewport(size);
 
@@ -738,7 +700,6 @@ class _EditorPainter extends CustomPainter {
       rotation: displayAngle,
     );
     gridPainter.paint(canvas, size);
-    final gridTime = paintStart.elapsedMicroseconds;
 
     canvas.save();
     if (displayAngle != 0) {
@@ -751,37 +712,23 @@ class _EditorPainter extends CustomPainter {
     canvas.scale(displayScale);
 
     // LOD: 根据缩放级别决定渲染细节
-    // scale < 0.35: minimal (仅色块+边框)
-    // scale < 0.5: simplified (跳过文字/配方/粒子)
-    // scale >= 0.5: full
     final detailLevel = displayScale < 0.35 ? 0 : (displayScale < 0.5 ? 1 : 2);
 
-    paintStart.reset();
-    int visibleConveyors = 0;
     for (final belt in project.conveyors) {
-      // 视口裁剪：跳过完全不可见的传送带
       if (!_isBeltVisible(belt, viewport)) continue;
-      visibleConveyors++;
       final item = dataLoader.getItem(belt.itemId);
       ConveyorRenderer.renderConveyorPath(canvas, belt, item, cellSize, detailLevel: detailLevel);
     }
-    final conveyorTime = paintStart.elapsedMicroseconds;
 
-    paintStart.reset();
-    int visibleBuildings = 0;
     for (final pb in project.buildings) {
-      // 视口裁剪：跳过完全不可见的设备
       if (!_isBuildingVisible(pb, viewport)) continue;
-      visibleBuildings++;
 
-      // 使用缓存，避免每帧 O(buildings*conveyors*ports) 重复计算
       final portConnections = portConnectionsCache[pb.id] ?? <String, bool>{};
 
       // 预渲染缓存 key
       final portsHash = portConnections.entries.map((e) => '${e.key}:${e.value}').join(',');
       final cacheKey = '${pb.building.id}_${pb.rotation}_${detailLevel}_$portsHash';
 
-      // 绘制缓存的静态部分
       final x = pb.gridX * cellSize;
       final y = pb.gridY * cellSize;
       final w = pb.building.gridWidth * cellSize;
@@ -789,14 +736,12 @@ class _EditorPainter extends CustomPainter {
 
       ui.Picture? cachedPicture = _pictureCache[cacheKey];
       if (cachedPicture == null) {
-        // 缓存未命中：渲染到 PictureRecorder
         final recorder = ui.PictureRecorder();
         final recordCanvas = Canvas(recorder);
         recordCanvas.translate(w / 2, h / 2);
         recordCanvas.rotate(pb.rotation * math.pi / 2);
         recordCanvas.translate(-w / 2, -h / 2);
 
-        // 渲染静态部分到 recorder
         _renderBuildingStatic(recordCanvas, pb, cellSize, detailLevel, portConnections);
 
         cachedPicture = recorder.endRecording();
@@ -806,13 +751,12 @@ class _EditorPainter extends CustomPainter {
         _pictureCache[cacheKey] = cachedPicture;
       }
 
-      // 绘制缓存的 Picture
       canvas.save();
       canvas.translate(x, y);
       canvas.drawPicture(cachedPicture);
       canvas.restore();
 
-      // 动态部分：进度条和阻塞遮罩（每帧绘制，不缓存）
+      // 动态部分：进度条（每帧绘制，不缓存）
       if (detailLevel >= 1 && pb.productionProgress > 0 && pb.productionProgress < 1.0) {
         canvas.save();
         canvas.translate(x + w / 2, y + h / 2);
@@ -822,40 +766,23 @@ class _EditorPainter extends CustomPainter {
         canvas.restore();
       }
     }
-    final buildingTime = paintStart.elapsedMicroseconds;
 
-    paintStart.reset();
     if (placingBuilding != null && mouseGridPos != null) {
       final cx = mouseGridPos!.dx - (placingBuilding!.gridWidth ~/ 2).toDouble();
       final cy = mouseGridPos!.dy - (placingBuilding!.gridHeight ~/ 2).toDouble();
 
       if (placingBuilding!.id == RefiningUnitConfig.id) {
         RefiningUnitRenderer.renderPlaceholder(
-          canvas,
-          placingBuilding!,
-          cx,
-          cy,
-          cellSize,
-          0.6,
+          canvas, placingBuilding!, cx, cy, cellSize, 0.6,
         );
       } else if (placingBuilding!.id == DepotLoaderConfig.id ||
           placingBuilding!.id == DepotUnloaderConfig.id) {
         DepotAccessRenderer.renderPlaceholder(
-          canvas,
-          placingBuilding!,
-          cx,
-          cy,
-          cellSize,
-          0.6,
+          canvas, placingBuilding!, cx, cy, cellSize, 0.6,
         );
       } else {
         BuildingRenderer.renderPlaceholder(
-          canvas,
-          placingBuilding!,
-          cx,
-          cy,
-          cellSize,
-          0.6,
+          canvas, placingBuilding!, cx, cy, cellSize, 0.6,
         );
       }
     }
@@ -864,20 +791,8 @@ class _EditorPainter extends CustomPainter {
       ConveyorRenderer.renderPreviewPath(
           canvas, conveyorPreviewPath!, cellSize, conveyorPreviewOccupied ?? <String>{});
     }
-    final previewTime = paintStart.elapsedMicroseconds;
 
     canvas.restore();
-
-    // 旋转时输出详细性能日志
-    if (isRotating) {
-      debugPrint('[Paint] scale=${displayScale.toStringAsFixed(3)} | '
-          'angle=${(displayAngle * 180 / math.pi).toStringAsFixed(1)}° | '
-          'grid=${gridTime}μs conveyor=${conveyorTime}μs '
-          'building=${buildingTime}μs preview=${previewTime}μs | '
-          'total=${gridTime + conveyorTime + buildingTime + previewTime}μs | '
-          'visible=$visibleBuildings/${project.buildings.length}+$visibleConveyors/${project.conveyors.length} '
-          'lod=$detailLevel');
-    }
   }
 
   /// 计算可见世界坐标区域（考虑旋转的轴对齐包围盒）
