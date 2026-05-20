@@ -1,17 +1,29 @@
 import 'dart:async';
+import 'dart:isolate';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../models/project.dart';
 import '../models/recipe.dart';
 import '../data/data_loader.dart';
+import 'sim_protocol.dart';
+import 'sim_worker.dart';
 
 class SimulationEngine extends ChangeNotifier {
   final DataLoader _dataLoader;
   ProjectState? _project;
-  Timer? _tickTimer;
   bool _isRunning = false;
-  final double _tickRate = 20.0;
   double _speedMultiplier = 1.0;
 
+  // Isolate 模式（原生平台）
+  Isolate? _isolate;
+  SendPort? _workerSendPort;
+  ReceivePort? _mainReceivePort;
+  StreamSubscription? _mainSubscription;
+  bool _isolateReady = false;
+
+  // 主线程回退模式（Web 平台）
+  Timer? _fallbackTimer;
+  static const double _tickRate = 20.0;
   static const double _cellSize = 48.0;
   static const double _portConnectionThreshold = 30.0;
 
@@ -19,29 +31,160 @@ class SimulationEngine extends ChangeNotifier {
   double get speedMultiplier => _speedMultiplier;
   set speedMultiplier(double v) {
     _speedMultiplier = v.clamp(0.25, 10.0);
+    if (_isolateReady) {
+      _sendControl('setSpeed', {'speedMultiplier': _speedMultiplier});
+    }
     notifyListeners();
   }
 
   SimulationEngine(this._dataLoader);
 
+  /// 初始化：原生平台启动 Isolate，Web 平台使用主线程回退
+  Future<void> init() async {
+    if (kIsWeb) {
+      // Web 平台不支持 Isolate，使用主线程回退
+      return;
+    }
+
+    try {
+      _mainReceivePort = ReceivePort();
+      _mainSubscription = _mainReceivePort!.listen(_onMessageFromWorker);
+
+      _isolate = await Isolate.spawn(
+        simWorkerEntry,
+        _mainReceivePort!.sendPort,
+      );
+    } catch (e) {
+      debugPrint('[SimulationEngine] Isolate 初始化失败，回退到主线程模式: $e');
+      _mainSubscription?.cancel();
+      _mainReceivePort?.close();
+      _mainReceivePort = null;
+      _isolate = null;
+    }
+  }
+
+  void _onMessageFromWorker(dynamic message) {
+    if (message is SendPort) {
+      _workerSendPort = message;
+      _isolateReady = true;
+      // Isolate 就绪后同步当前状态
+      _syncState();
+      return;
+    }
+
+    if (message is Map<String, dynamic>) {
+      final result = SimTickResult.fromJson(message);
+      _applyTickResult(result);
+      notifyListeners();
+    }
+  }
+
+  /// 将 tick 结果应用到主线程的 project 数据
+  void _applyTickResult(SimTickResult result) {
+    if (_project == null) return;
+
+    for (final br in result.buildings) {
+      final pb = _project!.buildings.where((b) => b.id == br.id).firstOrNull;
+      if (pb != null) {
+        pb.isBlocked = br.isBlocked;
+        pb.productionProgress = br.productionProgress;
+      }
+    }
+
+    for (final cr in result.conveyors) {
+      final belt = _project!.conveyors.where((c) => c.id == cr.id).firstOrNull;
+      if (belt != null) {
+        belt.itemId = cr.itemId;
+        belt.flowProgress = cr.flowProgress;
+        belt.isBlocked = cr.isBlocked;
+      }
+    }
+  }
+
   void attach(ProjectState project) {
     _project = project;
+    if (_isolateReady) {
+      _syncState();
+    }
+  }
+
+  /// 同步完整状态到计算 Isolate
+  void _syncState() {
+    if (_workerSendPort == null || _project == null) return;
+
+    final state = SimSyncState(
+      buildings: _project!.buildings.map((pb) => SimBuildingData(
+        id: pb.id,
+        buildingId: pb.building.id,
+        gridX: pb.gridX,
+        gridY: pb.gridY,
+        rotation: pb.rotation,
+        activeRecipeId: pb.activeRecipeId,
+        gridWidth: pb.building.gridWidth,
+        gridHeight: pb.building.gridHeight,
+        inputPorts: pb.inputPorts.map((p) => SimPortData(
+          index: p.index,
+          type: p.type,
+          relativeX: p.definition.relativeX,
+          relativeY: p.definition.relativeY,
+          direction: p.definition.direction,
+          portType: p.definition.portType,
+        )).toList(),
+        outputPorts: pb.outputPorts.map((p) => SimPortData(
+          index: p.index,
+          type: p.type,
+          relativeX: p.definition.relativeX,
+          relativeY: p.definition.relativeY,
+          direction: p.definition.direction,
+          portType: p.definition.portType,
+        )).toList(),
+      )).toList(),
+      conveyors: _project!.conveyors.map((c) => SimConveyorData(
+        id: c.id,
+        path: c.path,
+        itemId: c.itemId,
+        flowProgress: c.flowProgress,
+        isBlocked: c.isBlocked,
+      )).toList(),
+      recipes: _dataLoader.recipes.values.map((r) => SimRecipeData(
+        id: r.id,
+        processTimeSeconds: r.processTimeSeconds,
+        inputs: r.inputs.map((io) => SimRecipeIOData(itemId: io.itemId, amount: io.amount)).toList(),
+        outputs: r.outputs.map((io) => SimRecipeIOData(itemId: io.itemId, amount: io.amount)).toList(),
+      )).toList(),
+      speedMultiplier: _speedMultiplier,
+    );
+
+    _sendControl('sync', state.toJson());
   }
 
   void start() {
     if (_isRunning) return;
     _isRunning = true;
-    _tickTimer = Timer.periodic(
-      Duration(milliseconds: (1000 / _tickRate).round()),
-      _onTick,
-    );
+
+    if (_isolateReady) {
+      _sendControl('start');
+    } else {
+      // Web 回退：主线程定时器
+      _fallbackTimer = Timer.periodic(
+        Duration(milliseconds: (1000 / _tickRate).round()),
+        _onFallbackTick,
+      );
+    }
+
     notifyListeners();
   }
 
   void stop() {
     _isRunning = false;
-    _tickTimer?.cancel();
-    _tickTimer = null;
+
+    if (_isolateReady) {
+      _sendControl('stop');
+    } else {
+      _fallbackTimer?.cancel();
+      _fallbackTimer = null;
+    }
+
     notifyListeners();
   }
 
@@ -53,24 +196,32 @@ class SimulationEngine extends ChangeNotifier {
     }
   }
 
-  void _onTick(Timer timer) {
+  void _sendControl(String type, [Map<String, dynamic>? data]) {
+    _workerSendPort?.send({'type': type, 'data': data});
+  }
+
+  // ============================================================
+  // Web 回退：主线程计算（与旧版 SimulationEngine 逻辑一致）
+  // ============================================================
+
+  void _onFallbackTick(Timer timer) {
     if (_project == null) return;
     final dt = _speedMultiplier / _tickRate;
 
-    _updateConveyors(dt);
-    _updateBuildings(dt);
+    _fallbackUpdateConveyors(dt);
+    _fallbackUpdateBuildings(dt);
 
     notifyListeners();
   }
 
-  void _updateConveyors(double dt) {
+  void _fallbackUpdateConveyors(double dt) {
     if (_project == null) return;
     for (final belt in _project!.conveyors) {
       if (belt.isBlocked) continue;
       belt.flowProgress += dt * 60;
       if (belt.flowProgress > 100000) belt.flowProgress = 0;
 
-      final sourceBuilding = _findSourceBuilding(belt.start);
+      final sourceBuilding = _fallbackFindSourceBuilding(belt.start);
       if (sourceBuilding != null && sourceBuilding.isBlocked) {
         belt.isBlocked = true;
       } else {
@@ -79,7 +230,7 @@ class SimulationEngine extends ChangeNotifier {
     }
   }
 
-  PlacedBuilding? _findSourceBuilding(Offset worldPos) {
+  PlacedBuilding? _fallbackFindSourceBuilding(Offset worldPos) {
     if (_project == null) return null;
     for (final pb in _project!.buildings) {
       for (final port in pb.outputPorts) {
@@ -93,15 +244,15 @@ class SimulationEngine extends ChangeNotifier {
     return null;
   }
 
-  void _updateBuildings(double dt) {
+  void _fallbackUpdateBuildings(double dt) {
     if (_project == null) return;
     for (final pb in _project!.buildings) {
       if (pb.activeRecipeId == null) continue;
       final recipe = _dataLoader.getRecipe(pb.activeRecipeId!);
       if (recipe == null) continue;
 
-      final hasInputs = _checkInputsAvailable(pb, recipe);
-      final hasOutputSpace = _checkOutputSpace(pb);
+      final hasInputs = _fallbackCheckInputsAvailable(pb, recipe);
+      final hasOutputSpace = _fallbackCheckOutputSpace(pb);
 
       if (!hasInputs || !hasOutputSpace) {
         pb.isBlocked = true;
@@ -114,13 +265,13 @@ class SimulationEngine extends ChangeNotifier {
 
       if (pb.productionProgress >= 1.0) {
         pb.productionProgress = 0.0;
-        _consumeInputs(pb, recipe);
-        _produceOutputs(pb, recipe);
+        _fallbackConsumeInputs(pb, recipe);
+        _fallbackProduceOutputs(pb, recipe);
       }
     }
   }
 
-  bool _checkInputsAvailable(PlacedBuilding pb, Recipe recipe) {
+  bool _fallbackCheckInputsAvailable(PlacedBuilding pb, Recipe recipe) {
     for (final input in recipe.inputs) {
       bool found = false;
       for (final belt in _project!.conveyors) {
@@ -141,10 +292,8 @@ class SimulationEngine extends ChangeNotifier {
     return true;
   }
 
-  bool _checkOutputSpace(PlacedBuilding pb) {
+  bool _fallbackCheckOutputSpace(PlacedBuilding pb) {
     if (pb.isBlocked) return false;
-
-    // Check that at least one connected output belt is empty (no item)
     for (final port in pb.outputPorts) {
       final portWorld = port.worldPosition(
           pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight);
@@ -157,7 +306,7 @@ class SimulationEngine extends ChangeNotifier {
     return false;
   }
 
-  void _consumeInputs(PlacedBuilding pb, Recipe recipe) {
+  void _fallbackConsumeInputs(PlacedBuilding pb, Recipe recipe) {
     for (final input in recipe.inputs) {
       for (final port in pb.inputPorts) {
         final portWorld = port.worldPosition(
@@ -174,14 +323,13 @@ class SimulationEngine extends ChangeNotifier {
     }
   }
 
-  void _produceOutputs(PlacedBuilding pb, Recipe recipe) {
+  void _fallbackProduceOutputs(PlacedBuilding pb, Recipe recipe) {
     for (final output in recipe.outputs) {
       for (final port in pb.outputPorts) {
         final portWorld = port.worldPosition(
             pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight);
         for (final belt in _project!.conveyors) {
           if ((belt.start - portWorld).distance < _portConnectionThreshold) {
-            // Only assign to empty belts, skip belts that already carry items
             if (belt.itemId.isEmpty) {
               belt.itemId = output.itemId;
               port.connected = true;
@@ -197,6 +345,9 @@ class SimulationEngine extends ChangeNotifier {
   @override
   void dispose() {
     stop();
+    _mainSubscription?.cancel();
+    _mainReceivePort?.close();
+    _isolate?.kill(priority: Isolate.immediate);
     super.dispose();
   }
 }

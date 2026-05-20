@@ -6,8 +6,9 @@ import '../models/project.dart';
 import '../data/data_loader.dart';
 import '../canvas/canvas_editor.dart';
 import '../canvas/simulation_engine.dart';
-import '../widgets/building_palette.dart';
-import '../widgets/property_panel.dart';
+import '../widgets/equipment_dock.dart';
+import '../widgets/floating_action_buttons.dart';
+import '../widgets/building_detail_dialog.dart';
 
 class EditorPage extends StatefulWidget {
   final DataLoader dataLoader;
@@ -28,19 +29,46 @@ class _EditorPageState extends State<EditorPage> {
   Building? _placingBuilding;
   PlacedBuilding? _selectedBuilding;
   bool _conveyorMode = false;
+  final GlobalKey<CanvasEditorState> _canvasKey = GlobalKey();
+
+  static const List<String> _dockOrder = [
+    'refining_unit_3x3',
+    'shredder_3x3',
+    'furnace_3x3',
+    'assembler_4x4',
+    'depot_loader_3x1',
+    'depot_unloader_3x1',
+  ];
 
   @override
   void initState() {
     super.initState();
     _project = ProjectState();
     widget.simulationEngine.attach(_project);
+    // 监听仿真引擎的 tick 结果，触发 UI 重绘
+    widget.simulationEngine.addListener(_onSimTick);
+    // 异步初始化计算 Isolate
+    widget.simulationEngine.init().then((_) {
+      // Isolate 就绪后同步当前状态
+      widget.simulationEngine.attach(_project);
+    });
   }
 
-  void _onBuildingSelected(Building building) {
+  @override
+  void dispose() {
+    widget.simulationEngine.removeListener(_onSimTick);
+    super.dispose();
+  }
+
+  void _onSimTick() {
+    setState(() {});
+  }
+
+  void _onDockBuildingSelected(Building? building) {
     setState(() {
       _placingBuilding = building;
       _conveyorMode = false;
-      _selectedBuilding = null;
+      if (building == null) _selectedBuilding = null;
     });
   }
 
@@ -50,7 +78,7 @@ class _EditorPageState extends State<EditorPage> {
     });
   }
 
-  void _onCancelPlacement() {
+  void _cancelPlacement() {
     setState(() {
       _placingBuilding = null;
       _conveyorMode = false;
@@ -58,6 +86,13 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   void _onBuildingTapped(PlacedBuilding? pb) {
+    if (pb != null) {
+      BuildingDetailDialog.show(
+        context,
+        placedBuilding: pb,
+        dataLoader: widget.dataLoader,
+      );
+    }
     setState(() {
       _selectedBuilding = pb;
       _placingBuilding = null;
@@ -65,79 +100,16 @@ class _EditorPageState extends State<EditorPage> {
     });
   }
 
-  void _onRecipeChanged(String? recipeId) {
-    if (_selectedBuilding == null) return;
+  void _toggleConveyorMode() {
     setState(() {
-      _selectedBuilding!.activeRecipeId = recipeId;
-      _updatePortLinks();
-    });
-  }
-
-  void _updatePortLinks() {
-    if (_selectedBuilding == null) return;
-    final recipe = _selectedBuilding!.activeRecipeId != null
-        ? widget.dataLoader.getRecipe(_selectedBuilding!.activeRecipeId!)
-        : null;
-
-    _selectedBuilding!.inputPorts
-      ..clear()
-      ..addAll(List.generate(
-        _selectedBuilding!.building.ports.inputs.length,
-        (i) => PortState(
-          index: i,
-          type: 'input',
-          definition: _selectedBuilding!.building.ports.inputs[i],
-        ),
-      ));
-
-    _selectedBuilding!.outputPorts
-      ..clear()
-      ..addAll(List.generate(
-        _selectedBuilding!.building.ports.outputs.length,
-        (i) => PortState(
-          index: i,
-          type: 'output',
-          definition: _selectedBuilding!.building.ports.outputs[i],
-        ),
-      ));
-
-    if (recipe != null) {
-      for (int i = 0; i < recipe.inputs.length && i < _selectedBuilding!.inputPorts.length; i++) {
-        _selectedBuilding!.inputPorts[i].linkedItemId = recipe.inputs[i].itemId;
-      }
-      for (int i = 0; i < recipe.outputs.length && i < _selectedBuilding!.outputPorts.length; i++) {
-        _selectedBuilding!.outputPorts[i].linkedItemId = recipe.outputs[i].itemId;
-      }
-    }
-  }
-
-  void _onRotate() {
-    if (_selectedBuilding == null) return;
-    setState(() {
-      _selectedBuilding!.rotation = (_selectedBuilding!.rotation + 1) % 4;
-    });
-  }
-
-  void _onDelete() {
-    if (_selectedBuilding == null) return;
-    final pb = _selectedBuilding!;
-    setState(() {
-      _project.buildings.remove(pb);
-      _project.conveyors.removeWhere((belt) {
-        const cellSize = 48.0;
-        const threshold = 30.0;
-        for (final port in [...pb.inputPorts, ...pb.outputPorts]) {
-          final pw = port.worldPosition(
-              pb.gridX, pb.gridY, cellSize, pb.building.gridWidth, pb.building.gridHeight);
-          if ((belt.start - pw).distance < threshold ||
-              (belt.end - pw).distance < threshold) {
-            return true;
-          }
-        }
-        return false;
-      });
+      _conveyorMode = !_conveyorMode;
+      _placingBuilding = null;
       _selectedBuilding = null;
     });
+  }
+
+  void _rotateCanvas() {
+    _canvasKey.currentState?.rotateCanvas90();
   }
 
   void _exportProject() {
@@ -301,53 +273,135 @@ class _EditorPageState extends State<EditorPage> {
     });
   }
 
+  Building? _getBuildingByKey(int keyIndex) {
+    if (keyIndex < 0 || keyIndex >= _dockOrder.length) return null;
+    return widget.dataLoader.getBuilding(_dockOrder[keyIndex]);
+  }
+
+  bool _handleKeyDown(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      _cancelPlacement();
+      return true;
+    }
+
+    // Ctrl+R: 旋转画布（必须在页面层处理，否则浏览器会拦截刷新）
+    if (event.logicalKey == LogicalKeyboardKey.keyR &&
+        (HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) ||
+            HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.controlRight))) {
+      _rotateCanvas();
+      return true;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.keyE &&
+        !HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) &&
+        !HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.controlRight)) {
+      _toggleConveyorMode();
+      return true;
+    }
+
+    int? keyIndex;
+    final label = event.logicalKey.keyLabel;
+    if (label == '1') {
+      keyIndex = 0;
+    } else if (label == '2') {
+      keyIndex = 1;
+    } else if (label == '3') {
+      keyIndex = 2;
+    } else if (label == '4') {
+      keyIndex = 3;
+    } else if (label == '5') {
+      keyIndex = 4;
+    } else if (label == '6') {
+      keyIndex = 5;
+    } else if (label == '7') {
+      keyIndex = 6;
+    } else if (label == '8') {
+      keyIndex = 7;
+    } else if (label == '9') {
+      keyIndex = 8;
+    } else if (label == '0' ||
+        event.logicalKey == LogicalKeyboardKey.digit0) {
+      keyIndex = 9;
+    }
+
+    if (keyIndex != null) {
+      final building = _getBuildingByKey(keyIndex);
+      if (building != null) {
+        final isSelected = _placingBuilding?.id == building.id;
+        setState(() {
+          _placingBuilding = isSelected ? null : building;
+          _conveyorMode = false;
+          _selectedBuilding = null;
+        });
+        return true;
+      }
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF1A1A1A),
-      body: Column(
-        children: [
-          _buildToolbar(),
-          Expanded(
-            child: Row(
-              children: [
-                if (_placingBuilding != null || _conveyorMode)
-                  const SizedBox(width: 0)
-                else
-                  BuildingPalette(
-                    dataLoader: widget.dataLoader,
-                    selectedBuildingId: _placingBuilding?.id,
-                    onBuildingSelected: _onBuildingSelected,
-                    onCancelPlacement: _onCancelPlacement,
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: (node, event) {
+          final handled = _handleKeyDown(event);
+          return handled ? KeyEventResult.handled : KeyEventResult.ignored;
+        },
+        child: Column(
+          children: [
+            _buildToolbar(),
+            Expanded(
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: CanvasEditor(
+                      key: _canvasKey,
+                      dataLoader: widget.dataLoader,
+                      project: _project,
+                      onProjectChanged: (p) {
+                        setState(() {
+                          _project = p;
+                          widget.simulationEngine.attach(p);
+                        });
+                      },
+                      placingBuilding: _placingBuilding,
+                      onBuildingPlaced: _onBuildingPlaced,
+                      onBuildingSelected: _onBuildingTapped,
+                      conveyorMode: _conveyorMode,
+                    ),
                   ),
-                Expanded(
-                  child: CanvasEditor(
-                    dataLoader: widget.dataLoader,
-                    project: _project,
-                    onProjectChanged: (p) {
-                      setState(() {
-                        _project = p;
-                        widget.simulationEngine.attach(p);
-                      });
-                    },
-                    placingBuilding: _placingBuilding,
-                    onBuildingPlaced: _onBuildingPlaced,
-                    onBuildingSelected: _onBuildingTapped,
-                    conveyorMode: _conveyorMode,
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    bottom: 60,
+                    child: FloatingActionButtons(
+                      conveyorMode: _conveyorMode,
+                      onConveyorToggle: _toggleConveyorMode,
+                      onRotateCanvas: _rotateCanvas,
+                    ),
                   ),
-                ),
-                PropertyPanel(
-                  selectedBuilding: _selectedBuilding,
-                  dataLoader: widget.dataLoader,
-                  onRecipeChanged: _onRecipeChanged,
-                  onRotate: _onRotate,
-                  onDelete: _onDelete,
-                ),
-              ],
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 8,
+                    child: Center(
+                      child: EquipmentDock(
+                        dataLoader: widget.dataLoader,
+                        selectedBuilding: _placingBuilding,
+                        onBuildingSelected: _onDockBuildingSelected,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          _buildStatusBar(),
-        ],
+            _buildStatusBar(),
+          ],
+        ),
       ),
     );
   }
@@ -359,7 +413,7 @@ class _EditorPageState extends State<EditorPage> {
         color: Color(0xFF2A2A2A),
         border: Border(bottom: BorderSide(color: Color(0xFF444444), width: 1)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         children: [
           const Text(
@@ -369,19 +423,6 @@ class _EditorPageState extends State<EditorPage> {
               fontSize: 13,
               fontWeight: FontWeight.w600,
             ),
-          ),
-          const SizedBox(width: 16),
-          _toolbarButton(
-            '传送带',
-            Icons.cable,
-            _conveyorMode,
-            () {
-              setState(() {
-                _conveyorMode = !_conveyorMode;
-                _placingBuilding = null;
-                _selectedBuilding = null;
-              });
-            },
           ),
           const Spacer(),
           _toolbarButton(
@@ -492,7 +533,17 @@ class _EditorPageState extends State<EditorPage> {
             style: const TextStyle(color: Color(0xFF888888), fontSize: 10),
           ),
           const Spacer(),
-          if (widget.simulationEngine.isRunning)
+          if (_placingBuilding != null)
+            Text(
+              '放置模式: ${_placingBuilding!.name}',
+              style: const TextStyle(color: Color(0xFFFFCC00), fontSize: 10),
+            )
+          else if (_conveyorMode)
+            const Text(
+              '传送带模式 (ESC退出)',
+              style: TextStyle(color: Color(0xFF4488FF), fontSize: 10),
+            )
+          else if (widget.simulationEngine.isRunning)
             const Text(
               '● 仿真运行中',
               style: TextStyle(color: Color(0xFF00FF66), fontSize: 10),

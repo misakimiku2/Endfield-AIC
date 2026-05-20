@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 class GridPainter extends CustomPainter {
@@ -5,6 +6,7 @@ class GridPainter extends CustomPainter {
   final double offsetY;
   final double scale;
   final double cellSize;
+  final double rotation;
 
   static const double _baseCellSize = 48.0;
   static const Color _backgroundColor = Color(0xFFE4E4E4);
@@ -17,6 +19,7 @@ class GridPainter extends CustomPainter {
     required this.offsetY,
     required this.scale,
     this.cellSize = _baseCellSize,
+    this.rotation = 0.0,
   });
 
   double _gridOpacity() {
@@ -41,10 +44,30 @@ class GridPainter extends CustomPainter {
     final gridColor = Color.fromARGB(gridAlpha, 0xB0, 0xB0, 0xB0);
     final majorGridColor = Color.fromARGB(majorAlpha, 0xB0, 0xB0, 0xB0);
 
+    if (rotation != 0) {
+      final center = Offset(size.width / 2, size.height / 2);
+      canvas.save();
+      canvas.translate(center.dx, center.dy);
+      canvas.rotate(rotation);
+      canvas.translate(-center.dx, -center.dy);
+    }
+
+    // 旋转时扩大绘制范围，确保对角线方向的网格线不被裁剪
+    final double drawWidth;
+    final double drawHeight;
+    if (rotation != 0) {
+      final diag = math.sqrt(size.width * size.width + size.height * size.height);
+      drawWidth = diag;
+      drawHeight = diag;
+    } else {
+      drawWidth = size.width;
+      drawHeight = size.height;
+    }
+
     final startCol = (offsetX / scaledCellSize).floor() - 1;
-    final endCol = ((offsetX + size.width) / scaledCellSize).ceil() + 1;
+    final endCol = ((offsetX + drawWidth) / scaledCellSize).ceil() + 1;
     final startRow = (offsetY / scaledCellSize).floor() - 1;
-    final endRow = ((offsetY + size.height) / scaledCellSize).ceil() + 1;
+    final endRow = ((offsetY + drawHeight) / scaledCellSize).ceil() + 1;
 
     for (int col = startCol; col <= endCol; col++) {
       final x = col * scaledCellSize - offsetX;
@@ -52,7 +75,7 @@ class GridPainter extends CustomPainter {
       final paint = Paint()
         ..color = isMajor ? majorGridColor : gridColor
         ..strokeWidth = isMajor ? 1.2 : 0.6;
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+      canvas.drawLine(Offset(x, -drawHeight), Offset(x, drawHeight), paint);
     }
 
     for (int row = startRow; row <= endRow; row++) {
@@ -61,7 +84,11 @@ class GridPainter extends CustomPainter {
       final paint = Paint()
         ..color = isMajor ? majorGridColor : gridColor
         ..strokeWidth = isMajor ? 1.2 : 0.6;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+      canvas.drawLine(Offset(-drawWidth, y), Offset(drawWidth, y), paint);
+    }
+
+    if (rotation != 0) {
+      canvas.restore();
     }
   }
 
@@ -69,6 +96,7 @@ class GridPainter extends CustomPainter {
   bool shouldRepaint(covariant GridPainter oldDelegate) {
     return oldDelegate.offsetX != offsetX ||
         oldDelegate.offsetY != offsetY ||
-        oldDelegate.scale != scale;
+        oldDelegate.scale != scale ||
+        (oldDelegate.rotation - rotation).abs() > 0.001;
   }
 }

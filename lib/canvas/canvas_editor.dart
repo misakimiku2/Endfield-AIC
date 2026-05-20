@@ -1,12 +1,16 @@
+import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'dart:developer' as developer;
 import '../models/building.dart';
 import '../models/recipe.dart';
-import '../models/item.dart';
 import '../models/project.dart';
 import '../data/data_loader.dart';
+import '../AIC/Production I/refining_unit.dart';
+import '../AIC/Production I/Depot Access/depot_access.dart';
 import 'grid_painter.dart';
 import 'building_renderer.dart';
 import 'conveyor_renderer.dart';
@@ -49,6 +53,12 @@ class CanvasEditorState extends State<CanvasEditor>
   Offset? _lastMiddlePos;
   bool _isMiddleDragging = false;
 
+  // 手动双击检测，避免 GestureDetector 的 300ms 等待
+  DateTime? _lastTapTime;
+  Offset? _lastTapPos;
+  static const int _doubleTapMs = 400;
+  static const double _doubleTapDistance = 20.0;
+
   late Ticker _ticker;
   double _displayScale = 1.0;
   double _displayOffsetX = 0;
@@ -59,12 +69,38 @@ class CanvasEditorState extends State<CanvasEditor>
   bool _animating = false;
   double _gestureStartScale = 1.0;
 
+  double _displayAngle = 0.0; // 当前显示角度（弧度）
+  double _targetAngle = 0.0;  // 目标角度（弧度）
+
   static const double _cellSize = 48.0;
   static const double _minScale = 0.25;
   static const double _maxScale = 5.0;
 
+  // 端口连接缓存：building id -> port key -> 是否连接
+  Map<String, Map<String, bool>> _portConnectionsCache = {};
+
   ProjectState get _project => widget.project;
   set _project(ProjectState v) => widget.onProjectChanged(v);
+
+  /// 重新计算所有端口连接关系（仅在数据变更时调用）
+  void _rebuildPortConnectionsCache() {
+    _portConnectionsCache = {};
+    for (final pb in _project.buildings) {
+      final connections = <String, bool>{};
+      for (final belt in _project.conveyors) {
+        for (final port in [...pb.inputPorts, ...pb.outputPorts]) {
+          final portWorld = port.worldPosition(
+              pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight);
+          final distStart = (belt.start - portWorld).distance;
+          final distEnd = (belt.end - portWorld).distance;
+          if (distStart < 30 || distEnd < 30) {
+            connections['${port.type}_${port.index}'] = true;
+          }
+        }
+      }
+      _portConnectionsCache[pb.id] = connections;
+    }
+  }
 
   @override
   void initState() {
@@ -76,6 +112,7 @@ class CanvasEditorState extends State<CanvasEditor>
     _targetOffsetX = _project.offsetX;
     _targetOffsetY = _project.offsetY;
     _ticker = createTicker(_onTick);
+    _rebuildPortConnectionsCache();
   }
 
   @override
@@ -92,6 +129,8 @@ class CanvasEditorState extends State<CanvasEditor>
         _targetOffsetX = widget.project.offsetX;
         _targetOffsetY = widget.project.offsetY;
       }
+      // project 引用变化时重建端口连接缓存
+      _rebuildPortConnectionsCache();
     }
     if (oldWidget.conveyorMode && !widget.conveyorMode) {
       _conveyorAnchors = [];
@@ -107,6 +146,7 @@ class CanvasEditorState extends State<CanvasEditor>
   }
 
   void _onTick(Duration elapsed) {
+    final frameStart = DateTime.now();
     const lerpFactor = 0.2;
     final newScale =
         _displayScale + (_targetScale - _displayScale) * lerpFactor;
@@ -123,7 +163,25 @@ class CanvasEditorState extends State<CanvasEditor>
     _displayOffsetX = offsetXDone ? _targetOffsetX : newOffsetX;
     _displayOffsetY = offsetYDone ? _targetOffsetY : newOffsetY;
 
-    if (scaleDone && offsetXDone && offsetYDone) {
+    // 连续角度插值
+    final angleDiff = _targetAngle - _displayAngle;
+    final rotationDone = angleDiff.abs() < 0.005;
+    _displayAngle = rotationDone ? _targetAngle : _displayAngle + angleDiff * lerpFactor;
+
+    final isRotating = !rotationDone;
+    if (isRotating) {
+      final frameMs = frameStart.millisecondsSinceEpoch;
+      developer.Timeline.startSync('CanvasRotationFrame', arguments: {
+        'scale': _displayScale.toStringAsFixed(3),
+        'angle': (_displayAngle * 180 / math.pi).toStringAsFixed(1),
+        'targetAngle': (_targetAngle * 180 / math.pi).toStringAsFixed(1),
+        'buildings': _project.buildings.length.toString(),
+        'conveyors': _project.conveyors.length.toString(),
+        'frameTime': frameMs.toString(),
+      });
+    }
+
+    if (scaleDone && offsetXDone && offsetYDone && rotationDone) {
       _animating = false;
       _ticker.stop();
       _project.offsetX = _targetOffsetX;
@@ -132,6 +190,10 @@ class CanvasEditorState extends State<CanvasEditor>
     }
 
     setState(() {});
+
+    if (isRotating) {
+      developer.Timeline.finishSync();
+    }
   }
 
   void _startAnimation() {
@@ -141,11 +203,38 @@ class CanvasEditorState extends State<CanvasEditor>
     }
   }
 
+  void rotateCanvas90() {
+    _targetAngle += math.pi / 2;
+    debugPrint('[旋转] 触发90°旋转 | 当前scale=${_displayScale.toStringAsFixed(3)} | '
+        '目标角度=${(_targetAngle * 180 / math.pi).toStringAsFixed(1)}° | '
+        '设备=${_project.buildings.length} 传送带=${_project.conveyors.length}');
+    _startAnimation();
+  }
+
   Offset _screenToWorld(Offset screenPos, Size size) {
-    return Offset(
-      (screenPos.dx + _displayOffsetX) / _displayScale,
-      (screenPos.dy + _displayOffsetY) / _displayScale,
+    final center = Offset(size.width / 2, size.height / 2);
+    final cosA = math.cos(_displayAngle);
+    final sinA = math.sin(_displayAngle);
+
+    var pos = screenPos;
+    // 逆变换：按正向变换的逆序执行
+    // 正向: scale → translate(-offset) → translate(-center) → rotate → translate(center)
+    // 逆向: translate(-center) → inverse-rotate → translate(center) → translate(+offset) → unscale
+
+    // 1. 撤销 translate(center)
+    pos = Offset(pos.dx - center.dx, pos.dy - center.dy);
+    // 2. 撤销 rotate(θ) — 逆旋转
+    pos = Offset(
+      pos.dx * cosA + pos.dy * sinA,
+      -pos.dx * sinA + pos.dy * cosA,
     );
+    // 3. 撤销 translate(-center)
+    pos = Offset(pos.dx + center.dx, pos.dy + center.dy);
+    // 4. 撤销 translate(-offset)
+    pos = Offset(pos.dx + _displayOffsetX, pos.dy + _displayOffsetY);
+    // 5. 撤销 scale
+    pos = Offset(pos.dx / _displayScale, pos.dy / _displayScale);
+    return pos;
   }
 
   Offset _screenToGrid(Offset screenPos, Size size) {
@@ -181,6 +270,9 @@ class CanvasEditorState extends State<CanvasEditor>
         (localPos.dy + _targetOffsetY) * newScale / oldScale - localPos.dy;
     _targetScale = newScale;
 
+    debugPrint('[缩放] ${oldScale.toStringAsFixed(3)} → ${newScale.toStringAsFixed(3)} | '
+        '设备=${_project.buildings.length} 传送带=${_project.conveyors.length}');
+
     _startAnimation();
   }
 
@@ -201,8 +293,9 @@ class CanvasEditorState extends State<CanvasEditor>
       final focalPoint = details.localFocalPoint;
       if (_lastFocalPoint != null) {
         final delta = focalPoint - _lastFocalPoint!;
-        _targetOffsetX -= delta.dx;
-        _targetOffsetY -= delta.dy;
+        final rotatedDelta = _screenDeltaToWorldDelta(delta);
+        _targetOffsetX -= rotatedDelta.dx;
+        _targetOffsetY -= rotatedDelta.dy;
         _displayOffsetX = _targetOffsetX;
         _displayOffsetY = _targetOffsetY;
       }
@@ -223,32 +316,14 @@ class CanvasEditorState extends State<CanvasEditor>
     _isPanning = false;
   }
 
-  void _handleMiddleDown(PointerDownEvent event) {
-    if (event.buttons & kMiddleMouseButton != 0 && _middleDragPointerId == null) {
-      _middleDragPointerId = event.pointer;
-      _lastMiddlePos = event.localPosition;
-      _isMiddleDragging = true;
-    }
-  }
-
-  void _handleMiddleMove(PointerMoveEvent event) {
-    if (event.pointer == _middleDragPointerId && _lastMiddlePos != null) {
-      final delta = event.localPosition - _lastMiddlePos!;
-      _targetOffsetX -= delta.dx;
-      _targetOffsetY -= delta.dy;
-      _displayOffsetX = _targetOffsetX;
-      _displayOffsetY = _targetOffsetY;
-      _lastMiddlePos = event.localPosition;
-      setState(() {});
-    }
-  }
-
-  void _handleMiddleUp(PointerEvent event) {
-    if (event.pointer == _middleDragPointerId) {
-      _middleDragPointerId = null;
-      _lastMiddlePos = null;
-      _isMiddleDragging = false;
-    }
+  /// 将屏幕空间的拖拽delta转换到offset坐标系（反向旋转）
+  Offset _screenDeltaToWorldDelta(Offset screenDelta) {
+    final cosA = math.cos(_displayAngle);
+    final sinA = math.sin(_displayAngle);
+    return Offset(
+      screenDelta.dx * cosA + screenDelta.dy * sinA,
+      -screenDelta.dx * sinA + screenDelta.dy * cosA,
+    );
   }
 
   // === Conveyor helpers ===
@@ -369,6 +444,7 @@ class CanvasEditorState extends State<CanvasEditor>
     final building = widget.placingBuilding;
 
     if (building != null) {
+      debugPrint('[放置设备] screen=(${screenPos.dx.toStringAsFixed(1)}, ${screenPos.dy.toStringAsFixed(1)}) → grid=(${gridPos.dx.toInt()}, ${gridPos.dy.toInt()}) | building=${building.name}');
       _placeBuilding(building, gridPos);
       return;
     }
@@ -380,7 +456,7 @@ class CanvasEditorState extends State<CanvasEditor>
         return;
       }
 
-      debugPrint('[传送带] 添加锚点: (${gridPos.dx.toInt()}, ${gridPos.dy.toInt()})');
+      debugPrint('[传送带] screen=(${screenPos.dx.toStringAsFixed(1)}, ${screenPos.dy.toStringAsFixed(1)}) → grid=(${gridPos.dx.toInt()}, ${gridPos.dy.toInt()})');
 
       if (_conveyorAnchors.isNotEmpty && _conveyorAnchors.last != gridPos) {
         final segment = _calculateConveyorPath(_conveyorAnchors.last, gridPos);
@@ -411,11 +487,13 @@ class CanvasEditorState extends State<CanvasEditor>
   }
 
   void _placeBuilding(Building building, Offset gridPos) {
+    final cx = gridPos.dx - (building.gridWidth ~/ 2).toDouble();
+    final cy = gridPos.dy - (building.gridHeight ~/ 2).toDouble();
     final newBuilding = PlacedBuilding(
       id: 'building_${DateTime.now().millisecondsSinceEpoch}',
       building: building,
-      gridX: gridPos.dx,
-      gridY: gridPos.dy,
+      gridX: cx,
+      gridY: cy,
     );
 
     final bounds = newBuilding.getBounds(_cellSize);
@@ -428,6 +506,7 @@ class CanvasEditorState extends State<CanvasEditor>
       _project.offsetX = _targetOffsetX;
       _project.offsetY = _targetOffsetY;
       _project.scale = _targetScale;
+      _rebuildPortConnectionsCache();
       widget.onProjectChanged(_project);
       widget.onBuildingPlaced?.call();
     }
@@ -446,6 +525,7 @@ class CanvasEditorState extends State<CanvasEditor>
     _project.offsetX = _targetOffsetX;
     _project.offsetY = _targetOffsetY;
     _project.scale = _targetScale;
+    _rebuildPortConnectionsCache();
     widget.onProjectChanged(_project);
   }
 
@@ -468,10 +548,12 @@ class CanvasEditorState extends State<CanvasEditor>
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.escape) {
-      if (widget.conveyorMode && _conveyorAnchors.isNotEmpty) {
-        _finishConveyor();
-        return KeyEventResult.handled;
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        if (widget.conveyorMode && _conveyorAnchors.isNotEmpty) {
+          _finishConveyor();
+          return KeyEventResult.handled;
+        }
       }
     }
     return KeyEventResult.ignored;
@@ -487,6 +569,8 @@ class CanvasEditorState extends State<CanvasEditor>
         final renderBox = context.findRenderObject() as RenderBox;
         final localPos = renderBox.globalToLocal(event.position);
         final gridPos = _screenToGrid(localPos, renderBox.size);
+        // 只在网格位置变化时才触发重绘
+        if (_mouseGridPos == gridPos) return;
         setState(() {
           _mouseGridPos = gridPos;
           if (_conveyorAnchors.isNotEmpty && widget.conveyorMode) {
@@ -507,10 +591,63 @@ class CanvasEditorState extends State<CanvasEditor>
             _handleScroll(event, localPos);
           }
         },
-        onPointerDown: _handleMiddleDown,
-        onPointerMove: _handleMiddleMove,
-        onPointerUp: _handleMiddleUp,
-        onPointerCancel: _handleMiddleUp,
+        onPointerDown: (event) {
+          // 中键拖拽
+          if (event.buttons & kMiddleMouseButton != 0 && _middleDragPointerId == null) {
+            _middleDragPointerId = event.pointer;
+            _lastMiddlePos = event.localPosition;
+            _isMiddleDragging = true;
+            return;
+          }
+          // 左键：手动双击检测，单击立即响应
+          if (event.buttons & kPrimaryMouseButton != 0) {
+            final renderBox = context.findRenderObject() as RenderBox;
+            final localPos = event.localPosition;
+            final now = DateTime.now();
+
+            if (_lastTapTime != null &&
+                now.difference(_lastTapTime!).inMilliseconds < _doubleTapMs &&
+                _lastTapPos != null &&
+                (localPos - _lastTapPos!).distance < _doubleTapDistance) {
+              // 双击
+              _handleDoubleTap(localPos, renderBox.size);
+              _lastTapTime = null;
+              _lastTapPos = null;
+            } else {
+              // 单击 - 立即执行
+              _handleTap(localPos, renderBox.size);
+              _lastTapTime = now;
+              _lastTapPos = localPos;
+            }
+            setState(() {});
+          }
+        },
+        onPointerMove: (event) {
+          if (event.pointer == _middleDragPointerId && _lastMiddlePos != null) {
+            final delta = event.localPosition - _lastMiddlePos!;
+            final rotatedDelta = _screenDeltaToWorldDelta(delta);
+            _targetOffsetX -= rotatedDelta.dx;
+            _targetOffsetY -= rotatedDelta.dy;
+            _displayOffsetX = _targetOffsetX;
+            _displayOffsetY = _targetOffsetY;
+            _lastMiddlePos = event.localPosition;
+            setState(() {});
+          }
+        },
+        onPointerUp: (event) {
+          if (event.pointer == _middleDragPointerId) {
+            _middleDragPointerId = null;
+            _lastMiddlePos = null;
+            _isMiddleDragging = false;
+          }
+        },
+        onPointerCancel: (event) {
+          if (event.pointer == _middleDragPointerId) {
+            _middleDragPointerId = null;
+            _lastMiddlePos = null;
+            _isMiddleDragging = false;
+          }
+        },
         child: GestureDetector(
           onScaleStart: _handleScaleStart,
           onScaleUpdate: (details) {
@@ -518,15 +655,6 @@ class CanvasEditorState extends State<CanvasEditor>
             _handleScaleUpdate(details, renderBox.size);
           },
           onScaleEnd: _handleScaleEnd,
-          onTapUp: (details) {
-            final renderBox = context.findRenderObject() as RenderBox;
-            _handleTap(details.localPosition, renderBox.size);
-            setState(() {});
-          },
-          onDoubleTapDown: (details) {
-            final renderBox = context.findRenderObject() as RenderBox;
-            _handleDoubleTap(details.localPosition, renderBox.size);
-          },
           onSecondaryTapUp: (details) {
             final renderBox = context.findRenderObject() as RenderBox;
             _handleRightClick(details.localPosition, renderBox.size);
@@ -543,6 +671,8 @@ class CanvasEditorState extends State<CanvasEditor>
               displayScale: _displayScale,
               displayOffsetX: _displayOffsetX,
               displayOffsetY: _displayOffsetY,
+              displayAngle: _displayAngle,
+              portConnectionsCache: _portConnectionsCache,
             ),
             size: Size.infinite,
           ),
@@ -570,6 +700,12 @@ class _EditorPainter extends CustomPainter {
   final double displayScale;
   final double displayOffsetX;
   final double displayOffsetY;
+  final double displayAngle;
+  final Map<String, Map<String, bool>> portConnectionsCache;
+
+  // 预渲染缓存: key = "buildingId_rotation_detailLevel_portsHash" -> Picture
+  static final Map<String, ui.Picture> _pictureCache = {};
+  static const int _maxCacheSize = 200;
 
   _EditorPainter({
     required this.project,
@@ -582,79 +718,316 @@ class _EditorPainter extends CustomPainter {
     required this.displayScale,
     required this.displayOffsetX,
     required this.displayOffsetY,
+    required this.displayAngle,
+    required this.portConnectionsCache,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    final paintStart = Stopwatch()..start();
+    final isRotating = displayAngle % (math.pi / 2) != 0;
+
+    // 计算可见世界区域（视口裁剪用）
+    final viewport = _computeViewport(size);
+
     final gridPainter = GridPainter(
       offsetX: displayOffsetX,
       offsetY: displayOffsetY,
       scale: displayScale,
       cellSize: cellSize,
+      rotation: displayAngle,
     );
     gridPainter.paint(canvas, size);
+    final gridTime = paintStart.elapsedMicroseconds;
 
     canvas.save();
+    if (displayAngle != 0) {
+      final center = Offset(size.width / 2, size.height / 2);
+      canvas.translate(center.dx, center.dy);
+      canvas.rotate(displayAngle);
+      canvas.translate(-center.dx, -center.dy);
+    }
     canvas.translate(-displayOffsetX, -displayOffsetY);
     canvas.scale(displayScale);
 
+    // LOD: 根据缩放级别决定渲染细节
+    // scale < 0.35: minimal (仅色块+边框)
+    // scale < 0.5: simplified (跳过文字/配方/粒子)
+    // scale >= 0.5: full
+    final detailLevel = displayScale < 0.35 ? 0 : (displayScale < 0.5 ? 1 : 2);
+
+    paintStart.reset();
+    int visibleConveyors = 0;
     for (final belt in project.conveyors) {
+      // 视口裁剪：跳过完全不可见的传送带
+      if (!_isBeltVisible(belt, viewport)) continue;
+      visibleConveyors++;
       final item = dataLoader.getItem(belt.itemId);
-      ConveyorRenderer.renderConveyorPath(canvas, belt, item, cellSize);
+      ConveyorRenderer.renderConveyorPath(canvas, belt, item, cellSize, detailLevel: detailLevel);
     }
+    final conveyorTime = paintStart.elapsedMicroseconds;
 
+    paintStart.reset();
+    int visibleBuildings = 0;
     for (final pb in project.buildings) {
-      Recipe? recipe;
-      if (pb.activeRecipeId != null) {
-        recipe = dataLoader.getRecipe(pb.activeRecipeId!);
-      }
+      // 视口裁剪：跳过完全不可见的设备
+      if (!_isBuildingVisible(pb, viewport)) continue;
+      visibleBuildings++;
 
-      final portConnections = <String, bool>{};
-      for (final belt in project.conveyors) {
-        for (final port in [...pb.inputPorts, ...pb.outputPorts]) {
-          final portWorld = port.worldPosition(
-              pb.gridX, pb.gridY, cellSize, pb.building.gridWidth, pb.building.gridHeight);
-          final distStart = (belt.start - portWorld).distance;
-          final distEnd = (belt.end - portWorld).distance;
-          if (distStart < 30 || distEnd < 30) {
-            portConnections['${port.type}_${port.index}'] = true;
-          }
+      // 使用缓存，避免每帧 O(buildings*conveyors*ports) 重复计算
+      final portConnections = portConnectionsCache[pb.id] ?? <String, bool>{};
+
+      // 预渲染缓存 key
+      final portsHash = portConnections.entries.map((e) => '${e.key}:${e.value}').join(',');
+      final cacheKey = '${pb.building.id}_${pb.rotation}_${detailLevel}_$portsHash';
+
+      // 绘制缓存的静态部分
+      final x = pb.gridX * cellSize;
+      final y = pb.gridY * cellSize;
+      final w = pb.building.gridWidth * cellSize;
+      final h = pb.building.gridHeight * cellSize;
+
+      ui.Picture? cachedPicture = _pictureCache[cacheKey];
+      if (cachedPicture == null) {
+        // 缓存未命中：渲染到 PictureRecorder
+        final recorder = ui.PictureRecorder();
+        final recordCanvas = Canvas(recorder);
+        recordCanvas.translate(w / 2, h / 2);
+        recordCanvas.rotate(pb.rotation * math.pi / 2);
+        recordCanvas.translate(-w / 2, -h / 2);
+
+        // 渲染静态部分到 recorder
+        _renderBuildingStatic(recordCanvas, pb, cellSize, detailLevel, portConnections);
+
+        cachedPicture = recorder.endRecording();
+        if (_pictureCache.length >= _maxCacheSize) {
+          _pictureCache.remove(_pictureCache.keys.first);
         }
+        _pictureCache[cacheKey] = cachedPicture;
       }
 
-      BuildingRenderer.renderBuilding(
-        canvas,
-        pb.building,
-        pb.gridX,
-        pb.gridY,
-        cellSize,
-        pb.rotation,
-        activeRecipe: recipe,
-        isBlocked: pb.isBlocked,
-        productionProgress: pb.productionProgress,
-        portConnections: portConnections,
-      );
-    }
+      // 绘制缓存的 Picture
+      canvas.save();
+      canvas.translate(x, y);
+      canvas.drawPicture(cachedPicture);
+      canvas.restore();
 
+      // 动态部分：进度条和阻塞遮罩（每帧绘制，不缓存）
+      if (detailLevel >= 1 && pb.productionProgress > 0 && pb.productionProgress < 1.0) {
+        canvas.save();
+        canvas.translate(x + w / 2, y + h / 2);
+        canvas.rotate(pb.rotation * math.pi / 2);
+        canvas.translate(-w / 2, -h / 2);
+        _drawProgressBar(canvas, w, h, pb.productionProgress, pb.building);
+        canvas.restore();
+      }
+    }
+    final buildingTime = paintStart.elapsedMicroseconds;
+
+    paintStart.reset();
     if (placingBuilding != null && mouseGridPos != null) {
-      BuildingRenderer.renderPlaceholder(
-        canvas,
-        placingBuilding!,
-        mouseGridPos!.dx,
-        mouseGridPos!.dy,
-        cellSize,
-        0.6,
-      );
+      final cx = mouseGridPos!.dx - (placingBuilding!.gridWidth ~/ 2).toDouble();
+      final cy = mouseGridPos!.dy - (placingBuilding!.gridHeight ~/ 2).toDouble();
+
+      if (placingBuilding!.id == RefiningUnitConfig.id) {
+        RefiningUnitRenderer.renderPlaceholder(
+          canvas,
+          placingBuilding!,
+          cx,
+          cy,
+          cellSize,
+          0.6,
+        );
+      } else if (placingBuilding!.id == DepotLoaderConfig.id ||
+          placingBuilding!.id == DepotUnloaderConfig.id) {
+        DepotAccessRenderer.renderPlaceholder(
+          canvas,
+          placingBuilding!,
+          cx,
+          cy,
+          cellSize,
+          0.6,
+        );
+      } else {
+        BuildingRenderer.renderPlaceholder(
+          canvas,
+          placingBuilding!,
+          cx,
+          cy,
+          cellSize,
+          0.6,
+        );
+      }
     }
 
     if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
       ConveyorRenderer.renderPreviewPath(
           canvas, conveyorPreviewPath!, cellSize, conveyorPreviewOccupied ?? <String>{});
     }
+    final previewTime = paintStart.elapsedMicroseconds;
 
     canvas.restore();
+
+    // 旋转时输出详细性能日志
+    if (isRotating) {
+      debugPrint('[Paint] scale=${displayScale.toStringAsFixed(3)} | '
+          'angle=${(displayAngle * 180 / math.pi).toStringAsFixed(1)}° | '
+          'grid=${gridTime}μs conveyor=${conveyorTime}μs '
+          'building=${buildingTime}μs preview=${previewTime}μs | '
+          'total=${gridTime + conveyorTime + buildingTime + previewTime}μs | '
+          'visible=$visibleBuildings/${project.buildings.length}+$visibleConveyors/${project.conveyors.length} '
+          'lod=$detailLevel');
+    }
+  }
+
+  /// 计算可见世界坐标区域（考虑旋转的轴对齐包围盒）
+  _Viewport _computeViewport(Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final cosA = math.cos(displayAngle);
+    final sinA = math.sin(displayAngle);
+
+    // 屏幕四角逆变换到世界坐标
+    final corners = [
+      Offset.zero,
+      Offset(size.width, 0),
+      Offset(size.width, size.height),
+      Offset(0, size.height),
+    ];
+
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+
+    for (final corner in corners) {
+      var pos = corner;
+      // 逆变换: translate(-center) → inverse-rotate → translate(center) → translate(+offset) → unscale
+      pos = Offset(pos.dx - center.dx, pos.dy - center.dy);
+      pos = Offset(
+        pos.dx * cosA + pos.dy * sinA,
+        -pos.dx * sinA + pos.dy * cosA,
+      );
+      pos = Offset(pos.dx + center.dx, pos.dy + center.dy);
+      pos = Offset(pos.dx + displayOffsetX, pos.dy + displayOffsetY);
+      pos = Offset(pos.dx / displayScale, pos.dy / displayScale);
+
+      if (pos.dx < minX) minX = pos.dx;
+      if (pos.dy < minY) minY = pos.dy;
+      if (pos.dx > maxX) maxX = pos.dx;
+      if (pos.dy > maxY) maxY = pos.dy;
+    }
+
+    return _Viewport(minX, minY, maxX, maxY);
+  }
+
+  /// 判断设备是否在视口内
+  bool _isBuildingVisible(PlacedBuilding pb, _Viewport vp) {
+    final x = pb.gridX * cellSize;
+    final y = pb.gridY * cellSize;
+    final w = pb.building.gridWidth * cellSize;
+    final h = pb.building.gridHeight * cellSize;
+    // AABB 碰撞检测
+    return x + w > vp.minX && x < vp.maxX && y + h > vp.minY && y < vp.maxY;
+  }
+
+  /// 判断传送带是否在视口内
+  bool _isBeltVisible(ConveyorBelt belt, _Viewport vp) {
+    // belt.start/end 已经是世界像素坐标（含 cellSize），无需再乘
+    final startX = belt.start.dx;
+    final startY = belt.start.dy;
+    final endX = belt.end.dx;
+    final endY = belt.end.dy;
+    final minX = startX < endX ? startX : endX;
+    final minY = startY < endY ? startY : endY;
+    final maxX = (startX > endX ? startX : endX) + cellSize;
+    final maxY = (startY > endY ? startY : endY) + cellSize;
+    return maxX > vp.minX && minX < vp.maxX && maxY > vp.minY && minY < vp.maxY;
+  }
+
+  /// 渲染设备的静态部分到指定 Canvas（用于预渲染缓存）
+  void _renderBuildingStatic(Canvas canvas, PlacedBuilding pb, double cellSize, int detailLevel, Map<String, bool> portConnections) {
+    Recipe? recipe;
+    if (pb.activeRecipeId != null && detailLevel >= 1) {
+      recipe = dataLoader.getRecipe(pb.activeRecipeId!);
+    }
+
+    if (pb.building.id == RefiningUnitConfig.id) {
+      RefiningUnitRenderer.render(
+        canvas, pb.building, 0, 0, cellSize, 0,
+        activeRecipe: recipe,
+        isBlocked: pb.isBlocked,
+        productionProgress: 0, // 静态部分不含进度条
+        portConnections: portConnections,
+        detailLevel: detailLevel,
+      );
+    } else if (pb.building.id == DepotLoaderConfig.id || pb.building.id == DepotUnloaderConfig.id) {
+      DepotAccessRenderer.render(
+        canvas, pb.building, 0, 0, cellSize, 0,
+        activeRecipe: recipe,
+        isBlocked: pb.isBlocked,
+        productionProgress: 0,
+        portConnections: portConnections,
+        detailLevel: detailLevel,
+      );
+    } else {
+      BuildingRenderer.renderBuilding(
+        canvas, pb.building, 0, 0, cellSize, 0,
+        activeRecipe: recipe,
+        isBlocked: pb.isBlocked,
+        productionProgress: 0,
+        portConnections: portConnections,
+        detailLevel: detailLevel,
+      );
+    }
+  }
+
+  /// 绘制进度条（动态部分，不缓存）
+  void _drawProgressBar(Canvas canvas, double w, double h, double progress, Building building) {
+    const barHeight = 4.0;
+    final barY = h - barHeight - 2;
+    canvas.drawRect(
+      Rect.fromLTWH(2, barY, w - 4, barHeight),
+      Paint()..color = const Color(0x40000000),
+    );
+    canvas.drawRect(
+      Rect.fromLTWH(2, barY, (w - 4) * progress, barHeight),
+      Paint()..color = const Color(0xFF00FF66),
+    );
   }
 
   @override
-  bool shouldRepaint(covariant _EditorPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _EditorPainter oldDelegate) {
+    return project != oldDelegate.project ||
+        dataLoader != oldDelegate.dataLoader ||
+        cellSize != oldDelegate.cellSize ||
+        placingBuilding != oldDelegate.placingBuilding ||
+        mouseGridPos != oldDelegate.mouseGridPos ||
+        !_listEquals(conveyorPreviewPath, oldDelegate.conveyorPreviewPath) ||
+        !_setEquals(conveyorPreviewOccupied, oldDelegate.conveyorPreviewOccupied) ||
+        displayScale != oldDelegate.displayScale ||
+        displayOffsetX != oldDelegate.displayOffsetX ||
+        displayOffsetY != oldDelegate.displayOffsetY ||
+        displayAngle != oldDelegate.displayAngle;
+  }
+
+  bool _listEquals<T>(List<T>? a, List<T>? b) {
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  bool _setEquals<T>(Set<T>? a, Set<T>? b) {
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    if (a.length != b.length) return false;
+    return a.containsAll(b);
+  }
+}
+
+/// 视口区域（世界坐标）
+class _Viewport {
+  final double minX, minY, maxX, maxY;
+  const _Viewport(this.minX, this.minY, this.maxX, this.maxY);
 }

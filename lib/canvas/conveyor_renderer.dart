@@ -19,17 +19,19 @@ class ConveyorRenderer {
     Canvas canvas,
     ConveyorBelt belt,
     Item? item,
-    double cellSize,
-  ) {
+    double cellSize, {
+    int detailLevel = 2,
+  }) {
     if (belt.path.length < 2) return;
 
     for (int i = 0; i < belt.path.length; i++) {
       final cell = belt.path[i];
       final direction = _getCellDirection(belt.path, i);
-      _drawConveyorCell(canvas, cell, direction, cellSize, _beltColor, _beltHighlight, _arrowColor);
+      _drawConveyorCell(canvas, cell, direction, cellSize, _beltColor, _beltHighlight, _arrowColor, detailLevel: detailLevel);
     }
 
-    if (item != null && !belt.isBlocked) {
+    // LOD 2: 粒子动画
+    if (detailLevel >= 2 && item != null && !belt.isBlocked) {
       _renderParticles(canvas, belt, item, cellSize);
     }
 
@@ -45,8 +47,9 @@ class ConveyorRenderer {
     double cellSize,
     Color fillColor,
     Color lineColor,
-    Color arrowColor,
-  ) {
+    Color arrowColor, {
+    int detailLevel = 2,
+  }) {
     final x = cell.dx * cellSize + _cellMargin;
     final y = cell.dy * cellSize + _cellMargin;
     final w = cellSize - _cellMargin * 2;
@@ -59,8 +62,11 @@ class ConveyorRenderer {
 
     canvas.drawRRect(rect, Paint()..color = fillColor);
 
-    _drawCenterLine(canvas, cell, direction, cellSize, lineColor);
-    _drawArrow(canvas, cell, direction, cellSize, arrowColor);
+    // LOD 1+: 中心线和方向箭头
+    if (detailLevel >= 1) {
+      _drawCenterLine(canvas, cell, direction, cellSize, lineColor);
+      _drawArrow(canvas, cell, direction, cellSize, arrowColor);
+    }
   }
 
   static void _drawCenterLine(

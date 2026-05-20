@@ -4,11 +4,13 @@ class PortDefinition {
   final double relativeX;
   final double relativeY;
   final String direction;
+  final String portType; // 'solid' 或 'liquid'
 
   const PortDefinition({
     required this.relativeX,
     required this.relativeY,
     required this.direction,
+    this.portType = 'solid',
   });
 
   factory PortDefinition.fromJson(Map<String, dynamic> json) {
@@ -16,6 +18,7 @@ class PortDefinition {
       relativeX: (json['relative_x'] as num).toDouble(),
       relativeY: (json['relative_y'] as num).toDouble(),
       direction: json['direction'] as String,
+      portType: (json['port_type'] as String?) ?? 'solid',
     );
   }
 }

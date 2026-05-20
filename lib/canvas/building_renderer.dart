@@ -24,6 +24,7 @@ class BuildingRenderer {
     bool isBlocked = false,
     double productionProgress = 0.0,
     Map<String, bool>? portConnections,
+    int detailLevel = 2,
   }) {
     final x = gridX * cellSize;
     final y = gridY * cellSize;
@@ -37,15 +38,23 @@ class BuildingRenderer {
 
     _drawBuildingBody(canvas, building, cellSize, isBlocked);
 
-    if (productionProgress > 0 && productionProgress < 1.0) {
+    // LOD 1+: 进度条
+    if (detailLevel >= 1 && productionProgress > 0 && productionProgress < 1.0) {
       _drawProgressBar(canvas, cellSize, building, productionProgress);
     }
 
-    _drawPorts(canvas, building, cellSize, activeRecipe, portConnections);
+    // LOD 2: 端口箭头
+    if (detailLevel >= 2) {
+      _drawPorts(canvas, building, cellSize, activeRecipe, portConnections);
+    }
 
-    _drawBuildingName(canvas, building, cellSize);
+    // LOD 2: 设备名称
+    if (detailLevel >= 2) {
+      _drawBuildingName(canvas, building, cellSize);
+    }
 
-    if (activeRecipe != null) {
+    // LOD 2: 配方标签
+    if (detailLevel >= 2 && activeRecipe != null) {
       _drawRecipeLabel(canvas, activeRecipe.name, cellSize, building);
     }
 
