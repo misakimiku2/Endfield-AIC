@@ -12,7 +12,8 @@ import '../AIC/Production I/refining_unit.dart';
 import '../AIC/Production I/Depot Access/depot_access.dart';
 import 'grid_painter.dart';
 import 'building_renderer.dart';
-import 'conveyor_renderer.dart';
+import '../AIC/Logistics Units/transport_belt.dart';
+import '../AIC/Logistics Units/transport_belt_renderer.dart';
 
 class CanvasEditor extends StatefulWidget {
   final DataLoader dataLoader;
@@ -44,9 +45,7 @@ class CanvasEditorState extends State<CanvasEditor>
   bool _isPanning = false;
   Offset? _mouseGridPos;
 
-  List<Offset> _conveyorAnchors = [];
-  List<Offset>? _conveyorPreviewPath;
-  Set<String>? _conveyorPreviewOccupied;
+  late final TransportBeltController _beltCtrl;
 
   int? _middleDragPointerId;
   Offset? _lastMiddlePos;
@@ -79,7 +78,6 @@ class CanvasEditorState extends State<CanvasEditor>
   Map<String, Map<String, bool>> _portConnectionsCache = {};
 
   ProjectState get _project => widget.project;
-  set _project(ProjectState v) => widget.onProjectChanged(v);
 
   /// 重新计算所有端口连接关系（仅在数据变更时调用）
   void _rebuildPortConnectionsCache() {
@@ -111,7 +109,14 @@ class CanvasEditorState extends State<CanvasEditor>
     _targetOffsetX = _project.offsetX;
     _targetOffsetY = _project.offsetY;
     _ticker = createTicker(_onTick);
+    _beltCtrl = TransportBeltController(
+      project: _project,
+      onProjectChanged: widget.onProjectChanged,
+      onRebuildCache: _rebuildPortConnectionsCache,
+      notifyListeners: () => setState(() {}),
+    );
     _rebuildPortConnectionsCache();
+    TransportBeltRenderer.init();
   }
 
   @override
@@ -132,9 +137,10 @@ class CanvasEditorState extends State<CanvasEditor>
       _rebuildPortConnectionsCache();
     }
     if (oldWidget.conveyorMode && !widget.conveyorMode) {
-      _conveyorAnchors = [];
-      _conveyorPreviewPath = null;
-      _conveyorPreviewOccupied = null;
+      _beltCtrl.reset();
+    }
+    if (!identical(widget.project, oldWidget.project)) {
+      _beltCtrl.project = widget.project;
     }
   }
 
@@ -301,119 +307,6 @@ class CanvasEditorState extends State<CanvasEditor>
     );
   }
 
-  // === Conveyor helpers ===
-
-  bool _isCellOccupied(Offset gridPos) {
-    final gx = gridPos.dx.toInt();
-    final gy = gridPos.dy.toInt();
-    for (final belt in _project.conveyors) {
-      for (final cell in belt.path) {
-        if (cell.dx.toInt() == gx && cell.dy.toInt() == gy) return true;
-      }
-    }
-    return false;
-  }
-
-  Set<String> _getOccupiedCellSet() {
-    final cells = <String>{};
-    for (final belt in _project.conveyors) {
-      for (final cell in belt.path) {
-        cells.add('${cell.dx.toInt()}_${cell.dy.toInt()}');
-      }
-    }
-    return cells;
-  }
-
-  /// Calculate L-shaped path from start to end grid cell.
-  /// Truncates at the first occupied cell (exclusive).
-  List<Offset> _calculateConveyorPath(Offset startGrid, Offset endGrid) {
-    final sx = startGrid.dx.toInt();
-    final sy = startGrid.dy.toInt();
-    final ex = endGrid.dx.toInt();
-    final ey = endGrid.dy.toInt();
-
-    if (sx == ex && sy == ey) return [startGrid];
-
-    final path = <Offset>[];
-
-    if (sx != ex) {
-      final dx = ex > sx ? 1 : -1;
-      for (int x = sx + dx; ; x += dx) {
-        final cell = Offset(x.toDouble(), sy.toDouble());
-        if (_isCellOccupied(cell)) break;
-        path.add(cell);
-        if (x == ex) break;
-      }
-    }
-
-    // Only add vertical segment if horizontal reached target column
-    final lastX = path.isNotEmpty ? path.last.dx.toInt() : sx;
-    if (lastX == ex && sy != ey) {
-      final dy = ey > sy ? 1 : -1;
-      for (int y = sy + dy; ; y += dy) {
-        final cell = Offset(ex.toDouble(), y.toDouble());
-        if (_isCellOccupied(cell)) break;
-        path.add(cell);
-        if (y == ey) break;
-      }
-    }
-
-    return path;
-  }
-
-  /// Build preview path from last anchor to hover position.
-  /// Returns the path and marks which cells are occupied (for red rendering).
-  /// The starting anchor is excluded from occupied marking since it's a valid connection point.
-  _PreviewPath _buildPreviewSegment(Offset lastAnchor, Offset hoverGrid) {
-    if (lastAnchor == hoverGrid) {
-      return _PreviewPath([lastAnchor], <String>{});
-    }
-
-    final rawPath = _calculateConveyorPathRaw(lastAnchor, hoverGrid);
-    final occupied = _getOccupiedCellSet();
-    final anchorKey = '${lastAnchor.dx.toInt()}_${lastAnchor.dy.toInt()}';
-
-    final occupiedInPath = <String>{};
-    for (final cell in rawPath) {
-      final key = '${cell.dx.toInt()}_${cell.dy.toInt()}';
-      if (occupied.contains(key) && key != anchorKey) {
-        occupiedInPath.add(key);
-      }
-    }
-
-    return _PreviewPath(rawPath, occupiedInPath);
-  }
-
-  /// Raw path calculation without truncation (for preview with red cells).
-  List<Offset> _calculateConveyorPathRaw(Offset startGrid, Offset endGrid) {
-    final sx = startGrid.dx.toInt();
-    final sy = startGrid.dy.toInt();
-    final ex = endGrid.dx.toInt();
-    final ey = endGrid.dy.toInt();
-
-    if (sx == ex && sy == ey) return [startGrid];
-
-    final path = <Offset>[startGrid];
-
-    if (sx != ex) {
-      final dx = ex > sx ? 1 : -1;
-      for (int x = sx; x != ex; x += dx) {
-        path.add(Offset(x.toDouble(), sy.toDouble()));
-      }
-    }
-
-    if (sy != ey) {
-      final dy = ey > sy ? 1 : -1;
-      for (int y = sy; y != ey; y += dy) {
-        path.add(Offset(ex.toDouble(), y.toDouble()));
-      }
-    }
-
-    path.add(Offset(ex.toDouble(), ey.toDouble()));
-
-    return path;
-  }
-
   void _handleTap(Offset screenPos, Size size) {
     final gridPos = _screenToGrid(screenPos, size);
     final building = widget.placingBuilding;
@@ -424,31 +317,7 @@ class CanvasEditorState extends State<CanvasEditor>
     }
 
     if (widget.conveyorMode) {
-      if (_isCellOccupied(gridPos)) {
-        return;
-      }
-
-      if (_conveyorAnchors.isNotEmpty && _conveyorAnchors.last != gridPos) {
-        final segment = _calculateConveyorPath(_conveyorAnchors.last, gridPos);
-        if (segment.length >= 1) {
-          final fullPath = <Offset>[_conveyorAnchors.last, ...segment];
-          _placeConveyorPath(fullPath);
-        }
-      }
-
-      _conveyorAnchors.add(gridPos);
-
-      if (_mouseGridPos != null) {
-        final preview = _buildPreviewSegment(gridPos, _mouseGridPos!);
-        _conveyorPreviewPath = preview.path;
-        _conveyorPreviewOccupied = preview.occupiedKeys;
-      } else {
-        _conveyorPreviewPath = null;
-        _conveyorPreviewOccupied = null;
-      }
-
-      setState(() {});
-      return;
+      if (_beltCtrl.handleTap(gridPos)) return;
     }
   }
 
@@ -478,23 +347,6 @@ class CanvasEditorState extends State<CanvasEditor>
     }
   }
 
-  void _placeConveyorPath(List<Offset> path) {
-    if (path.length < 2) return;
-
-    final belt = ConveyorBelt(
-      id: 'belt_${DateTime.now().millisecondsSinceEpoch}',
-      path: path,
-      itemId: '',
-    );
-
-    _project.conveyors.add(belt);
-    _project.offsetX = _targetOffsetX;
-    _project.offsetY = _targetOffsetY;
-    _project.scale = _targetScale;
-    _rebuildPortConnectionsCache();
-    widget.onProjectChanged(_project);
-  }
-
   void _handleDoubleTap(Offset screenPos, Size size) {
     final gridPos = _screenToGrid(screenPos, size);
     final pb = _getBuildingAt(gridPos);
@@ -502,21 +354,13 @@ class CanvasEditorState extends State<CanvasEditor>
   }
 
   void _handleRightClick(Offset screenPos, Size size) {
-    _finishConveyor();
-  }
-
-  void _finishConveyor() {
-    _conveyorAnchors = [];
-    _conveyorPreviewPath = null;
-    _conveyorPreviewOccupied = null;
-    setState(() {});
+    _beltCtrl.handleRightClick();
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent) {
       if (event.logicalKey == LogicalKeyboardKey.escape) {
-        if (widget.conveyorMode && _conveyorAnchors.isNotEmpty) {
-          _finishConveyor();
+        if (widget.conveyorMode && _beltCtrl.handleKeyEscape()) {
           return KeyEventResult.handled;
         }
       }
@@ -538,13 +382,10 @@ class CanvasEditorState extends State<CanvasEditor>
         if (_mouseGridPos == gridPos) return;
         setState(() {
           _mouseGridPos = gridPos;
-          if (_conveyorAnchors.isNotEmpty && widget.conveyorMode) {
-            final preview = _buildPreviewSegment(_conveyorAnchors.last, gridPos);
-            _conveyorPreviewPath = preview.path;
-            _conveyorPreviewOccupied = preview.occupiedKeys;
+          if (widget.conveyorMode) {
+            _beltCtrl.handleHover(gridPos);
           } else {
-            _conveyorPreviewPath = null;
-            _conveyorPreviewOccupied = null;
+            _beltCtrl.reset();
           }
         });
       },
@@ -631,8 +472,12 @@ class CanvasEditorState extends State<CanvasEditor>
               cellSize: _cellSize,
               placingBuilding: widget.placingBuilding,
               mouseGridPos: _mouseGridPos,
-              conveyorPreviewPath: _conveyorPreviewPath,
-              conveyorPreviewOccupied: _conveyorPreviewOccupied,
+              conveyorMode: widget.conveyorMode,
+              conveyorConfirmedPath: _beltCtrl.confirmedPath,
+              conveyorPreviewPath: _beltCtrl.previewPath,
+              conveyorPreviewOccupied: _beltCtrl.previewOccupied,
+              conveyorPathInvalid: _beltCtrl.pathInvalid,
+              conveyorForkCell: _beltCtrl.anchors.isNotEmpty ? _beltCtrl.anchors.first : null,
               displayScale: _displayScale,
               displayOffsetX: _displayOffsetX,
               displayOffsetY: _displayOffsetY,
@@ -648,20 +493,18 @@ class CanvasEditorState extends State<CanvasEditor>
   }
 }
 
-class _PreviewPath {
-  final List<Offset> path;
-  final Set<String> occupiedKeys;
-  _PreviewPath(this.path, this.occupiedKeys);
-}
-
 class _EditorPainter extends CustomPainter {
   final ProjectState project;
   final DataLoader dataLoader;
   final double cellSize;
   final Building? placingBuilding;
   final Offset? mouseGridPos;
+  final bool conveyorMode;
+  final List<Offset> conveyorConfirmedPath;
   final List<Offset>? conveyorPreviewPath;
   final Set<String>? conveyorPreviewOccupied;
+  final bool conveyorPathInvalid;
+  final Offset? conveyorForkCell;
   final double displayScale;
   final double displayOffsetX;
   final double displayOffsetY;
@@ -671,6 +514,7 @@ class _EditorPainter extends CustomPainter {
   // 预渲染缓存: key = "buildingId_rotation_detailLevel_portsHash" -> Picture
   static final Map<String, ui.Picture> _pictureCache = {};
   static const int _maxCacheSize = 200;
+  int _lastCullLog = 0;
 
   _EditorPainter({
     required this.project,
@@ -678,8 +522,12 @@ class _EditorPainter extends CustomPainter {
     required this.cellSize,
     this.placingBuilding,
     this.mouseGridPos,
+    this.conveyorMode = false,
+    this.conveyorConfirmedPath = const [],
     this.conveyorPreviewPath,
     this.conveyorPreviewOccupied,
+    this.conveyorPathInvalid = false,
+    this.conveyorForkCell,
     required this.displayScale,
     required this.displayOffsetX,
     required this.displayOffsetY,
@@ -714,10 +562,80 @@ class _EditorPainter extends CustomPainter {
     // LOD: 根据缩放级别决定渲染细节
     final detailLevel = displayScale < 0.35 ? 0 : (displayScale < 0.5 ? 1 : 2);
 
+    // 获取当前正在绘制的新传送带的分叉点（用于旧道动态裁剪）
+    // 使用 anchors.first（用户实际点击的位置），而非路径的 first
+    final Offset? startCell = conveyorForkCell;
+
+    // 构建 fullPathContext（已确认段 + 实时段的完整路径）
+    List<Offset>? fullPathContext;
+    if (conveyorConfirmedPath.isNotEmpty && conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
+      fullPathContext = [...conveyorConfirmedPath, ...conveyorPreviewPath!];
+      // 去重：已确认段末尾和实时段开头可能重叠
+      if (fullPathContext.length >= 2 &&
+          fullPathContext[conveyorConfirmedPath.length - 1].dx == fullPathContext[conveyorConfirmedPath.length].dx &&
+          fullPathContext[conveyorConfirmedPath.length - 1].dy == fullPathContext[conveyorConfirmedPath.length].dy) {
+        fullPathContext.removeAt(conveyorConfirmedPath.length);
+      }
+    }
+
+    // 调试：视口与裁剪统计（有裁剪时才输出，且每2秒最多一次）
+    int culledCount = 0;
     for (final belt in project.conveyors) {
-      if (!_isBeltVisible(belt, viewport)) continue;
+      // 动态裁剪：如果当前正在绘制且起点在旧传送带上，裁剪分叉点之前的部分
+      List<Offset> renderPath = belt.path;
+      if (startCell != null) {
+        int forkIdx = -1;
+        for (int i = 0; i < belt.path.length; i++) {
+          if (belt.path[i].dx == startCell.dx && belt.path[i].dy == startCell.dy) {
+            forkIdx = i;
+            break;
+          }
+        }
+        if (forkIdx >= 0 && forkIdx < belt.path.length - 1) {
+          renderPath = belt.path.sublist(forkIdx + 1);
+        } else if (forkIdx >= 0) {
+          // 分叉点在末尾或之后，整条旧道被替代，不渲染
+          culledCount++;
+          continue;
+        }
+      }
+
+      final visible = _isPathVisible(renderPath, viewport);
+      if (!visible) {
+        culledCount++;
+        continue;
+      }
       final item = dataLoader.getItem(belt.itemId);
-      ConveyorRenderer.renderConveyorPath(canvas, belt, item, cellSize, detailLevel: detailLevel);
+      // 如果路径被裁剪，创建临时 ConveyorBelt 用于渲染
+      if (!identical(renderPath, belt.path)) {
+        final clippedBelt = ConveyorBelt(
+          id: belt.id,
+          path: renderPath,
+          itemId: belt.itemId,
+          isBlocked: belt.isBlocked,
+        );
+        TransportBeltRenderer.renderConveyorPath(canvas, clippedBelt, item, cellSize, detailLevel: detailLevel);
+      } else {
+        TransportBeltRenderer.renderConveyorPath(canvas, belt, item, cellSize, detailLevel: detailLevel);
+      }
+    }
+
+    if (culledCount > 0) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now - _lastCullLog > 2000) {
+        _lastCullLog = now;
+        debugPrint('[BeltCull] viewport=(${viewport.minX.toStringAsFixed(0)},${viewport.minY.toStringAsFixed(0)})-'
+            '(${viewport.maxX.toStringAsFixed(0)},${viewport.maxY.toStringAsFixed(0)}) '
+            'scale=${displayScale.toStringAsFixed(2)} total=${project.conveyors.length} culled=$culledCount');
+        for (final belt in project.conveyors) {
+          if (!_isBeltVisible(belt, viewport)) {
+            final aabb = _beltAABB(belt);
+            debugPrint('  CULL belt=${belt.id} len=${belt.path.length} '
+                'aabb=(${aabb.$1.toStringAsFixed(0)},${aabb.$2.toStringAsFixed(0)})-'
+                '(${aabb.$3.toStringAsFixed(0)},${aabb.$4.toStringAsFixed(0)})');
+          }
+        }
+      }
     }
 
     for (final pb in project.buildings) {
@@ -787,9 +705,35 @@ class _EditorPainter extends CustomPainter {
       }
     }
 
-    if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
-      ConveyorRenderer.renderPreviewPath(
-          canvas, conveyorPreviewPath!, cellSize, conveyorPreviewOccupied ?? <String>{});
+    // 已确认段始终使用传送带本色渲染（不论有效还是无效）
+    if (conveyorConfirmedPath.isNotEmpty) {
+      TransportBeltRenderer.renderConfirmedPreviewPath(
+        canvas, conveyorConfirmedPath, cellSize,
+        fullPathContext: fullPathContext,
+      );
+    }
+
+    // 实时段根据有效/无效状态分别渲染
+    if (conveyorPathInvalid) {
+      // 无效状态：仅实时段标红
+      if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
+        TransportBeltRenderer.renderPreviewPath(
+          canvas, conveyorPreviewPath!, cellSize, <String>{},
+          isInvalid: true,
+          fullPathContext: fullPathContext,
+        );
+      }
+    } else {
+      // 有效状态：实时段为蓝色预览
+      if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
+        TransportBeltRenderer.renderPreviewPath(
+          canvas, conveyorPreviewPath!, cellSize, <String>{},
+          fullPathContext: fullPathContext,
+        );
+      } else if (conveyorMode && mouseGridPos != null && conveyorConfirmedPath.isEmpty) {
+        // 传送带模式下无锚点时，高亮鼠标下的网格
+        TransportBeltRenderer.renderHoverHighlight(canvas, mouseGridPos!, cellSize);
+      }
     }
 
     canvas.restore();
@@ -843,18 +787,43 @@ class _EditorPainter extends CustomPainter {
     return x + w > vp.minX && x < vp.maxX && y + h > vp.minY && y < vp.maxY;
   }
 
-  /// 判断传送带是否在视口内
+  /// 判断传送带是否在视口内（遍历所有路径点计算真实 AABB）
   bool _isBeltVisible(ConveyorBelt belt, _Viewport vp) {
-    // belt.start/end 已经是世界像素坐标（含 cellSize），无需再乘
-    final startX = belt.start.dx;
-    final startY = belt.start.dy;
-    final endX = belt.end.dx;
-    final endY = belt.end.dy;
-    final minX = startX < endX ? startX : endX;
-    final minY = startY < endY ? startY : endY;
-    final maxX = (startX > endX ? startX : endX) + cellSize;
-    final maxY = (startY > endY ? startY : endY) + cellSize;
+    return _isPathVisible(belt.path, vp);
+  }
+
+  /// 判断路径是否在视口内
+  bool _isPathVisible(List<Offset> path, _Viewport vp) {
+    if (path.isEmpty) return false;
+
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+
+    for (final cell in path) {
+      final x = cell.dx * cellSize;
+      final y = cell.dy * cellSize;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x + cellSize > maxX) maxX = x + cellSize;
+      if (y + cellSize > maxY) maxY = y + cellSize;
+    }
+
     return maxX > vp.minX && minX < vp.maxX && maxY > vp.minY && minY < vp.maxY;
+  }
+
+  /// 计算传送带真实 AABB（用于调试）
+  (double, double, double, double) _beltAABB(ConveyorBelt belt) {
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+    for (final cell in belt.path) {
+      final x = cell.dx * cellSize;
+      final y = cell.dy * cellSize;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x + cellSize > maxX) maxX = x + cellSize;
+      if (y + cellSize > maxY) maxY = y + cellSize;
+    }
+    return (minX, minY, maxX, maxY);
   }
 
   /// 渲染设备的静态部分到指定 Canvas（用于预渲染缓存）
@@ -915,6 +884,10 @@ class _EditorPainter extends CustomPainter {
         cellSize != oldDelegate.cellSize ||
         placingBuilding != oldDelegate.placingBuilding ||
         mouseGridPos != oldDelegate.mouseGridPos ||
+        conveyorMode != oldDelegate.conveyorMode ||
+        conveyorPathInvalid != oldDelegate.conveyorPathInvalid ||
+        conveyorForkCell != oldDelegate.conveyorForkCell ||
+        !_listEquals(conveyorConfirmedPath, oldDelegate.conveyorConfirmedPath) ||
         !_listEquals(conveyorPreviewPath, oldDelegate.conveyorPreviewPath) ||
         !_setEquals(conveyorPreviewOccupied, oldDelegate.conveyorPreviewOccupied) ||
         displayScale != oldDelegate.displayScale ||
