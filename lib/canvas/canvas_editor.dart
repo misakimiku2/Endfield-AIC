@@ -40,7 +40,7 @@ class CanvasEditor extends StatefulWidget {
 }
 
 class CanvasEditorState extends State<CanvasEditor>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   Offset? _lastFocalPoint;
   bool _isPanning = false;
   Offset? _mouseGridPos;
@@ -73,6 +73,26 @@ class CanvasEditorState extends State<CanvasEditor>
   static const double _cellSize = 48.0;
   static const double _minScale = 0.25;
   static const double _maxScale = 5.0;
+
+  // 功能1: 悬停高亮
+  PlacedBuilding? _hoveredBuilding;
+
+  // 功能2: 放置时旋转
+  int _placingRotation = 0;
+
+  // 功能3: 长按移动设备
+  bool _isLongPressing = false;
+  DateTime? _longPressStartTime;
+  Offset? _longPressScreenPos;
+  PlacedBuilding? _longPressTargetBuilding;
+  double _longPressProgress = 0.0;
+  static const Duration _longPressDuration = Duration(milliseconds: 800);
+
+  // 移动模式
+  PlacedBuilding? _movingBuilding;
+  int _movingRotation = 0;
+  double _movingOriginalGridX = 0;
+  double _movingOriginalGridY = 0;
 
   // 端口连接缓存：building id -> port key -> 是否连接
   Map<String, Map<String, bool>> _portConnectionsCache = {};
@@ -117,6 +137,11 @@ class CanvasEditorState extends State<CanvasEditor>
     );
     _rebuildPortConnectionsCache();
     TransportBeltRenderer.init();
+    RefiningUnitRenderer.init(onReady: () {
+      // SVG 加载完成后，清除静态缓存并触发重绘
+      _EditorPainter.clearPictureCache();
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -136,6 +161,11 @@ class CanvasEditorState extends State<CanvasEditor>
       // project 引用变化时重建端口连接缓存
       _rebuildPortConnectionsCache();
     }
+    if (!identical(oldWidget.placingBuilding, widget.placingBuilding) &&
+        widget.placingBuilding != null &&
+        oldWidget.placingBuilding == null) {
+      _placingRotation = 0;
+    }
     if (oldWidget.conveyorMode && !widget.conveyorMode) {
       _beltCtrl.reset();
     }
@@ -151,6 +181,18 @@ class CanvasEditorState extends State<CanvasEditor>
   }
 
   void _onTick(Duration elapsed) {
+    // 长按进度计算
+    if (_isLongPressing && _longPressStartTime != null) {
+      _longPressProgress = (DateTime.now()
+              .difference(_longPressStartTime!)
+              .inMilliseconds /
+          _longPressDuration.inMilliseconds)
+          .clamp(0.0, 1.0);
+      if (_longPressProgress >= 1.0) {
+        _enterMoveMode();
+      }
+    }
+
     const lerpFactor = 0.2;
     final newScale =
         _displayScale + (_targetScale - _displayScale) * lerpFactor;
@@ -172,7 +214,8 @@ class CanvasEditorState extends State<CanvasEditor>
     final rotationDone = angleDiff.abs() < 0.005;
     _displayAngle = rotationDone ? _targetAngle : _displayAngle + angleDiff * lerpFactor;
 
-    if (scaleDone && offsetXDone && offsetYDone && rotationDone) {
+    final hasRunningAnimation = !scaleDone || !offsetXDone || !offsetYDone || !rotationDone;
+    if (!hasRunningAnimation && !_isLongPressing && _movingBuilding == null) {
       _animating = false;
       _ticker.stop();
       _project.offsetX = _targetOffsetX;
@@ -193,6 +236,18 @@ class CanvasEditorState extends State<CanvasEditor>
   void rotateCanvas90() {
     _targetAngle += math.pi / 2;
     _startAnimation();
+  }
+
+  void rotatePlacement() {
+    if (_movingBuilding != null) {
+      setState(() {
+        _movingRotation = (_movingRotation + 1) % 4;
+      });
+    } else if (widget.placingBuilding != null) {
+      setState(() {
+        _placingRotation = (_placingRotation + 1) % 4;
+      });
+    }
   }
 
   Offset _screenToWorld(Offset screenPos, Size size) {
@@ -312,7 +367,7 @@ class CanvasEditorState extends State<CanvasEditor>
     final building = widget.placingBuilding;
 
     if (building != null) {
-      _placeBuilding(building, gridPos);
+      _placeBuilding(building, gridPos, rotation: _placingRotation);
       return;
     }
 
@@ -321,7 +376,7 @@ class CanvasEditorState extends State<CanvasEditor>
     }
   }
 
-  void _placeBuilding(Building building, Offset gridPos) {
+  void _placeBuilding(Building building, Offset gridPos, {int rotation = 0}) {
     final cx = gridPos.dx - (building.gridWidth ~/ 2).toDouble();
     final cy = gridPos.dy - (building.gridHeight ~/ 2).toDouble();
     final newBuilding = PlacedBuilding(
@@ -329,6 +384,7 @@ class CanvasEditorState extends State<CanvasEditor>
       building: building,
       gridX: cx,
       gridY: cy,
+      rotation: rotation,
     );
 
     final bounds = newBuilding.getBounds(_cellSize);
@@ -347,6 +403,85 @@ class CanvasEditorState extends State<CanvasEditor>
     }
   }
 
+  // ─── 长按与移动模式 ────────────────────────────────────────────
+
+  void _startLongPress(Offset screenPos, PlacedBuilding building) {
+    _isLongPressing = true;
+    _longPressStartTime = DateTime.now();
+    _longPressScreenPos = screenPos;
+    _longPressTargetBuilding = building;
+    _longPressProgress = 0.0;
+    _ticker.start();
+  }
+
+  void _cancelLongPress() {
+    _isLongPressing = false;
+    _longPressStartTime = null;
+    _longPressScreenPos = null;
+    _longPressTargetBuilding = null;
+    _longPressProgress = 0.0;
+  }
+
+  void _enterMoveMode() {
+    if (_longPressTargetBuilding == null) return;
+    _isLongPressing = false;
+    _longPressProgress = 0.0;
+
+    _movingBuilding = _longPressTargetBuilding;
+    _movingRotation = _longPressTargetBuilding!.rotation;
+    _movingOriginalGridX = _longPressTargetBuilding!.gridX;
+    _movingOriginalGridY = _longPressTargetBuilding!.gridY;
+
+    // 从工程中移除建筑
+    _project.buildings.remove(_longPressTargetBuilding);
+    _longPressTargetBuilding = null;
+    _longPressStartTime = null;
+    _longPressScreenPos = null;
+
+    _rebuildPortConnectionsCache();
+    widget.onProjectChanged(_project);
+  }
+
+  void _cancelMoveMode() {
+    if (_movingBuilding == null) return;
+    // 恢复到原始位置
+    _movingBuilding!.gridX = _movingOriginalGridX;
+    _movingBuilding!.gridY = _movingOriginalGridY;
+    _project.buildings.add(_movingBuilding!);
+    _movingBuilding = null;
+    _movingRotation = 0;
+
+    _rebuildPortConnectionsCache();
+    widget.onProjectChanged(_project);
+    setState(() {});
+  }
+
+  void _placeMovingBuilding(Offset gridPos) {
+    if (_movingBuilding == null) return;
+    final cx = gridPos.dx - (_movingBuilding!.building.gridWidth ~/ 2).toDouble();
+    final cy = gridPos.dy - (_movingBuilding!.building.gridHeight ~/ 2).toDouble();
+
+    _movingBuilding!.gridX = cx;
+    _movingBuilding!.gridY = cy;
+    _movingBuilding!.rotation = _movingRotation;
+
+    final bounds = _movingBuilding!.getBounds(_cellSize);
+    final overlaps = _project.buildings.any(
+      (b) => b.overlaps(bounds, _cellSize),
+    );
+
+    if (!overlaps) {
+      _project.buildings.add(_movingBuilding!);
+      _movingBuilding = null;
+      _movingRotation = 0;
+      _project.offsetX = _targetOffsetX;
+      _project.offsetY = _targetOffsetY;
+      _project.scale = _targetScale;
+      _rebuildPortConnectionsCache();
+      widget.onProjectChanged(_project);
+    }
+  }
+
   void _handleDoubleTap(Offset screenPos, Size size) {
     final gridPos = _screenToGrid(screenPos, size);
     final pb = _getBuildingAt(gridPos);
@@ -360,7 +495,25 @@ class CanvasEditorState extends State<CanvasEditor>
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent) {
       if (event.logicalKey == LogicalKeyboardKey.escape) {
+        if (_movingBuilding != null) {
+          _cancelMoveMode();
+          return KeyEventResult.handled;
+        }
         if (widget.conveyorMode && _beltCtrl.handleKeyEscape()) {
+          return KeyEventResult.handled;
+        }
+      }
+      if (event.logicalKey == LogicalKeyboardKey.keyR) {
+        if (_movingBuilding != null) {
+          setState(() {
+            _movingRotation = (_movingRotation + 1) % 4;
+          });
+          return KeyEventResult.handled;
+        }
+        if (widget.placingBuilding != null) {
+          setState(() {
+            _placingRotation = (_placingRotation + 1) % 4;
+          });
           return KeyEventResult.handled;
         }
       }
@@ -382,6 +535,11 @@ class CanvasEditorState extends State<CanvasEditor>
         if (_mouseGridPos == gridPos) return;
         setState(() {
           _mouseGridPos = gridPos;
+          // 检测悬停的建筑
+          _hoveredBuilding = widget.placingBuilding == null &&
+                  _movingBuilding == null
+              ? _getBuildingAt(gridPos)
+              : null;
           if (widget.conveyorMode) {
             _beltCtrl.handleHover(gridPos);
           } else {
@@ -405,25 +563,37 @@ class CanvasEditorState extends State<CanvasEditor>
             _isMiddleDragging = true;
             return;
           }
-          // 左键：手动双击检测，单击立即响应
+          // 左键
           if (event.buttons & kPrimaryMouseButton != 0) {
             final renderBox = context.findRenderObject() as RenderBox;
             final localPos = event.localPosition;
-            final now = DateTime.now();
+            final gridPos = _screenToGrid(localPos, renderBox.size);
 
-            if (_lastTapTime != null &&
-                now.difference(_lastTapTime!).inMilliseconds < _doubleTapMs &&
-                _lastTapPos != null &&
-                (localPos - _lastTapPos!).distance < _doubleTapDistance) {
-              // 双击
-              _handleDoubleTap(localPos, renderBox.size);
-              _lastTapTime = null;
-              _lastTapPos = null;
-            } else {
-              // 单击 - 立即执行
+            // 移动模式：点击放置
+            if (_movingBuilding != null) {
+              _placeMovingBuilding(gridPos);
+              setState(() {});
+              return;
+            }
+
+            // 放置模式：立即放置
+            if (widget.placingBuilding != null) {
               _handleTap(localPos, renderBox.size);
-              _lastTapTime = now;
-              _lastTapPos = localPos;
+              setState(() {});
+              return;
+            }
+
+            // 传送带模式：立即处理
+            if (widget.conveyorMode) {
+              _handleTap(localPos, renderBox.size);
+              setState(() {});
+              return;
+            }
+
+            // 普通模式：检测是否点击了建筑（用于长按）
+            final pb = _getBuildingAt(gridPos);
+            if (pb != null) {
+              _startLongPress(localPos, pb);
             }
             setState(() {});
           }
@@ -439,12 +609,44 @@ class CanvasEditorState extends State<CanvasEditor>
             _lastMiddlePos = event.localPosition;
             setState(() {});
           }
+          // 长按时移动过远则取消
+          if (_isLongPressing && _longPressScreenPos != null) {
+            const cancelDist = 30.0;
+            if ((event.localPosition - _longPressScreenPos!).distance > cancelDist) {
+              _cancelLongPress();
+              setState(() {});
+            }
+          }
         },
         onPointerUp: (event) {
           if (event.pointer == _middleDragPointerId) {
             _middleDragPointerId = null;
             _lastMiddlePos = null;
             _isMiddleDragging = false;
+            return;
+          }
+          // 长按未完成：视为点击
+          if (_isLongPressing && _longPressProgress < 1.0) {
+            _cancelLongPress();
+            final renderBox = context.findRenderObject() as RenderBox;
+            final localPos = event.localPosition;
+            final now = DateTime.now();
+
+            if (_lastTapTime != null &&
+                now.difference(_lastTapTime!).inMilliseconds < _doubleTapMs &&
+                _lastTapPos != null &&
+                (localPos - _lastTapPos!).distance < _doubleTapDistance) {
+              // 双击
+              _handleDoubleTap(localPos, renderBox.size);
+              _lastTapTime = null;
+              _lastTapPos = null;
+            } else {
+              // 单击
+              _handleTap(localPos, renderBox.size);
+              _lastTapTime = now;
+              _lastTapPos = localPos;
+            }
+            setState(() {});
           }
         },
         onPointerCancel: (event) {
@@ -452,6 +654,10 @@ class CanvasEditorState extends State<CanvasEditor>
             _middleDragPointerId = null;
             _lastMiddlePos = null;
             _isMiddleDragging = false;
+          }
+          if (_isLongPressing) {
+            _cancelLongPress();
+            setState(() {});
           }
         },
         child: GestureDetector(
@@ -471,7 +677,9 @@ class CanvasEditorState extends State<CanvasEditor>
               dataLoader: widget.dataLoader,
               cellSize: _cellSize,
               placingBuilding: widget.placingBuilding,
+              placingRotation: _placingRotation,
               mouseGridPos: _mouseGridPos,
+              hoveredBuilding: _hoveredBuilding,
               conveyorMode: widget.conveyorMode,
               conveyorConfirmedPath: _beltCtrl.confirmedPath,
               conveyorPreviewPath: _beltCtrl.previewPath,
@@ -483,6 +691,11 @@ class CanvasEditorState extends State<CanvasEditor>
               displayOffsetY: _displayOffsetY,
               displayAngle: _displayAngle,
               portConnectionsCache: _portConnectionsCache,
+              isLongPressing: _isLongPressing,
+              longPressScreenPos: _longPressScreenPos,
+              longPressProgress: _longPressProgress,
+              movingBuilding: _movingBuilding,
+              movingRotation: _movingRotation,
             ),
             size: Size.infinite,
           ),
@@ -498,7 +711,9 @@ class _EditorPainter extends CustomPainter {
   final DataLoader dataLoader;
   final double cellSize;
   final Building? placingBuilding;
+  final int placingRotation;
   final Offset? mouseGridPos;
+  final PlacedBuilding? hoveredBuilding;
   final bool conveyorMode;
   final List<Offset> conveyorConfirmedPath;
   final List<Offset>? conveyorPreviewPath;
@@ -510,18 +725,29 @@ class _EditorPainter extends CustomPainter {
   final double displayOffsetY;
   final double displayAngle;
   final Map<String, Map<String, bool>> portConnectionsCache;
+  final bool isLongPressing;
+  final Offset? longPressScreenPos;
+  final double longPressProgress;
+  final PlacedBuilding? movingBuilding;
+  final int movingRotation;
 
   // 预渲染缓存: key = "buildingId_rotation_detailLevel_portsHash" -> Picture
   static final Map<String, ui.Picture> _pictureCache = {};
   static const int _maxCacheSize = 200;
-  int _lastCullLog = 0;
+
+/// 清除所有静态渲染缓存
+  static void clearPictureCache() {
+    _pictureCache.clear();
+  }
 
   _EditorPainter({
     required this.project,
     required this.dataLoader,
     required this.cellSize,
     this.placingBuilding,
+    this.placingRotation = 0,
     this.mouseGridPos,
+    this.hoveredBuilding,
     this.conveyorMode = false,
     this.conveyorConfirmedPath = const [],
     this.conveyorPreviewPath,
@@ -533,6 +759,11 @@ class _EditorPainter extends CustomPainter {
     required this.displayOffsetY,
     required this.displayAngle,
     required this.portConnectionsCache,
+    this.isLongPressing = false,
+    this.longPressScreenPos,
+    this.longPressProgress = 0.0,
+    this.movingBuilding,
+    this.movingRotation = 0,
   });
 
   @override
@@ -579,7 +810,6 @@ class _EditorPainter extends CustomPainter {
     }
 
     // 调试：视口与裁剪统计（有裁剪时才输出，且每2秒最多一次）
-    int culledCount = 0;
     for (final belt in project.conveyors) {
       // 动态裁剪：如果当前正在绘制且起点在旧传送带上，裁剪分叉点之前的部分
       List<Offset> renderPath = belt.path;
@@ -595,14 +825,12 @@ class _EditorPainter extends CustomPainter {
           renderPath = belt.path.sublist(forkIdx + 1);
         } else if (forkIdx >= 0) {
           // 分叉点在末尾或之后，整条旧道被替代，不渲染
-          culledCount++;
           continue;
         }
       }
 
       final visible = _isPathVisible(renderPath, viewport);
       if (!visible) {
-        culledCount++;
         continue;
       }
       final item = dataLoader.getItem(belt.itemId);
@@ -617,24 +845,6 @@ class _EditorPainter extends CustomPainter {
         TransportBeltRenderer.renderConveyorPath(canvas, clippedBelt, item, cellSize, detailLevel: detailLevel);
       } else {
         TransportBeltRenderer.renderConveyorPath(canvas, belt, item, cellSize, detailLevel: detailLevel);
-      }
-    }
-
-    if (culledCount > 0) {
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if (now - _lastCullLog > 2000) {
-        _lastCullLog = now;
-        debugPrint('[BeltCull] viewport=(${viewport.minX.toStringAsFixed(0)},${viewport.minY.toStringAsFixed(0)})-'
-            '(${viewport.maxX.toStringAsFixed(0)},${viewport.maxY.toStringAsFixed(0)}) '
-            'scale=${displayScale.toStringAsFixed(2)} total=${project.conveyors.length} culled=$culledCount');
-        for (final belt in project.conveyors) {
-          if (!_isBeltVisible(belt, viewport)) {
-            final aabb = _beltAABB(belt);
-            debugPrint('  CULL belt=${belt.id} len=${belt.path.length} '
-                'aabb=(${aabb.$1.toStringAsFixed(0)},${aabb.$2.toStringAsFixed(0)})-'
-                '(${aabb.$3.toStringAsFixed(0)},${aabb.$4.toStringAsFixed(0)})');
-          }
-        }
       }
     }
 
@@ -692,17 +902,67 @@ class _EditorPainter extends CustomPainter {
       if (placingBuilding!.id == RefiningUnitConfig.id) {
         RefiningUnitRenderer.renderPlaceholder(
           canvas, placingBuilding!, cx, cy, cellSize, 0.6,
+          rotation: placingRotation,
         );
       } else if (placingBuilding!.id == DepotLoaderConfig.id ||
           placingBuilding!.id == DepotUnloaderConfig.id) {
         DepotAccessRenderer.renderPlaceholder(
           canvas, placingBuilding!, cx, cy, cellSize, 0.6,
+          rotation: placingRotation,
         );
       } else {
         BuildingRenderer.renderPlaceholder(
           canvas, placingBuilding!, cx, cy, cellSize, 0.6,
+          rotation: placingRotation,
         );
       }
+    }
+
+    // 移动中的建筑预览
+    if (movingBuilding != null && mouseGridPos != null) {
+      final mb = movingBuilding!;
+      final cx = mouseGridPos!.dx - (mb.building.gridWidth ~/ 2).toDouble();
+      final cy = mouseGridPos!.dy - (mb.building.gridHeight ~/ 2).toDouble();
+
+      if (mb.building.id == RefiningUnitConfig.id) {
+        RefiningUnitRenderer.renderPlaceholder(
+          canvas, mb.building, cx, cy, cellSize, 0.6,
+          rotation: movingRotation,
+        );
+      } else if (mb.building.id == DepotLoaderConfig.id ||
+          mb.building.id == DepotUnloaderConfig.id) {
+        DepotAccessRenderer.renderPlaceholder(
+          canvas, mb.building, cx, cy, cellSize, 0.6,
+          rotation: movingRotation,
+        );
+      } else {
+        BuildingRenderer.renderPlaceholder(
+          canvas, mb.building, cx, cy, cellSize, 0.6,
+          rotation: movingRotation,
+        );
+      }
+    }
+
+    // 悬停高亮白框
+    if (hoveredBuilding != null && placingBuilding == null && movingBuilding == null) {
+      final hb = hoveredBuilding!;
+      final hx = hb.gridX * cellSize;
+      final hy = hb.gridY * cellSize;
+      final hw = hb.building.gridWidth * cellSize;
+      final hh = hb.building.gridHeight * cellSize;
+
+      canvas.save();
+      canvas.translate(hx + hw / 2, hy + hh / 2);
+      canvas.rotate(hb.rotation * math.pi / 2);
+      canvas.translate(-hw / 2, -hh / 2);
+
+      final highlightPaint = Paint()
+        ..color = Colors.white
+        ..strokeWidth = 5.0
+        ..style = PaintingStyle.stroke;
+      canvas.drawRect(Rect.fromLTWH(0, 0, hw, hh), highlightPaint);
+
+      canvas.restore();
     }
 
     // 已确认段始终使用传送带本色渲染（不论有效还是无效）
@@ -737,6 +997,37 @@ class _EditorPainter extends CustomPainter {
     }
 
     canvas.restore();
+
+    // 长按圆形进度条（屏幕空间绘制）
+    if (isLongPressing && longPressScreenPos != null) {
+      final center = longPressScreenPos!;
+      const radius = 24.0;
+      const strokeW = 4.0;
+
+      // 背景圆环
+      final bgPaint = Paint()
+        ..color = const Color(0x30FFFFFF)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeW;
+      canvas.drawCircle(center, radius, bgPaint);
+
+      // 蓝色填充弧（顺时针，从顶部开始）
+      final progressPaint = Paint()
+        ..color = Colors.blue
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeW
+        ..strokeCap = StrokeCap.round;
+
+      const startAngle = -math.pi / 2; // 12点方向
+      final sweepAngle = 2 * math.pi * longPressProgress;
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        startAngle,
+        sweepAngle,
+        false,
+        progressPaint,
+      );
+    }
   }
 
   /// 计算可见世界坐标区域（考虑旋转的轴对齐包围盒）
@@ -787,11 +1078,6 @@ class _EditorPainter extends CustomPainter {
     return x + w > vp.minX && x < vp.maxX && y + h > vp.minY && y < vp.maxY;
   }
 
-  /// 判断传送带是否在视口内（遍历所有路径点计算真实 AABB）
-  bool _isBeltVisible(ConveyorBelt belt, _Viewport vp) {
-    return _isPathVisible(belt.path, vp);
-  }
-
   /// 判断路径是否在视口内
   bool _isPathVisible(List<Offset> path, _Viewport vp) {
     if (path.isEmpty) return false;
@@ -809,21 +1095,6 @@ class _EditorPainter extends CustomPainter {
     }
 
     return maxX > vp.minX && minX < vp.maxX && maxY > vp.minY && minY < vp.maxY;
-  }
-
-  /// 计算传送带真实 AABB（用于调试）
-  (double, double, double, double) _beltAABB(ConveyorBelt belt) {
-    double minX = double.infinity, minY = double.infinity;
-    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
-    for (final cell in belt.path) {
-      final x = cell.dx * cellSize;
-      final y = cell.dy * cellSize;
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (x + cellSize > maxX) maxX = x + cellSize;
-      if (y + cellSize > maxY) maxY = y + cellSize;
-    }
-    return (minX, minY, maxX, maxY);
   }
 
   /// 渲染设备的静态部分到指定 Canvas（用于预渲染缓存）
@@ -883,7 +1154,9 @@ class _EditorPainter extends CustomPainter {
         dataLoader != oldDelegate.dataLoader ||
         cellSize != oldDelegate.cellSize ||
         placingBuilding != oldDelegate.placingBuilding ||
+        placingRotation != oldDelegate.placingRotation ||
         mouseGridPos != oldDelegate.mouseGridPos ||
+        hoveredBuilding != oldDelegate.hoveredBuilding ||
         conveyorMode != oldDelegate.conveyorMode ||
         conveyorPathInvalid != oldDelegate.conveyorPathInvalid ||
         conveyorForkCell != oldDelegate.conveyorForkCell ||
@@ -893,7 +1166,12 @@ class _EditorPainter extends CustomPainter {
         displayScale != oldDelegate.displayScale ||
         displayOffsetX != oldDelegate.displayOffsetX ||
         displayOffsetY != oldDelegate.displayOffsetY ||
-        displayAngle != oldDelegate.displayAngle;
+        displayAngle != oldDelegate.displayAngle ||
+        isLongPressing != oldDelegate.isLongPressing ||
+        longPressScreenPos != oldDelegate.longPressScreenPos ||
+        longPressProgress != oldDelegate.longPressProgress ||
+        movingBuilding != oldDelegate.movingBuilding ||
+        movingRotation != oldDelegate.movingRotation;
   }
 
   bool _listEquals<T>(List<T>? a, List<T>? b) {

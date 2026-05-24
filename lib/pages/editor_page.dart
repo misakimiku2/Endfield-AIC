@@ -294,6 +294,14 @@ class _EditorPageState extends State<EditorPage> {
       return true;
     }
 
+    // R: 旋转正在放置/移动的设备（非Ctrl+R时尝试）
+    if (event.logicalKey == LogicalKeyboardKey.keyR &&
+        !(HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) ||
+            HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.controlRight))) {
+      _canvasKey.currentState?.rotatePlacement();
+      return true;
+    }
+
     if (event.logicalKey == LogicalKeyboardKey.keyE &&
         !HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) &&
         !HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.controlRight)) {

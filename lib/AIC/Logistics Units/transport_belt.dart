@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/project.dart';
+import '../../models/building.dart';
 
 /// 传送带创建控制器：管理锚点、路径、预览、寻路等全部状态和逻辑
 class TransportBeltController {
@@ -24,6 +25,7 @@ class TransportBeltController {
   Set<String>? previewOccupied;
   Offset? mouseGridPos;
   ConveyorBelt? _mergeTarget;
+  String? _startingPortDirection;
 
   // === 静态工具 ===
   static const double cellSize = 48.0;
@@ -38,6 +40,7 @@ class TransportBeltController {
     previewPath = null;
     previewOccupied = null;
     _mergeTarget = null;
+    _startingPortDirection = null;
   }
 
   /// 返回 true 表示点击已被处理
@@ -77,16 +80,25 @@ class TransportBeltController {
     if (belt != null) {
       fullPath = _traceBeltToCell(belt, gridPos);
       anchors.add(gridPos);
+      _startingPortDirection = null;
       _updatePreview();
       notifyListeners();
       return true;
     }
     if (_isCellInBuilding(gridPos)) {
+      // 只允许从输出端口开始创建传送带
+      // 不允许从输入端口开始（传送带单向），也不允许从设备内部非端口格子开始
+      final portInfo = _findPortAtCell(gridPos);
+      if (portInfo == null || portInfo.type != 'output') {
+        return false;
+      }
       anchors.add(gridPos);
+      _startingPortDirection = portInfo.definition.direction;
       _updatePreview();
       notifyListeners();
       return true;
     }
+    _startingPortDirection = null;
     return false;
   }
 
@@ -125,13 +137,31 @@ class TransportBeltController {
       return false;
     }
 
-    if (_isCellOccupied(gridPos)) return false;
+    // 允许设备输入端口的格子作为传送带终点
+    final isInputPort = _isCellDeviceInputPort(gridPos);
+    if (!isInputPort && _isCellOccupied(gridPos)) return false;
 
-    final blocked = _buildBlockedSet();
+    // 输入端口作为终点时，从 blocked 中排除该格
+    final blocked = _buildBlockedSet(excludeCell: isInputPort ? gridPos : null);
     final verticalFirst = _isIncomingVertical();
 
     final segment = _findPath(anchors.last, gridPos, blocked, verticalFirst: verticalFirst);
     if (segment == null || segment.length < 2) return false;
+
+    // 点击输入端口时自动完成创建
+    if (isInputPort) {
+      if (fullPath.isEmpty) {
+        fullPath.addAll(segment);
+      } else {
+        if (segment.length > 1) {
+          fullPath.addAll(segment.sublist(1));
+        }
+      }
+      anchors.add(gridPos);
+      _finish();
+      notifyListeners();
+      return true;
+    }
 
     if (fullPath.isEmpty) {
       fullPath.addAll(segment);
@@ -349,6 +379,54 @@ class TransportBeltController {
     return (last.dy - prev.dy).abs() > (last.dx - prev.dx).abs();
   }
 
+  // === 设备端口检测 ===
+
+  /// 在 gridPos 处查找设备端口，返回 (设备, 端口定义, 'input'/'output')
+  ({PlacedBuilding building, PortDefinition definition, String type})?
+      _findPortAtCell(Offset gridPos) {
+    final gx = gridPos.dx.round();
+    final gy = gridPos.dy.round();
+    for (final pb in project.buildings) {
+      for (final port in pb.inputPorts) {
+        final px =
+            (pb.gridX + port.definition.relativeX * pb.building.gridWidth)
+                .round();
+        final py =
+            (pb.gridY + port.definition.relativeY * pb.building.gridHeight)
+                .round();
+        if (px == gx && py == gy) {
+          return (
+            building: pb,
+            definition: port.definition,
+            type: 'input'
+          );
+        }
+      }
+      for (final port in pb.outputPorts) {
+        final px =
+            (pb.gridX + port.definition.relativeX * pb.building.gridWidth)
+                .round();
+        final py =
+            (pb.gridY + port.definition.relativeY * pb.building.gridHeight)
+                .round();
+        if (px == gx && py == gy) {
+          return (
+            building: pb,
+            definition: port.definition,
+            type: 'output'
+          );
+        }
+      }
+    }
+    return null;
+  }
+
+  /// 检查 gridPos 是否为设备的输入端口格子
+  bool _isCellDeviceInputPort(Offset gridPos) {
+    final portInfo = _findPortAtCell(gridPos);
+    return portInfo != null && portInfo.type == 'input';
+  }
+
   // === 预览 ===
 
   void _updatePreview() {
@@ -364,6 +442,9 @@ class TransportBeltController {
 
     // 检查鼠标是否悬停在某条传送带的起点（合并候选）
     final mergeBelt = _findBeltStartCell(mouseGridPos!);
+    // 检查鼠标是否悬停在设备输入端口
+    final isInputPort = _isCellDeviceInputPort(mouseGridPos!);
+
     Offset? excludeCell;
     if (mergeBelt != null) {
       final alreadyInPath = fullPath.any(
@@ -371,6 +452,8 @@ class TransportBeltController {
       if (!alreadyInPath) {
         excludeCell = mouseGridPos!;
       }
+    } else if (isInputPort) {
+      excludeCell = mouseGridPos!;
     }
 
     final blocked = _buildBlockedSet(excludeCell: excludeCell);
@@ -420,7 +503,10 @@ class TransportBeltController {
     if (startKey == endKey) return [start];
     if (blocked.contains(endKey)) return null;
 
-    final momentumPath = _calculateMomentumPath(start, end, verticalFirst: verticalFirst);
+    // 如果有端口方向约束，优先尝试按端口方向走
+    final momentumPath = _calculateMomentumPath(start, end,
+        verticalFirst: verticalFirst,
+        startingDirection: _startingPortDirection);
     bool momentumValid = true;
     for (final cell in momentumPath) {
       final key = '${cell.dx.toInt()}_${cell.dy.toInt()}';
@@ -431,11 +517,13 @@ class TransportBeltController {
     }
     if (momentumValid) return _deduplicatePath(momentumPath);
 
-    final bfsPath = _findPathBFS(start, end, blocked);
+    // BFS 也强制首步方向
+    final bfsPath = _findPathBFS(start, end, blocked,
+        firstStepDirection: _startingPortDirection);
     return bfsPath != null ? _deduplicatePath(bfsPath) : null;
   }
 
-  List<Offset> _calculateMomentumPath(Offset start, Offset end, {bool verticalFirst = false}) {
+  List<Offset> _calculateMomentumPath(Offset start, Offset end, {bool verticalFirst = false, String? startingDirection}) {
     final sx = start.dx.toInt();
     final sy = start.dy.toInt();
     final ex = end.dx.toInt();
@@ -444,31 +532,68 @@ class TransportBeltController {
     if (sx == ex && sy == ey) return [start];
 
     final path = <Offset>[];
+    int cx = sx;
+    int cy = sy;
 
+    // 如果有起始方向约束，第一步必须按端口方向走
+    if (startingDirection != null && (cx != ex || cy != ey)) {
+      path.add(Offset(cx.toDouble(), cy.toDouble()));
+      switch (startingDirection) {
+        case 'up':
+          cy -= 1;
+          break;
+        case 'down':
+          cy += 1;
+          break;
+        case 'left':
+          cx -= 1;
+          break;
+        case 'right':
+          cx += 1;
+          break;
+      }
+      // 如果第一格正好是终点，直接返回
+      if (cx == ex && cy == ey) {
+        path.add(Offset(ex.toDouble(), ey.toDouble()));
+        return path;
+      }
+      path.add(Offset(cx.toDouble(), cy.toDouble()));
+      // 继续从新位置开始走剩余路径
+    }
+
+    // 从当前位置用原有逻辑走到终点
     if (verticalFirst) {
-      if (sy != ey) {
-        final dy = ey > sy ? 1 : -1;
-        for (int y = sy; y != ey; y += dy) {
-          path.add(Offset(sx.toDouble(), y.toDouble()));
+      if (cy != ey) {
+        final dy = ey > cy ? 1 : -1;
+        for (int y = cy; y != ey; y += dy) {
+          if (path.isEmpty || path.last.dx != cx.toDouble() || path.last.dy != y.toDouble()) {
+            path.add(Offset(cx.toDouble(), y.toDouble()));
+          }
         }
       }
-      if (sx != ex) {
-        final dx = ex > sx ? 1 : -1;
-        for (int x = sx; x != ex; x += dx) {
-          path.add(Offset(x.toDouble(), ey.toDouble()));
+      if (cx != ex) {
+        final dx = ex > cx ? 1 : -1;
+        for (int x = cx; x != ex; x += dx) {
+          if (path.isEmpty || path.last.dx != x.toDouble() || path.last.dy != ey.toDouble()) {
+            path.add(Offset(x.toDouble(), ey.toDouble()));
+          }
         }
       }
     } else {
-      if (sx != ex) {
-        final dx = ex > sx ? 1 : -1;
-        for (int x = sx; x != ex; x += dx) {
-          path.add(Offset(x.toDouble(), sy.toDouble()));
+      if (cx != ex) {
+        final dx = ex > cx ? 1 : -1;
+        for (int x = cx; x != ex; x += dx) {
+          if (path.isEmpty || path.last.dx != x.toDouble() || path.last.dy != cy.toDouble()) {
+            path.add(Offset(x.toDouble(), cy.toDouble()));
+          }
         }
       }
-      if (sy != ey) {
-        final dy = ey > sy ? 1 : -1;
-        for (int y = sy; y != ey; y += dy) {
-          path.add(Offset(ex.toDouble(), y.toDouble()));
+      if (cy != ey) {
+        final dy = ey > cy ? 1 : -1;
+        for (int y = cy; y != ey; y += dy) {
+          if (path.isEmpty || path.last.dx != ex.toDouble() || path.last.dy != y.toDouble()) {
+            path.add(Offset(ex.toDouble(), y.toDouble()));
+          }
         }
       }
     }
@@ -477,7 +602,7 @@ class TransportBeltController {
     return path;
   }
 
-  List<Offset>? _findPathBFS(Offset start, Offset end, Set<String> blocked) {
+  List<Offset>? _findPathBFS(Offset start, Offset end, Set<String> blocked, {String? firstStepDirection}) {
     final startKey = '${start.dx.toInt()}_${start.dy.toInt()}';
     final endKey = '${end.dx.toInt()}_${end.dy.toInt()}';
 
@@ -488,7 +613,7 @@ class TransportBeltController {
     final visited = <String, Offset?>{startKey: null};
     queue.add(_BFSNode(start.dx.toInt(), start.dy.toInt()));
 
-    const dirs = [
+    const allDirs = [
       [0, -1],
       [0, 1],
       [-1, 0],
@@ -511,6 +636,20 @@ class TransportBeltController {
           key = parent == null ? null : '${parent.dx.toInt()}_${parent.dy.toInt()}';
         }
         return path.reversed.toList();
+      }
+
+      // 如果是从起始点出发且有端口方向约束，只允许端口方向
+      List<List<int>> dirs;
+      if (nodeKey == startKey && firstStepDirection != null) {
+        dirs = switch (firstStepDirection) {
+          'up' => const [[0, -1]],
+          'down' => const [[0, 1]],
+          'left' => const [[-1, 0]],
+          'right' => const [[1, 0]],
+          _ => allDirs,
+        };
+      } else {
+        dirs = allDirs;
       }
 
       for (final d in dirs) {

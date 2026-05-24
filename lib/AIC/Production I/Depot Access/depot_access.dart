@@ -136,8 +136,9 @@ class DepotAccessRenderer {
     double gridX,
     double gridY,
     double cellSize,
-    double opacity,
-  ) {
+    double opacity, {
+    int rotation = 0,
+  }) {
     final x = gridX * cellSize;
     final y = gridY * cellSize;
     final w = building.gridWidth * cellSize;
@@ -146,21 +147,28 @@ class DepotAccessRenderer {
     final isLoader = building.id == DepotLoaderConfig.id;
     final bodyColor = isLoader ? _loaderBodyColor : _unloaderBodyColor;
 
+    canvas.save();
+    canvas.translate(x + w / 2, y + h / 2);
+    canvas.rotate(rotation * math.pi / 2);
+    canvas.translate(-w / 2, -h / 2);
+
     final paint = Paint()
       ..color = bodyColor.withValues(alpha: opacity * 0.3)
       ..style = PaintingStyle.fill;
-    canvas.drawRect(Rect.fromLTWH(x, y, w, h), paint);
+    canvas.drawRect(Rect.fromLTWH(0, 0, w, h), paint);
 
     final borderPaint = Paint()
       ..color = bodyColor.withValues(alpha: opacity)
       ..strokeWidth = 2.0
       ..style = PaintingStyle.stroke;
-    canvas.drawRect(Rect.fromLTWH(x, y, w, h), borderPaint);
+    canvas.drawRect(Rect.fromLTWH(0, 0, w, h), borderPaint);
 
     canvas.save();
-    canvas.translate(x + w / 2, y + h / 2);
+    canvas.translate(w / 2, h / 2);
     canvas.translate(-w / 2, -h / 2);
     _drawPortArrows(canvas, building, cellSize, null, opacity: opacity * 0.6);
+    canvas.restore();
+
     canvas.restore();
   }
 
