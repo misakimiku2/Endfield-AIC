@@ -78,6 +78,14 @@ class TransportBeltController {
   bool _handleFirstAnchor(Offset gridPos) {
     final belt = _findBeltAtCell(gridPos);
     if (belt != null) {
+      // 传送带截断点或绝对起点不能作为新创建传送带的起点（这会导致重叠冲突或流向矛盾）
+      if (belt.path.isNotEmpty) {
+        final firstCell = belt.path.first;
+        if (firstCell.dx.toInt() == gridPos.dx.toInt() &&
+            firstCell.dy.toInt() == gridPos.dy.toInt()) {
+          return false;
+        }
+      }
       fullPath = _traceBeltToCell(belt, gridPos);
       anchors.add(gridPos);
       _startingPortDirection = null;
@@ -93,7 +101,7 @@ class TransportBeltController {
         return false;
       }
       anchors.add(gridPos);
-      _startingPortDirection = portInfo.definition.direction;
+      _startingPortDirection = portInfo.worldDirection;
       _updatePreview();
       notifyListeners();
       return true;
@@ -381,44 +389,51 @@ class TransportBeltController {
 
   // === 设备端口检测 ===
 
-  /// 在 gridPos 处查找设备端口，返回 (设备, 端口定义, 'input'/'output')
-  ({PlacedBuilding building, PortDefinition definition, String type})?
+  /// 在 gridPos 处查找设备端口，返回 (设备, 端口定义, 'input'/'output', 旋转后的世界方向)
+  ({PlacedBuilding building, PortDefinition definition, String type, String worldDirection})?
       _findPortAtCell(Offset gridPos) {
     final gx = gridPos.dx.round();
     final gy = gridPos.dy.round();
     for (final pb in project.buildings) {
+      final rot = pb.rotation;
+      final gw = pb.building.gridWidth;
+      final gh = pb.building.gridHeight;
+
       for (final port in pb.inputPorts) {
-        final px =
-            (pb.gridX + port.definition.relativeX * pb.building.gridWidth)
-                .round();
-        final py =
-            (pb.gridY + port.definition.relativeY * pb.building.gridHeight)
-                .round();
+        final portGrid = port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
+        final px = portGrid.dx.round();
+        final py = portGrid.dy.round();
         if (px == gx && py == gy) {
           return (
             building: pb,
             definition: port.definition,
-            type: 'input'
+            type: 'input',
+            worldDirection: _rotateDirection(port.definition.direction, rot),
           );
         }
       }
       for (final port in pb.outputPorts) {
-        final px =
-            (pb.gridX + port.definition.relativeX * pb.building.gridWidth)
-                .round();
-        final py =
-            (pb.gridY + port.definition.relativeY * pb.building.gridHeight)
-                .round();
+        final portGrid = port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
+        final px = portGrid.dx.round();
+        final py = portGrid.dy.round();
         if (px == gx && py == gy) {
           return (
             building: pb,
             definition: port.definition,
-            type: 'output'
+            type: 'output',
+            worldDirection: _rotateDirection(port.definition.direction, rot),
           );
         }
       }
     }
     return null;
+  }
+
+  String _rotateDirection(String original, int rotation) {
+    const directions = ['up', 'right', 'down', 'left'];
+    final idx = directions.indexOf(original);
+    if (idx == -1) return original;
+    return directions[(idx + rotation) % 4];
   }
 
   /// 检查 gridPos 是否为设备的输入端口格子
@@ -503,10 +518,43 @@ class TransportBeltController {
     if (startKey == endKey) return [start];
     if (blocked.contains(endKey)) return null;
 
+    // 检查终点是否为设备的输入端口
+    final portInfo = _findPortAtCell(end);
+    if (portInfo != null && portInfo.type == 'input') {
+      final D = portInfo.worldDirection;
+      final dirOffset = switch (D) {
+        'up' => const Offset(0, -1),
+        'down' => const Offset(0, 1),
+        'left' => const Offset(-1, 0),
+        'right' => const Offset(1, 0),
+        _ => const Offset(0, 0),
+      };
+
+      if (dirOffset != const Offset(0, 0)) {
+        final penultimate = end + dirOffset;
+        final penultimateKey = '${penultimate.dx.toInt()}_${penultimate.dy.toInt()}';
+
+        // 前驱格子如果被阻挡且不是起点，则寻路失败
+        if (blocked.contains(penultimateKey) && penultimateKey != startKey) {
+          return null;
+        }
+
+        // 暂时在寻路至前驱格子时将终点(输入端口)设为阻挡，预防擦过或斜插
+        final tempBlocked = Set<String>.from(blocked)..add(endKey);
+        final subPath = _findPath(start, penultimate, tempBlocked, verticalFirst: verticalFirst);
+        if (subPath == null) return null;
+
+        return _deduplicatePath([...subPath, end]);
+      }
+    }
+
+    // 仅在创建第一段时（即 anchors.length <= 1），才施加起始端口物理方向的约束，之后的中继锚点寻路自由
+    final activeDirection = (anchors.length <= 1) ? _startingPortDirection : null;
+
     // 如果有端口方向约束，优先尝试按端口方向走
     final momentumPath = _calculateMomentumPath(start, end,
         verticalFirst: verticalFirst,
-        startingDirection: _startingPortDirection);
+        startingDirection: activeDirection);
     bool momentumValid = true;
     for (final cell in momentumPath) {
       final key = '${cell.dx.toInt()}_${cell.dy.toInt()}';
@@ -519,7 +567,7 @@ class TransportBeltController {
 
     // BFS 也强制首步方向
     final bfsPath = _findPathBFS(start, end, blocked,
-        firstStepDirection: _startingPortDirection);
+        firstStepDirection: activeDirection);
     return bfsPath != null ? _deduplicatePath(bfsPath) : null;
   }
 

@@ -235,7 +235,7 @@ class SimulationEngine extends ChangeNotifier {
     for (final pb in _project!.buildings) {
       for (final port in pb.outputPorts) {
         final portWorld = port.worldPosition(
-            pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight);
+            pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
         if ((worldPos - portWorld).distance < _portConnectionThreshold) {
           return pb;
         }
@@ -277,7 +277,7 @@ class SimulationEngine extends ChangeNotifier {
       for (final belt in _project!.conveyors) {
         for (final port in pb.inputPorts) {
           final portWorld = port.worldPosition(
-              pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight);
+              pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
           if ((belt.end - portWorld).distance < _portConnectionThreshold) {
             if (belt.itemId == input.itemId) {
               found = true;
@@ -296,7 +296,7 @@ class SimulationEngine extends ChangeNotifier {
     if (pb.isBlocked) return false;
     for (final port in pb.outputPorts) {
       final portWorld = port.worldPosition(
-          pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight);
+          pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
       for (final belt in _project!.conveyors) {
         if ((belt.start - portWorld).distance < _portConnectionThreshold) {
           if (belt.itemId.isEmpty) return true;
@@ -310,7 +310,7 @@ class SimulationEngine extends ChangeNotifier {
     for (final input in recipe.inputs) {
       for (final port in pb.inputPorts) {
         final portWorld = port.worldPosition(
-            pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight);
+            pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
         for (final belt in _project!.conveyors) {
           if ((belt.end - portWorld).distance < _portConnectionThreshold) {
             if (belt.itemId == input.itemId) {
@@ -327,7 +327,7 @@ class SimulationEngine extends ChangeNotifier {
     for (final output in recipe.outputs) {
       for (final port in pb.outputPorts) {
         final portWorld = port.worldPosition(
-            pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight);
+            pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
         for (final belt in _project!.conveyors) {
           if ((belt.start - portWorld).distance < _portConnectionThreshold) {
             if (belt.itemId.isEmpty) {

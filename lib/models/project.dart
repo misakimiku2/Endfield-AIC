@@ -17,11 +17,85 @@ class PortState {
   });
 
   Offset worldPosition(
-      double gridX, double gridY, double cellSize, int gridWidth, int gridHeight) {
-    return Offset(
-      (gridX + definition.relativeX * gridWidth) * cellSize,
-      (gridY + definition.relativeY * gridHeight) * cellSize,
-    );
+      double gridX, double gridY, double cellSize, int gridWidth, int gridHeight, {int rotation = 0}) {
+    double rX = definition.relativeX;
+    double rY = definition.relativeY;
+
+    double localGridX = (rX == 1.0) ? (gridWidth - 1).toDouble() : (rX * gridWidth).floorToDouble();
+    double localGridY = (rY == 1.0) ? (gridHeight - 1).toDouble() : (rY * gridHeight).floorToDouble();
+
+    double rx = localGridX + 0.5;
+    double ry = localGridY + 0.5;
+
+    double cx = rx - gridWidth / 2.0;
+    double cy = ry - gridHeight / 2.0;
+
+    double rcx, rcy;
+    switch (rotation % 4) {
+      case 1:
+        rcx = -cy;
+        rcy = cx;
+        break;
+      case 2:
+        rcx = -cx;
+        rcy = -cy;
+        break;
+      case 3:
+        rcx = cy;
+        rcy = -cx;
+        break;
+      case 0:
+      default:
+        rcx = cx;
+        rcy = cy;
+        break;
+    }
+
+    double wx = gridX + rcx + gridWidth / 2.0;
+    double wy = gridY + rcy + gridHeight / 2.0;
+
+    return Offset(wx * cellSize, wy * cellSize);
+  }
+
+  Offset gridPosition(
+      double gridX, double gridY, int gridWidth, int gridHeight, {int rotation = 0}) {
+    double rX = definition.relativeX;
+    double rY = definition.relativeY;
+
+    double localGridX = (rX == 1.0) ? (gridWidth - 1).toDouble() : (rX * gridWidth).floorToDouble();
+    double localGridY = (rY == 1.0) ? (gridHeight - 1).toDouble() : (rY * gridHeight).floorToDouble();
+
+    double rx = localGridX + 0.5;
+    double ry = localGridY + 0.5;
+
+    double cx = rx - gridWidth / 2.0;
+    double cy = ry - gridHeight / 2.0;
+
+    double rcx, rcy;
+    switch (rotation % 4) {
+      case 1:
+        rcx = -cy;
+        rcy = cx;
+        break;
+      case 2:
+        rcx = -cx;
+        rcy = -cy;
+        break;
+      case 3:
+        rcx = cy;
+        rcy = -cx;
+        break;
+      case 0:
+      default:
+        rcx = cx;
+        rcy = cy;
+        break;
+    }
+
+    double wx = gridX + rcx + gridWidth / 2.0;
+    double wy = gridY + rcy + gridHeight / 2.0;
+
+    return Offset(wx.floorToDouble(), wy.floorToDouble());
   }
 }
 

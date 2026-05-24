@@ -107,7 +107,7 @@ class CanvasEditorState extends State<CanvasEditor>
       for (final belt in _project.conveyors) {
         for (final port in [...pb.inputPorts, ...pb.outputPorts]) {
           final portWorld = port.worldPosition(
-              pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight);
+              pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
           final distStart = (belt.start - portWorld).distance;
           final distEnd = (belt.end - portWorld).distance;
           if (distStart < 30 || distEnd < 30) {
@@ -795,9 +795,12 @@ class _EditorPainter extends CustomPainter {
 
     // 获取当前正在绘制的新传送带的分叉点（用于旧道动态裁剪）
     // 使用 anchors.first（用户实际点击的位置），而非路径的 first
-    final Offset? startCell = conveyorForkCell;
+    // 如果当前路径有效，才需要对原传送带进行裁剪来建立连接。
+    // 如果新传送带路径无效，不应对旧传送带进行裁剪，以保持已有样式的完整性。
+    final Offset? startCell = conveyorPathInvalid ? null : conveyorForkCell;
 
     // 构建 fullPathContext（已确认段 + 实时段的完整路径）
+    // 不论路径有效还是无效都构建上下文，这样即使渲染红色错误预览时，转角处的纹理也能计算正确
     List<Offset>? fullPathContext;
     if (conveyorConfirmedPath.isNotEmpty && conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
       fullPathContext = [...conveyorConfirmedPath, ...conveyorPreviewPath!];
@@ -975,10 +978,13 @@ class _EditorPainter extends CustomPainter {
 
     // 实时段根据有效/无效状态分别渲染
     if (conveyorPathInvalid) {
-      // 无效状态：仅实时段标红
+      // 无效状态：仅实时段标红，但是同样传入 fullPathContext 使得转弯样式能与已确认段进行平滑衔接
       if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
         TransportBeltRenderer.renderPreviewPath(
-          canvas, conveyorPreviewPath!, cellSize, <String>{},
+          canvas,
+          conveyorPreviewPath!,
+          cellSize,
+          <String>{},
           isInvalid: true,
           fullPathContext: fullPathContext,
         );
@@ -987,11 +993,14 @@ class _EditorPainter extends CustomPainter {
       // 有效状态：实时段为蓝色预览
       if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
         TransportBeltRenderer.renderPreviewPath(
-          canvas, conveyorPreviewPath!, cellSize, <String>{},
+          canvas,
+          conveyorPreviewPath!,
+          cellSize,
+          <String>{},
           fullPathContext: fullPathContext,
         );
       } else if (conveyorMode && mouseGridPos != null && conveyorConfirmedPath.isEmpty) {
-        // 传送带模式下无锚点时，高亮鼠标下的网格
+        // 传送带处于尚未锚定的预备状态且当前空节点鼠标浮动时，高亮选中指示格
         TransportBeltRenderer.renderHoverHighlight(canvas, mouseGridPos!, cellSize);
       }
     }

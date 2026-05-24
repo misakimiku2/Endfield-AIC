@@ -273,10 +273,43 @@ class _SimWorker {
   }
 
   Offset _portWorldPosition(SimPortData port, SimBuildingData pb) {
-    return Offset(
-      (pb.gridX + port.relativeX * pb.gridWidth) * _cellSize,
-      (pb.gridY + port.relativeY * pb.gridHeight) * _cellSize,
-    );
+    double relativeX = port.relativeX;
+    double relativeY = port.relativeY;
+
+    double localGridX = (relativeX == 1.0) ? (pb.gridWidth - 1).toDouble() : (relativeX * pb.gridWidth).floorToDouble();
+    double localGridY = (relativeY == 1.0) ? (pb.gridHeight - 1).toDouble() : (relativeY * pb.gridHeight).floorToDouble();
+
+    double rx = localGridX + 0.5;
+    double ry = localGridY + 0.5;
+
+    double cx = rx - pb.gridWidth / 2.0;
+    double cy = ry - pb.gridHeight / 2.0;
+
+    double rcx, rcy;
+    switch (pb.rotation % 4) {
+      case 1:
+        rcx = -cy;
+        rcy = cx;
+        break;
+      case 2:
+        rcx = -cx;
+        rcy = -cy;
+        break;
+      case 3:
+        rcx = cy;
+        rcy = -cx;
+        break;
+      case 0:
+      default:
+        rcx = cx;
+        rcy = cy;
+        break;
+    }
+
+    double wx = pb.gridX + rcx + pb.gridWidth / 2.0;
+    double wy = pb.gridY + rcy + pb.gridHeight / 2.0;
+
+    return Offset(wx * _cellSize, wy * _cellSize);
   }
 
   Offset _beltStart(SimConveyorData belt) {
