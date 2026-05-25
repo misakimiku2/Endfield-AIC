@@ -315,10 +315,23 @@ class CanvasEditorState extends State<CanvasEditor>
 
     if ((newScale - oldScale).abs() < 0.0001) return;
 
+    // 将屏幕坐标转换到旋转前的空间（offset所在的空间）
+    final renderBox = context.findRenderObject() as RenderBox;
+    final size = renderBox.size;
+    final center = Offset(size.width / 2, size.height / 2);
+    final cosA = math.cos(_displayAngle);
+    final sinA = math.sin(_displayAngle);
+    var preRotationPos = Offset(localPos.dx - center.dx, localPos.dy - center.dy);
+    preRotationPos = Offset(
+      preRotationPos.dx * cosA + preRotationPos.dy * sinA,
+      -preRotationPos.dx * sinA + preRotationPos.dy * cosA,
+    );
+    preRotationPos = Offset(preRotationPos.dx + center.dx, preRotationPos.dy + center.dy);
+
     _targetOffsetX =
-        (localPos.dx + _targetOffsetX) * newScale / oldScale - localPos.dx;
+        (preRotationPos.dx + _targetOffsetX) * newScale / oldScale - preRotationPos.dx;
     _targetOffsetY =
-        (localPos.dy + _targetOffsetY) * newScale / oldScale - localPos.dy;
+        (preRotationPos.dy + _targetOffsetY) * newScale / oldScale - preRotationPos.dy;
     _targetScale = newScale;
 
     _startAnimation();
@@ -699,6 +712,7 @@ class CanvasEditorState extends State<CanvasEditor>
               conveyorPreviewOccupied: _beltCtrl.previewOccupied,
               conveyorPathInvalid: _beltCtrl.pathInvalid,
               conveyorForkCell: _beltCtrl.anchors.isNotEmpty ? _beltCtrl.anchors.first : null,
+              conveyorIncomingDirection: _beltCtrl.incomingDirection,
               displayScale: _displayScale,
               displayOffsetX: _displayOffsetX,
               displayOffsetY: _displayOffsetY,
@@ -734,6 +748,7 @@ class _EditorPainter extends CustomPainter {
   final Set<String>? conveyorPreviewOccupied;
   final bool conveyorPathInvalid;
   final Offset? conveyorForkCell;
+  final String? conveyorIncomingDirection;
   final double displayScale;
   final double displayOffsetX;
   final double displayOffsetY;
@@ -769,6 +784,7 @@ class _EditorPainter extends CustomPainter {
     this.conveyorPreviewOccupied,
     this.conveyorPathInvalid = false,
     this.conveyorForkCell,
+    this.conveyorIncomingDirection,
     required this.displayScale,
     required this.displayOffsetX,
     required this.displayOffsetY,
@@ -835,8 +851,8 @@ class _EditorPainter extends CustomPainter {
     for (final belt in project.conveyors) {
       // 动态裁剪：如果当前正在绘制且起点在旧传送带上，裁剪分叉点之前的部分
       List<Offset> renderPath = belt.path;
+      int forkIdx = -1;
       if (startCell != null) {
-        int forkIdx = -1;
         for (int i = 0; i < belt.path.length; i++) {
           if (belt.path[i].dx == startCell.dx && belt.path[i].dy == startCell.dy) {
             forkIdx = i;
@@ -858,11 +874,26 @@ class _EditorPainter extends CustomPainter {
       final item = dataLoader.getItem(belt.itemId);
       // 如果路径被裁剪，创建临时 ConveyorBelt 用于渲染
       if (!identical(renderPath, belt.path)) {
+        // 单格下游：从旧传送带推断原始方向
+        String? forcedDir;
+        // 下游首格的入方向：从分叉点指向下游首格
+        String? incomingDir;
+        if (forkIdx >= 0 && forkIdx + 1 < belt.path.length) {
+          final dx = belt.path[forkIdx + 1].dx - belt.path[forkIdx].dx;
+          final dy = belt.path[forkIdx + 1].dy - belt.path[forkIdx].dy;
+          if (dx > 0) { incomingDir = 'right'; }
+          else if (dx < 0) { incomingDir = 'left'; }
+          else if (dy > 0) { incomingDir = 'down'; }
+          else if (dy < 0) { incomingDir = 'up'; }
+          if (renderPath.length == 1) { forcedDir = incomingDir; }
+        }
         final clippedBelt = ConveyorBelt(
           id: belt.id,
           path: renderPath,
           itemId: belt.itemId,
           isBlocked: belt.isBlocked,
+          forcedDirection: forcedDir,
+          incomingDirection: incomingDir,
         );
         TransportBeltRenderer.renderConveyorPath(canvas, clippedBelt, item, cellSize, project.buildings, detailLevel: detailLevel);
       } else {
@@ -888,6 +919,7 @@ class _EditorPainter extends CustomPainter {
         project.buildings,
         fullPathContext: fullPathContext,
         contextStartIndex: confirmedStartIndex,
+        incomingDirection: conveyorIncomingDirection,
       );
     }
 
@@ -1248,6 +1280,7 @@ class _EditorPainter extends CustomPainter {
         conveyorMode != oldDelegate.conveyorMode ||
         conveyorPathInvalid != oldDelegate.conveyorPathInvalid ||
         conveyorForkCell != oldDelegate.conveyorForkCell ||
+        conveyorIncomingDirection != oldDelegate.conveyorIncomingDirection ||
         !_listEquals(conveyorConfirmedPath, oldDelegate.conveyorConfirmedPath) ||
         !_listEquals(conveyorPreviewPath, oldDelegate.conveyorPreviewPath) ||
         !_setEquals(conveyorPreviewOccupied, oldDelegate.conveyorPreviewOccupied) ||

@@ -158,6 +158,8 @@ class ConveyorBelt {
   List<Offset> particles;
   double flowProgress;
   bool isBlocked;
+  final String? forcedDirection;
+  final String? incomingDirection;
 
   ConveyorBelt({
     required this.id,
@@ -166,6 +168,8 @@ class ConveyorBelt {
     List<Offset>? particles,
     this.flowProgress = 0.0,
     this.isBlocked = false,
+    this.forcedDirection,
+    this.incomingDirection,
   }) : particles = particles ?? [];
 
   static const double _cellSize = 48.0;

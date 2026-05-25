@@ -145,6 +145,8 @@ class SimulationEngine extends ChangeNotifier {
         itemId: c.itemId,
         flowProgress: c.flowProgress,
         isBlocked: c.isBlocked,
+        forcedDirection: c.forcedDirection,
+        incomingDirection: c.incomingDirection,
       )).toList(),
       recipes: _dataLoader.recipes.values.map((r) => SimRecipeData(
         id: r.id,

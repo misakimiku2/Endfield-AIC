@@ -140,6 +140,8 @@ class SimConveyorData {
   final String itemId;
   final double flowProgress;
   final bool isBlocked;
+  final String? forcedDirection;
+  final String? incomingDirection;
 
   const SimConveyorData({
     required this.id,
@@ -147,6 +149,8 @@ class SimConveyorData {
     required this.itemId,
     this.flowProgress = 0.0,
     this.isBlocked = false,
+    this.forcedDirection,
+    this.incomingDirection,
   });
 
   Map<String, dynamic> toJson() => {
@@ -155,6 +159,8 @@ class SimConveyorData {
         'itemId': itemId,
         'flowProgress': flowProgress,
         'isBlocked': isBlocked,
+        'forcedDirection': forcedDirection,
+        'incomingDirection': incomingDirection,
       };
 
   factory SimConveyorData.fromJson(Map<String, dynamic> json) => SimConveyorData(
@@ -165,6 +171,8 @@ class SimConveyorData {
         itemId: json['itemId'] as String? ?? '',
         flowProgress: (json['flowProgress'] as num?)?.toDouble() ?? 0.0,
         isBlocked: json['isBlocked'] as bool? ?? false,
+        forcedDirection: json['forcedDirection'] as String?,
+        incomingDirection: json['incomingDirection'] as String?,
       );
 }
 

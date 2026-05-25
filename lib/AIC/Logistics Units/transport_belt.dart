@@ -26,6 +26,10 @@ class TransportBeltController {
   Offset? mouseGridPos;
   ConveyorBelt? _mergeTarget;
   String? _startingPortDirection;
+  String? _incomingDirection;
+
+  /// 当前创建中传送带首格的入方向（用于预览渲染转角）
+  String? get incomingDirection => _incomingDirection;
 
   // === 静态工具 ===
   static const double cellSize = 48.0;
@@ -41,6 +45,7 @@ class TransportBeltController {
     previewOccupied = null;
     _mergeTarget = null;
     _startingPortDirection = null;
+    _incomingDirection = null;
   }
 
   /// 返回 true 表示点击已被处理
@@ -78,17 +83,28 @@ class TransportBeltController {
   bool _handleFirstAnchor(Offset gridPos) {
     final belt = _findBeltAtCell(gridPos);
     if (belt != null) {
-      // 传送带截断点或绝对起点不能作为新创建传送带的起点（这会导致重叠冲突或流向矛盾）
       if (belt.path.isNotEmpty) {
         final firstCell = belt.path.first;
         if (firstCell.dx.toInt() == gridPos.dx.toInt() &&
             firstCell.dy.toInt() == gridPos.dy.toInt()) {
+          // 单格传送带：允许从该格开始创建，以其方向作为起始方向约束
+          if (belt.path.length == 1) {
+            final dir = belt.forcedDirection ?? 'right';
+            anchors.add(gridPos);
+            _startingPortDirection = dir;
+            _incomingDirection = belt.incomingDirection;
+            _updatePreview();
+            notifyListeners();
+            return true;
+          }
           return false;
         }
       }
       fullPath = _traceBeltToCell(belt, gridPos);
       anchors.add(gridPos);
       _startingPortDirection = null;
+      // 继承旧传送带首格的入方向，用于预览渲染转角
+      _incomingDirection = belt.incomingDirection;
       _updatePreview();
       notifyListeners();
       return true;
@@ -192,11 +208,26 @@ class TransportBeltController {
         fullPath.addAll(_mergeTarget!.path.sublist(1));
       }
 
+      // 查找 fullPath 首格来源的旧传送带，继承其 incomingDirection
+      String? newBeltIncomingDir;
+      if (fullPath.isNotEmpty) {
+        final firstCell = fullPath.first;
+        for (final oldBelt in project.conveyors) {
+          if (oldBelt.path.isNotEmpty &&
+              oldBelt.path.first.dx == firstCell.dx &&
+              oldBelt.path.first.dy == firstCell.dy) {
+            newBeltIncomingDir = oldBelt.incomingDirection;
+            break;
+          }
+        }
+      }
+
       final belt = ConveyorBelt(
         id: 'belt_${DateTime.now().millisecondsSinceEpoch}',
         path: List<Offset>.from(fullPath),
         itemId: '',
         isBlocked: false,
+        incomingDirection: newBeltIncomingDir,
       );
 
       // 检查新传送带的起点是否在某条旧传送带的节点上，进行截断与拆分
@@ -219,15 +250,37 @@ class TransportBeltController {
 
         if (forkIdx >= 0) {
           toRemove.add(oldBelt);
-          // 保留分叉点之后的下游部分
+          // 保留分叉点之后的下游部分（不含分叉点，分叉点归属新传送带）
           if (forkIdx + 1 < oldBelt.path.length) {
             final downstream = oldBelt.path.sublist(forkIdx + 1);
-            if (downstream.length >= 2) {
+            if (downstream.isNotEmpty) {
+              // 单格下游无法从路径邻居推断方向，从旧传送带记录原始方向
+              String? forcedDir;
+              if (downstream.length == 1 && forkIdx + 1 < oldBelt.path.length) {
+                final dx = oldBelt.path[forkIdx + 1].dx - oldBelt.path[forkIdx].dx;
+                final dy = oldBelt.path[forkIdx + 1].dy - oldBelt.path[forkIdx].dy;
+                if (dx > 0) { forcedDir = 'right'; }
+                else if (dx < 0) { forcedDir = 'left'; }
+                else if (dy > 0) { forcedDir = 'down'; }
+                else if (dy < 0) { forcedDir = 'up'; }
+              }
+              // 下游首格的入方向：从分叉点指向下游首格
+              String? incomingDir;
+              if (forkIdx >= 0) {
+                final dx = oldBelt.path[forkIdx + 1].dx - oldBelt.path[forkIdx].dx;
+                final dy = oldBelt.path[forkIdx + 1].dy - oldBelt.path[forkIdx].dy;
+                if (dx > 0) { incomingDir = 'right'; }
+                else if (dx < 0) { incomingDir = 'left'; }
+                else if (dy > 0) { incomingDir = 'down'; }
+                else if (dy < 0) { incomingDir = 'up'; }
+              }
               toAdd.add(ConveyorBelt(
                 id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${oldBelt.id}',
                 path: downstream,
                 itemId: oldBelt.itemId,
                 isBlocked: oldBelt.isBlocked,
+                forcedDirection: forcedDir,
+                incomingDirection: incomingDir,
               ));
             }
           }

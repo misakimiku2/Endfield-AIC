@@ -290,8 +290,26 @@ class TransportBeltRenderer {
   /// 判断格子是直线段还是转弯点
   /// 返回 (isTurn, incomingDir, outgoingDir, isCounterClockwise)
   static (bool, String, String, bool) _getCellTurnInfo(
-      List<Offset> path, int index) {
-    if (index == 0 || index == path.length - 1) {
+      List<Offset> path, int index, {String? incomingDirection}) {
+    if (index == 0) {
+      // 首格：如果有 incomingDirection，用它作为入方向
+      if (incomingDirection != null && index < path.length - 1) {
+        final nextDx = path[index + 1].dx - path[index].dx;
+        final nextDy = path[index + 1].dy - path[index].dy;
+        final outgoingDir = _offsetToDirection(nextDx, nextDy);
+        if (incomingDirection == outgoingDir) {
+          return (false, incomingDirection, outgoingDir, false);
+        }
+        final inIdx = _directionToIndex(incomingDirection);
+        final outIdx = _directionToIndex(outgoingDir);
+        final diff = (outIdx - inIdx + 4) % 4;
+        final isCCW = diff == 3;
+        return (true, incomingDirection, outgoingDir, isCCW);
+      }
+      final dir = _getCellDirection(path, index);
+      return (false, dir, dir, false);
+    }
+    if (index == path.length - 1) {
       final dir = _getCellDirection(path, index);
       return (false, dir, dir, false);
     }
@@ -325,14 +343,14 @@ class TransportBeltRenderer {
     List<PlacedBuilding> buildings, {
     int detailLevel = 2,
   }) {
-    if (belt.path.length < 2) return;
+    if (belt.path.isEmpty) return;
 
     if (isReady) {
-      _renderWithSvg(canvas, belt.path, cellSize, buildings);
+      _renderWithSvg(canvas, belt.path, cellSize, buildings, forcedDirection: belt.forcedDirection, incomingDirection: belt.incomingDirection);
     } else {
       for (int i = 0; i < belt.path.length; i++) {
         final cell = belt.path[i];
-        final direction = _getCellDirection(belt.path, i);
+        final direction = _getCellDirection(belt.path, i, forcedDirection: belt.forcedDirection);
         final cx = cell.dx * cellSize + cellSize / 2;
         final cy = cell.dy * cellSize + cellSize / 2;
         final localClip = getLocalClipRect(
@@ -375,6 +393,8 @@ class TransportBeltRenderer {
     List<PlacedBuilding> buildings, {
     List<Offset>? fullPathContext,
     int contextStartIndex = 0,
+    String? forcedDirection,
+    String? incomingDirection,
   }) {
     for (int i = 0; i < path.length; i++) {
       final cell = path[i];
@@ -397,9 +417,11 @@ class TransportBeltRenderer {
       }
 
       _drawSvgCellAtOrigin(
-        canvas, path, i, cellSize, 
+        canvas, path, i, cellSize,
         fullPathContext: fullPathContext,
         contextStartIndex: contextStartIndex,
+        forcedDirection: forcedDirection,
+        incomingDirection: incomingDirection,
       );
       canvas.restore();
     }
@@ -523,7 +545,8 @@ class TransportBeltRenderer {
     canvas.drawPath(path, paint);
   }
 
-  static String _getCellDirection(List<Offset> path, int index) {
+  static String _getCellDirection(List<Offset> path, int index, {String? forcedDirection}) {
+    if (forcedDirection != null && path.length == 1) return forcedDirection;
     if (index < path.length - 1) {
       final dx = path[index + 1].dx - path[index].dx;
       final dy = path[index + 1].dy - path[index].dy;
@@ -628,8 +651,18 @@ class TransportBeltRenderer {
   }
 
   /// 判断是否是转弯点
-  static bool _isTurn(List<Offset> path, int index) {
-    if (index == 0 || index == path.length - 1) return false;
+  static bool _isTurn(List<Offset> path, int index, {String? incomingDirection}) {
+    if (index == 0) {
+      // 首格：如果有 incomingDirection 且路径有后继，检查入方向与出方向是否不同
+      if (incomingDirection != null && index < path.length - 1) {
+        final nextDx = path[index + 1].dx - path[index].dx;
+        final nextDy = path[index + 1].dy - path[index].dy;
+        final outgoingDir = _offsetToDirection(nextDx, nextDy);
+        return incomingDirection != outgoingDir;
+      }
+      return false;
+    }
+    if (index == path.length - 1) return false;
     final prevDx = path[index].dx - path[index - 1].dx;
     final prevDy = path[index].dy - path[index - 1].dy;
     final nextDx = path[index + 1].dx - path[index].dx;
@@ -715,6 +748,8 @@ class TransportBeltRenderer {
     bool isOccupied = false,
     List<Offset>? fullPathContext,
     int contextStartIndex = 0,
+    String? forcedDirection,
+    String? incomingDirection,
   }) {
     // 确定用于转弯检测的路径 and 索引
     List<Offset> turnPath = path;
@@ -725,7 +760,7 @@ class TransportBeltRenderer {
       turnIndex = contextStartIndex + index;
     }
 
-    final turn = _isTurn(turnPath, turnIndex);
+    final turn = _isTurn(turnPath, turnIndex, incomingDirection: incomingDirection);
     final PictureInfo picture;
     if (isPreview) {
       if (isOccupied) {
@@ -742,7 +777,7 @@ class TransportBeltRenderer {
     final scaleY = cellSize / svgSize.height;
 
     final (isTurn, _, outgoingDir, isCCW) =
-        _getCellTurnInfo(turnPath, turnIndex);
+        _getCellTurnInfo(turnPath, turnIndex, incomingDirection: incomingDirection);
 
     if (isTurn) {
       double rotation;
@@ -766,7 +801,7 @@ class TransportBeltRenderer {
       canvas.translate(-svgSize.width / 2, -svgSize.height / 2);
       canvas.drawPicture(picture.picture);
     } else {
-      final direction = _getCellDirection(turnPath, turnIndex);
+      final direction = _getCellDirection(turnPath, turnIndex, forcedDirection: forcedDirection);
       final dirIdx = _directionToIndex(direction);
       final rotation = dirIdx * math.pi / 2;
 
@@ -873,18 +908,20 @@ class TransportBeltRenderer {
     List<PlacedBuilding> buildings, {
     List<Offset>? fullPathContext,
     int contextStartIndex = 0,
+    String? forcedDirection,
+    String? incomingDirection,
   }) {
-    if (path.length < 2) return;
+    if (path.isEmpty) return;
 
     if (isReady) {
       // 使用 SVG 渲染，通过 saveLayer 降低透明度
       canvas.saveLayer(null, Paint()..color = const Color(0xCCFFFFFF));
-      _renderWithSvg(canvas, path, cellSize, buildings, fullPathContext: fullPathContext, contextStartIndex: contextStartIndex);
+      _renderWithSvg(canvas, path, cellSize, buildings, fullPathContext: fullPathContext, contextStartIndex: contextStartIndex, forcedDirection: forcedDirection, incomingDirection: incomingDirection);
       canvas.restore();
     } else {
       for (int i = 0; i < path.length; i++) {
         final cell = path[i];
-        final direction = _getCellDirection(path, i);
+        final direction = _getCellDirection(path, i, forcedDirection: forcedDirection);
         final cx = cell.dx * cellSize + cellSize / 2;
         final cy = cell.dy * cellSize + cellSize / 2;
 

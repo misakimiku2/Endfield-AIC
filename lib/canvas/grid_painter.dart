@@ -52,22 +52,62 @@ class GridPainter extends CustomPainter {
       canvas.translate(-center.dx, -center.dy);
     }
 
-    // 旋转时扩大绘制范围，确保对角线方向的网格线不被裁剪
-    final double drawWidth;
-    final double drawHeight;
+    // 计算旋转后可见区域在旋转坐标系中的边界
+    // 旋转后，屏幕矩形在旋转坐标系中是一个旋转的矩形，需要计算其包围盒
+    final double visXMin;
+    final double visXMax;
+    final double visYMin;
+    final double visYMax;
+    final double lineExtent; // 网格线延伸长度，确保覆盖旋转后的可见区域
+
     if (rotation != 0) {
-      final diag = math.sqrt(size.width * size.width + size.height * size.height);
-      drawWidth = diag;
-      drawHeight = diag;
+      final cx = size.width / 2;
+      final cy = size.height / 2;
+      final cosR = math.cos(rotation);
+      final sinR = math.sin(rotation);
+
+      // 将屏幕四角逆旋转到旋转坐标系，求包围盒
+      final corners = [
+        Offset(0, 0),
+        Offset(size.width, 0),
+        Offset(size.width, size.height),
+        Offset(0, size.height),
+      ];
+
+      double minX = double.infinity, maxX = double.negativeInfinity;
+      double minY = double.infinity, maxY = double.negativeInfinity;
+
+      for (final corner in corners) {
+        final dx = corner.dx - cx;
+        final dy = corner.dy - cy;
+        final rx = dx * cosR + dy * sinR + cx;
+        final ry = -dx * sinR + dy * cosR + cy;
+        if (rx < minX) minX = rx;
+        if (rx > maxX) maxX = rx;
+        if (ry < minY) minY = ry;
+        if (ry > maxY) maxY = ry;
+      }
+
+      visXMin = minX;
+      visXMax = maxX;
+      visYMin = minY;
+      visYMax = maxY;
+      lineExtent = math.sqrt(size.width * size.width + size.height * size.height);
     } else {
-      drawWidth = size.width;
-      drawHeight = size.height;
+      visXMin = 0;
+      visXMax = size.width;
+      visYMin = 0;
+      visYMax = size.height;
+      lineExtent = 0; // 未旋转时不使用
     }
 
-    final startCol = (offsetX / scaledCellSize).floor() - 1;
-    final endCol = ((offsetX + drawWidth) / scaledCellSize).ceil() + 1;
-    final startRow = (offsetY / scaledCellSize).floor() - 1;
-    final endRow = ((offsetY + drawHeight) / scaledCellSize).ceil() + 1;
+    final startCol = ((visXMin + offsetX) / scaledCellSize).floor() - 1;
+    final endCol = ((visXMax + offsetX) / scaledCellSize).ceil() + 1;
+    final startRow = ((visYMin + offsetY) / scaledCellSize).floor() - 1;
+    final endRow = ((visYMax + offsetY) / scaledCellSize).ceil() + 1;
+
+    final double lineH = rotation != 0 ? lineExtent : size.height;
+    final double lineW = rotation != 0 ? lineExtent : size.width;
 
     for (int col = startCol; col <= endCol; col++) {
       final x = col * scaledCellSize - offsetX;
@@ -75,7 +115,7 @@ class GridPainter extends CustomPainter {
       final paint = Paint()
         ..color = isMajor ? majorGridColor : gridColor
         ..strokeWidth = isMajor ? 1.2 : 0.6;
-      canvas.drawLine(Offset(x, -drawHeight), Offset(x, drawHeight), paint);
+      canvas.drawLine(Offset(x, -lineH), Offset(x, lineH), paint);
     }
 
     for (int row = startRow; row <= endRow; row++) {
@@ -84,7 +124,7 @@ class GridPainter extends CustomPainter {
       final paint = Paint()
         ..color = isMajor ? majorGridColor : gridColor
         ..strokeWidth = isMajor ? 1.2 : 0.6;
-      canvas.drawLine(Offset(-drawWidth, y), Offset(drawWidth, y), paint);
+      canvas.drawLine(Offset(-lineW, y), Offset(lineW, y), paint);
     }
 
     if (rotation != 0) {
