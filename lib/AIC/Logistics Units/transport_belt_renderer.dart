@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../models/project.dart';
 import '../../models/item.dart';
+import '../../models/building.dart';
 
 class TransportBeltRenderer {
   static const double _cellMargin = 3.0;
@@ -31,6 +32,159 @@ class TransportBeltRenderer {
   static PictureInfo? _rotateRedPicture;
   static bool _initialized = false;
   static bool _initializing = false;
+
+  /// 检测是否是输出端口 (output)
+  static bool isOutputPort(Offset gridPos, List<PlacedBuilding> buildings) {
+    final gx = gridPos.dx.round();
+    final gy = gridPos.dy.round();
+    for (final pb in buildings) {
+      final rot = pb.rotation;
+      final gw = pb.building.gridWidth;
+      final gh = pb.building.gridHeight;
+      for (final port in pb.outputPorts) {
+        final portGrid = port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
+        if (portGrid.dx.round() == gx && portGrid.dy.round() == gy) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /// 检测是否是输入端口 (input)
+  static bool isInputPort(Offset gridPos, List<PlacedBuilding> buildings) {
+    final gx = gridPos.dx.round();
+    final gy = gridPos.dy.round();
+    for (final pb in buildings) {
+      final rot = pb.rotation;
+      final gw = pb.building.gridWidth;
+      final gh = pb.building.gridHeight;
+      for (final port in pb.inputPorts) {
+        final portGrid = port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
+        if (portGrid.dx.round() == gx && portGrid.dy.round() == gy) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /// 获取以单元格中心 (0,0) 为原点时的裁剪 Rect。
+  /// 如果不需要裁剪，返回 null。
+  static Rect? getLocalClipRect({
+    required List<Offset> path,
+    required int index,
+    required double cellSize,
+    required List<PlacedBuilding>? buildings,
+    List<Offset>? fullPathContext,
+    int contextStartIndex = 0,
+  }) {
+    if (buildings == null) return null;
+
+    // 确定当前这一格在传送带完整上下文中的位置和完整路径
+    List<Offset> actualPath = path;
+    int actualIndex = index;
+    if (fullPathContext != null) {
+      actualPath = fullPathContext;
+      actualIndex = contextStartIndex + index;
+    }
+
+    if (actualPath.isEmpty) return null;
+
+    final cell = actualPath[actualIndex];
+
+    // 情况 1：起点，且是 Output 端口
+    if (actualIndex == 0) {
+      if (isOutputPort(cell, buildings)) {
+        final dir = _getCellDirection(actualPath, actualIndex);
+        final half = cellSize / 2;
+        switch (dir) {
+          case 'right':
+            return Rect.fromLTRB(0, -half, half, half);
+          case 'left':
+            return Rect.fromLTRB(-half, -half, 0, half);
+          case 'down':
+            return Rect.fromLTRB(-half, 0, half, half);
+          case 'up':
+            return Rect.fromLTRB(-half, -half, half, 0);
+        }
+      }
+    }
+
+    // 情况 2：终点，且是 Input 端口
+    if (actualIndex == actualPath.length - 1) {
+      if (isInputPort(cell, buildings)) {
+        final dir = _getCellDirection(actualPath, actualIndex);
+        final half = cellSize / 2;
+        switch (dir) {
+          case 'right':
+            return Rect.fromLTRB(-half, -half, 0, half);
+          case 'left':
+            return Rect.fromLTRB(0, -half, half, half);
+          case 'down':
+            return Rect.fromLTRB(-half, -half, half, 0);
+          case 'up':
+            return Rect.fromLTRB(-half, 0, half, half);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /// 判断粒子是否需要过滤（在缩小的两个首位单元格里排除掉朝内部流动的半段）
+  static bool _shouldDiscardParticle(
+    Offset particlePos,
+    List<Offset> path,
+    double cellSize,
+    List<PlacedBuilding> buildings,
+  ) {
+    if (path.length < 2) return false;
+
+    // 1. 判断是否在第一格 (起点/输出端)
+    final firstCell = path.first;
+    final fcx = firstCell.dx * cellSize + cellSize / 2;
+    final fcy = firstCell.dy * cellSize + cellSize / 2;
+    if ((particlePos.dx - fcx).abs() <= cellSize / 2 &&
+        (particlePos.dy - fcy).abs() <= cellSize / 2) {
+      if (isOutputPort(firstCell, buildings)) {
+        final dir = _getCellDirection(path, 0);
+        switch (dir) {
+          case 'right':
+            return particlePos.dx < fcx;
+          case 'left':
+            return particlePos.dx > fcx;
+          case 'down':
+            return particlePos.dy < fcy;
+          case 'up':
+            return particlePos.dy > fcy;
+        }
+      }
+    }
+
+    // 2. 判断是否在最后一格 (终点/输入端)
+    final lastCell = path.last;
+    final lcx = lastCell.dx * cellSize + cellSize / 2;
+    final lcy = lastCell.dy * cellSize + cellSize / 2;
+    if ((particlePos.dx - lcx).abs() <= cellSize / 2 &&
+        (particlePos.dy - lcy).abs() <= cellSize / 2) {
+      if (isInputPort(lastCell, buildings)) {
+        final dir = _getCellDirection(path, path.length - 1);
+        switch (dir) {
+          case 'right':
+            return particlePos.dx > lcx;
+          case 'left':
+            return particlePos.dx < lcx;
+          case 'down':
+            return particlePos.dy > lcy;
+          case 'up':
+            return particlePos.dy < lcy;
+        }
+      }
+    }
+
+    return false;
+  }
 
   /// 预加载传送带 SVG 资源并生成预览资源
   static Future<void> init() async {
@@ -167,26 +321,45 @@ class TransportBeltRenderer {
     Canvas canvas,
     ConveyorBelt belt,
     Item? item,
-    double cellSize, {
+    double cellSize,
+    List<PlacedBuilding> buildings, {
     int detailLevel = 2,
   }) {
     if (belt.path.length < 2) return;
 
     if (isReady) {
-      _renderWithSvg(canvas, belt.path, cellSize);
+      _renderWithSvg(canvas, belt.path, cellSize, buildings);
     } else {
       for (int i = 0; i < belt.path.length; i++) {
         final cell = belt.path[i];
         final direction = _getCellDirection(belt.path, i);
-        _drawConveyorCell(canvas, cell, direction, cellSize, _beltColor,
-            _beltHighlight, _arrowColor,
-            detailLevel: detailLevel);
+        final cx = cell.dx * cellSize + cellSize / 2;
+        final cy = cell.dy * cellSize + cellSize / 2;
+        final localClip = getLocalClipRect(
+          path: belt.path,
+          index: i,
+          cellSize: cellSize,
+          buildings: buildings,
+        );
+
+        if (localClip != null) {
+          canvas.save();
+          canvas.clipRect(localClip.shift(Offset(cx, cy)));
+          _drawConveyorCell(canvas, cell, direction, cellSize, _beltColor,
+              _beltHighlight, _arrowColor,
+              detailLevel: detailLevel);
+          canvas.restore();
+        } else {
+          _drawConveyorCell(canvas, cell, direction, cellSize, _beltColor,
+              _beltHighlight, _arrowColor,
+              detailLevel: detailLevel);
+        }
       }
     }
 
     // LOD 2: 粒子动画
     if (detailLevel >= 2 && item != null && !belt.isBlocked) {
-      _renderParticles(canvas, belt, item, cellSize);
+      _renderParticles(canvas, belt, item, cellSize, buildings);
     }
 
     if (belt.isBlocked && belt.path.isNotEmpty) {
@@ -198,7 +371,8 @@ class TransportBeltRenderer {
   static void _renderWithSvg(
     Canvas canvas,
     List<Offset> path,
-    double cellSize, {
+    double cellSize,
+    List<PlacedBuilding> buildings, {
     List<Offset>? fullPathContext,
     int contextStartIndex = 0,
   }) {
@@ -209,6 +383,19 @@ class TransportBeltRenderer {
 
       canvas.save();
       canvas.translate(cx, cy);
+
+      final clip = getLocalClipRect(
+        path: path,
+        index: i,
+        cellSize: cellSize,
+        buildings: buildings,
+        fullPathContext: fullPathContext,
+        contextStartIndex: contextStartIndex,
+      );
+      if (clip != null) {
+        canvas.clipRect(clip);
+      }
+
       _drawSvgCellAtOrigin(
         canvas, path, i, cellSize, 
         fullPathContext: fullPathContext,
@@ -361,6 +548,7 @@ class TransportBeltRenderer {
     ConveyorBelt belt,
     Item item,
     double cellSize,
+    List<PlacedBuilding> buildings,
   ) {
     final totalLength = belt.length;
     if (totalLength <= 0) return;
@@ -372,6 +560,9 @@ class TransportBeltRenderer {
     for (int i = 0; i < particleCount; i++) {
       final distance = (i * _particleSpacing + flowOffset) % totalLength;
       final pos = _getPositionAlongPath(belt.path, distance, cellSize);
+      if (_shouldDiscardParticle(pos, belt.path, cellSize, buildings)) {
+        continue;
+      }
       canvas.drawCircle(pos, _particleSize, particlePaint);
     }
   }
@@ -421,7 +612,8 @@ class TransportBeltRenderer {
     Canvas canvas,
     List<Offset> path,
     double cellSize,
-    Set<String> occupiedKeys, {
+    Set<String> occupiedKeys,
+    List<PlacedBuilding> buildings, {
     bool isInvalid = false,
     List<Offset>? fullPathContext,
     int contextStartIndex = 0,
@@ -429,9 +621,9 @@ class TransportBeltRenderer {
     if (path.isEmpty) return;
 
     if (isReady) {
-      _renderPreviewWithSvg(canvas, path, cellSize, occupiedKeys, isInvalid: isInvalid, fullPathContext: fullPathContext, contextStartIndex: contextStartIndex);
+      _renderPreviewWithSvg(canvas, path, cellSize, occupiedKeys, buildings, isInvalid: isInvalid, fullPathContext: fullPathContext, contextStartIndex: contextStartIndex);
     } else {
-      _renderPreviewLegacy(canvas, path, cellSize, occupiedKeys, isInvalid: isInvalid);
+      _renderPreviewLegacy(canvas, path, cellSize, occupiedKeys, buildings, isInvalid: isInvalid);
     }
   }
 
@@ -465,7 +657,8 @@ class TransportBeltRenderer {
     Canvas canvas,
     List<Offset> path,
     double cellSize,
-    Set<String> occupiedKeys, {
+    Set<String> occupiedKeys,
+    List<PlacedBuilding> buildings, {
     bool isInvalid = false,
     List<Offset>? fullPathContext,
     int contextStartIndex = 0,
@@ -483,6 +676,19 @@ class TransportBeltRenderer {
 
       // 预览时应用 60% 透明度 (0x99FFFFFF)
       canvas.saveLayer(null, Paint()..color = const Color(0x99FFFFFF));
+
+      final clip = getLocalClipRect(
+        path: path,
+        index: i,
+        cellSize: cellSize,
+        buildings: buildings,
+        fullPathContext: fullPathContext,
+        contextStartIndex: contextStartIndex,
+      );
+      if (clip != null) {
+        canvas.clipRect(clip);
+      }
+
       _drawSvgCellAtOrigin(
         canvas,
         path,
@@ -510,7 +716,7 @@ class TransportBeltRenderer {
     List<Offset>? fullPathContext,
     int contextStartIndex = 0,
   }) {
-    // 确定用于转弯检测的路径和索引
+    // 确定用于转弯检测的路径 and 索引
     List<Offset> turnPath = path;
     int turnIndex = index;
 
@@ -576,13 +782,17 @@ class TransportBeltRenderer {
     Canvas canvas,
     List<Offset> path,
     double cellSize,
-    Set<String> occupiedKeys, {
+    Set<String> occupiedKeys,
+    List<PlacedBuilding> buildings, {
     bool isInvalid = false,
   }) {
     for (int i = 0; i < path.length; i++) {
       final cell = path[i];
       final key = '${cell.dx.toInt()}_${cell.dy.toInt()}';
       final isOccupied = isInvalid || occupiedKeys.contains(key);
+
+      final cx = cell.dx * cellSize + cellSize / 2;
+      final cy = cell.dy * cellSize + cellSize / 2;
 
       final x = cell.dx * cellSize + _cellMargin;
       final y = cell.dy * cellSize + _cellMargin;
@@ -594,17 +804,42 @@ class TransportBeltRenderer {
         const Radius.circular(3.0),
       );
 
-      canvas.drawRRect(rect, Paint()..color = isOccupied ? _previewOccupiedFill : _previewFillColor);
-      canvas.drawRRect(
-          rect,
-          Paint()
-            ..color = isOccupied ? _previewOccupiedBorder : _previewBorderColor
-            ..strokeWidth = 1.0
-            ..style = PaintingStyle.stroke);
+      final localClip = getLocalClipRect(
+        path: path,
+        index: i,
+        cellSize: cellSize,
+        buildings: buildings,
+      );
 
-      if (path.length >= 2 && !isOccupied) {
-        final direction = _getCellDirection(path, i);
-        _drawArrow(canvas, cell, direction, cellSize, _previewArrowColor);
+      if (localClip != null) {
+        canvas.save();
+        canvas.clipRect(localClip.shift(Offset(cx, cy)));
+        canvas.drawRRect(rect, Paint()..color = isOccupied ? _previewOccupiedFill : _previewFillColor);
+        canvas.drawRRect(
+            rect,
+            Paint()
+              ..color = isOccupied ? _previewOccupiedBorder : _previewBorderColor
+              ..strokeWidth = 1.0
+              ..style = PaintingStyle.stroke);
+
+        if (path.length >= 2 && !isOccupied) {
+          final direction = _getCellDirection(path, i);
+          _drawArrow(canvas, cell, direction, cellSize, _previewArrowColor);
+        }
+        canvas.restore();
+      } else {
+        canvas.drawRRect(rect, Paint()..color = isOccupied ? _previewOccupiedFill : _previewFillColor);
+        canvas.drawRRect(
+            rect,
+            Paint()
+              ..color = isOccupied ? _previewOccupiedBorder : _previewBorderColor
+              ..strokeWidth = 1.0
+              ..style = PaintingStyle.stroke);
+
+        if (path.length >= 2 && !isOccupied) {
+          final direction = _getCellDirection(path, i);
+          _drawArrow(canvas, cell, direction, cellSize, _previewArrowColor);
+        }
       }
     }
   }
@@ -634,7 +869,8 @@ class TransportBeltRenderer {
   static void renderConfirmedPreviewPath(
     Canvas canvas,
     List<Offset> path,
-    double cellSize, {
+    double cellSize,
+    List<PlacedBuilding> buildings, {
     List<Offset>? fullPathContext,
     int contextStartIndex = 0,
   }) {
@@ -643,15 +879,38 @@ class TransportBeltRenderer {
     if (isReady) {
       // 使用 SVG 渲染，通过 saveLayer 降低透明度
       canvas.saveLayer(null, Paint()..color = const Color(0xCCFFFFFF));
-      _renderWithSvg(canvas, path, cellSize, fullPathContext: fullPathContext, contextStartIndex: contextStartIndex);
+      _renderWithSvg(canvas, path, cellSize, buildings, fullPathContext: fullPathContext, contextStartIndex: contextStartIndex);
       canvas.restore();
     } else {
       for (int i = 0; i < path.length; i++) {
+        final cell = path[i];
         final direction = _getCellDirection(path, i);
-        _drawConveyorCell(
-          canvas, path[i], direction, cellSize,
-          _confirmedFillColor, _confirmedLineColor, _confirmedArrowColor,
+        final cx = cell.dx * cellSize + cellSize / 2;
+        final cy = cell.dy * cellSize + cellSize / 2;
+
+        final localClip = getLocalClipRect(
+          path: path,
+          index: i,
+          cellSize: cellSize,
+          buildings: buildings,
+          fullPathContext: fullPathContext,
+          contextStartIndex: contextStartIndex,
         );
+
+        if (localClip != null) {
+          canvas.save();
+          canvas.clipRect(localClip.shift(Offset(cx, cy)));
+          _drawConveyorCell(
+            canvas, path[i], direction, cellSize,
+            _confirmedFillColor, _confirmedLineColor, _confirmedArrowColor,
+          );
+          canvas.restore();
+        } else {
+          _drawConveyorCell(
+            canvas, path[i], direction, cellSize,
+            _confirmedFillColor, _confirmedLineColor, _confirmedArrowColor,
+          );
+        }
       }
     }
   }

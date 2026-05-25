@@ -98,21 +98,29 @@ class RefiningUnitRenderer {
   static bool _initialized = false;
   static bool _initializing = false;
 
+  static String? _baseSvgStr;
+  static final Map<String, PictureInfo> _svgCache = {};
+  static VoidCallback? _onReadyCallback;
+
   /// 预加载精炼炉 SVG 资源
   /// [onReady] 加载完成后的回调，用于通知外部刷新缓存和重绘
   static Future<void> init({VoidCallback? onReady}) async {
+    _onReadyCallback = onReady;
     if (_initialized || _initializing) return;
     _initializing = true;
 
     try {
       // 1. 加载原始 SVG 字符串
-      final svgStr = await rootBundle.loadString('assets/svg/Refining_Unit.svg');
+      _baseSvgStr = await rootBundle.loadString('assets/svg/Refining_Unit.svg');
 
-      // 2. 清理 Inkscape 不兼容元素
-      final cleanedSvg = _cleanInkscapeSvg(svgStr);
+      // 2. 清理 Inkscape 并预载全 0 的原始图
+      final defaultKey = '00000000';
+      final defaultSvg = _generateModifiedSvg(_baseSvgStr!, defaultKey);
+      final cleanedSvg = _cleanInkscapeSvg(defaultSvg);
 
-      // 3. 解析为 PictureInfo
+      // 3. 解析为 PictureInfo 并放到默认里
       _svgPicture = await vg.loadPicture(SvgStringLoader(cleanedSvg), null);
+      _svgCache[defaultKey] = _svgPicture!;
       _initialized = true;
 
       // 4. 通知外部刷新
@@ -184,9 +192,9 @@ class RefiningUnitRenderer {
     canvas.rotate(rotation * math.pi / 2);
     canvas.translate(-w / 2, -h / 2);
 
-    // 1. 绘制设备主体
+    // 1. 绘制设备主体 (通过带有特定高亮端口状态的动态 SVG)
     if (isReady) {
-      _drawSvgBody(canvas, w, h);
+      _drawSvgBody(canvas, w, h, portConnections: portConnections);
     } else {
       _drawBodyFallback(canvas, w, h);
     }
@@ -236,7 +244,7 @@ class RefiningUnitRenderer {
       canvas.save();
       canvas.translate(w / 2, h / 2);
       canvas.translate(-w / 2, -h / 2);
-      _drawSvgBody(canvas, w, h, opacity: opacity * 0.5);
+      _drawSvgBody(canvas, w, h, opacity: opacity * 0.5, portConnections: null);
       canvas.restore();
     } else {
       final paint = Paint()
@@ -254,9 +262,113 @@ class RefiningUnitRenderer {
     canvas.restore();
   }
 
+  static String _getConnectionKey(Map<String, bool>? portConnections) {
+    if (portConnections == null) return '00000000';
+    final sb = StringBuffer();
+    sb.write(portConnections['output_0'] == true ? '1' : '0');
+    sb.write(portConnections['output_1'] == true ? '1' : '0');
+    sb.write(portConnections['output_2'] == true ? '1' : '0');
+    sb.write(portConnections['output_3'] == true ? '1' : '0');
+    sb.write(portConnections['input_0'] == true ? '1' : '0');
+    sb.write(portConnections['input_1'] == true ? '1' : '0');
+    sb.write(portConnections['input_2'] == true ? '1' : '0');
+    sb.write(portConnections['input_3'] == true ? '1' : '0');
+    return sb.toString();
+  }
+
+  static void _preloadSvgForState(String key) async {
+    if (_baseSvgStr == null) return;
+    // 使用默认图占个位，防止重复预载
+    _svgCache[key] = _svgPicture!;
+
+    try {
+      final modifiedSvg = _generateModifiedSvg(_baseSvgStr!, key);
+      final cleanedSvg = _cleanInkscapeSvg(modifiedSvg);
+      final PictureInfo picture = await vg.loadPicture(SvgStringLoader(cleanedSvg), null);
+      _svgCache[key] = picture;
+      _onReadyCallback?.call();
+    } catch (e) {
+      debugPrint('Failed to load modified SVG for state $key: $e');
+      _svgCache.remove(key);
+    }
+  }
+
+  static String _generateModifiedSvg(String baseSvg, String key) {
+    var svgText = baseSvg;
+
+    // 1. output_0 (顶左): rect9 (#cbc9c9), rect68 (#e0dede)
+    final out0ColorBg = (key[0] == '1') ? '#ffef00' : '#cbc9c9';
+    final out0ColorFg = (key[0] == '1') ? '#ffef00' : '#e0dede';
+    svgText = _setElementColor(svgText, 'rect9', '#cbc9c9', out0ColorBg);
+    svgText = _setElementColor(svgText, 'rect68', '#e0dede', out0ColorFg);
+
+    // 2. output_1 (顶中): rect11 (#cbc9c9), rect66 (#e0dede)
+    final out1ColorBg = (key[1] == '1') ? '#ffef00' : '#cbc9c9';
+    final out1ColorFg = (key[1] == '1') ? '#ffef00' : '#e0dede';
+    svgText = _setElementColor(svgText, 'rect11', '#cbc9c9', out1ColorBg);
+    svgText = _setElementColor(svgText, 'rect66', '#e0dede', out1ColorFg);
+
+    // 3. output_2 (顶右): rect7 (#cbc9c9), rect70 (#e0dede)
+    final out2ColorBg = (key[2] == '1') ? '#ffef00' : '#cbc9c9';
+    final out2ColorFg = (key[2] == '1') ? '#ffef00' : '#e0dede';
+    svgText = _setElementColor(svgText, 'rect7', '#cbc9c9', out2ColorBg);
+    svgText = _setElementColor(svgText, 'rect70', '#e0dede', out2ColorFg);
+
+    // 4. output_3 (液体右): path79 (#ffffff)
+    final out3ColorBg = (key[3] == '1') ? '#ffef00' : '#ffffff';
+    svgText = _setElementColor(svgText, 'path79', '#ffffff', out3ColorBg);
+
+    // 5. input_0 (底左): rect1 (#cbc9c9), rect61 (#e0dede)
+    final in0ColorBg = (key[4] == '1') ? '#ffef00' : '#cbc9c9';
+    final in0ColorFg = (key[4] == '1') ? '#ffef00' : '#e0dede';
+    svgText = _setElementColor(svgText, 'rect1', '#cbc9c9', in0ColorBg);
+    svgText = _setElementColor(svgText, 'rect61', '#e0dede', in0ColorFg);
+
+    // 6. input_1 (底中): rect3 (#cbc9c9), rect59 (#e0dede)
+    final in1ColorBg = (key[5] == '1') ? '#ffef00' : '#cbc9c9';
+    final in1ColorFg = (key[5] == '1') ? '#ffef00' : '#e0dede';
+    svgText = _setElementColor(svgText, 'rect3', '#cbc9c9', in1ColorBg);
+    svgText = _setElementColor(svgText, 'rect59', '#e0dede', in1ColorFg);
+
+    // 7. input_2 (底右): rect5 (#cbc9c9), rect63 (#e0dede)
+    final in2ColorBg = (key[6] == '1') ? '#ffef00' : '#cbc9c9';
+    final in2ColorFg = (key[6] == '1') ? '#ffef00' : '#e0dede';
+    svgText = _setElementColor(svgText, 'rect5', '#cbc9c9', in2ColorBg);
+    svgText = _setElementColor(svgText, 'rect63', '#e0dede', in2ColorFg);
+
+    // 8. input_3 (液体左): circle73 (#ffef00)
+    final in3ColorBg = (key[7] == '1') ? '#ffef00' : '#ffef00';
+    svgText = _setElementColor(svgText, 'circle73', '#ffef00', in3ColorBg);
+
+    return svgText;
+  }
+
+  static String _setElementColor(String svg, String elementId, String oldColor, String newColor) {
+    final regExp = RegExp(
+      '(<[a-zA-Z0-9_-]+[^>]*?id="$elementId"[^>]*?>)',
+      multiLine: true,
+      dotAll: true,
+    );
+
+    return svg.replaceAllMapped(regExp, (match) {
+      final tag = match.group(1)!;
+      return tag
+          .replaceAll(oldColor.toLowerCase(), newColor)
+          .replaceAll(oldColor.toUpperCase(), newColor);
+    });
+  }
+
   /// 使用 SVG 绘制精炼炉主体
-  static void _drawSvgBody(Canvas canvas, double w, double h, {double opacity = 1.0}) {
-    final picture = _svgPicture!;
+  static void _drawSvgBody(Canvas canvas, double w, double h, {double opacity = 1.0, Map<String, bool>? portConnections}) {
+    final key = _getConnectionKey(portConnections);
+    var picture = _svgCache[key];
+
+    if (picture == null) {
+      _preloadSvgForState(key);
+      picture = _svgPicture; // 临时退回到默认原始状态
+    }
+
+    if (picture == null) return;
     final svgSize = picture.size;
 
     canvas.save();

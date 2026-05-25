@@ -849,9 +849,9 @@ class _EditorPainter extends CustomPainter {
           itemId: belt.itemId,
           isBlocked: belt.isBlocked,
         );
-        TransportBeltRenderer.renderConveyorPath(canvas, clippedBelt, item, cellSize, detailLevel: detailLevel);
+        TransportBeltRenderer.renderConveyorPath(canvas, clippedBelt, item, cellSize, project.buildings, detailLevel: detailLevel);
       } else {
-        TransportBeltRenderer.renderConveyorPath(canvas, belt, item, cellSize, detailLevel: detailLevel);
+        TransportBeltRenderer.renderConveyorPath(canvas, belt, item, cellSize, project.buildings, detailLevel: detailLevel);
       }
     }
 
@@ -976,6 +976,7 @@ class _EditorPainter extends CustomPainter {
     if (conveyorConfirmedPath.isNotEmpty) {
       TransportBeltRenderer.renderConfirmedPreviewPath(
         canvas, conveyorConfirmedPath, cellSize,
+        project.buildings,
         fullPathContext: fullPathContext,
         contextStartIndex: confirmedStartIndex,
       );
@@ -990,6 +991,7 @@ class _EditorPainter extends CustomPainter {
           conveyorPreviewPath!,
           cellSize,
           <String>{},
+          project.buildings,
           isInvalid: true,
           fullPathContext: fullPathContext,
           contextStartIndex: previewStartIndex,
@@ -1003,6 +1005,7 @@ class _EditorPainter extends CustomPainter {
           conveyorPreviewPath!,
           cellSize,
           <String>{},
+          project.buildings,
           fullPathContext: fullPathContext,
           contextStartIndex: previewStartIndex,
         );
