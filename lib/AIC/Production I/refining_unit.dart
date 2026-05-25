@@ -179,7 +179,7 @@ class RefiningUnitRenderer {
     Recipe? activeRecipe,
     bool isBlocked = false,
     double productionProgress = 0.0,
-    Map<String, bool>? portConnections,
+    Map<String, int>? portConnections,
     int detailLevel = 2,
   }) {
     final x = gridX * cellSize;
@@ -262,17 +262,17 @@ class RefiningUnitRenderer {
     canvas.restore();
   }
 
-  static String _getConnectionKey(Map<String, bool>? portConnections) {
+  static String _getConnectionKey(Map<String, int>? portConnections) {
     if (portConnections == null) return '00000000';
     final sb = StringBuffer();
-    sb.write(portConnections['output_0'] == true ? '1' : '0');
-    sb.write(portConnections['output_1'] == true ? '1' : '0');
-    sb.write(portConnections['output_2'] == true ? '1' : '0');
-    sb.write(portConnections['output_3'] == true ? '1' : '0');
-    sb.write(portConnections['input_0'] == true ? '1' : '0');
-    sb.write(portConnections['input_1'] == true ? '1' : '0');
-    sb.write(portConnections['input_2'] == true ? '1' : '0');
-    sb.write(portConnections['input_3'] == true ? '1' : '0');
+    sb.write(portConnections['output_0']?.toString() ?? '0');
+    sb.write(portConnections['output_1']?.toString() ?? '0');
+    sb.write(portConnections['output_2']?.toString() ?? '0');
+    sb.write(portConnections['output_3']?.toString() ?? '0');
+    sb.write(portConnections['input_0']?.toString() ?? '0');
+    sb.write(portConnections['input_1']?.toString() ?? '0');
+    sb.write(portConnections['input_2']?.toString() ?? '0');
+    sb.write(portConnections['input_3']?.toString() ?? '0');
     return sb.toString();
   }
 
@@ -297,47 +297,47 @@ class RefiningUnitRenderer {
     var svgText = baseSvg;
 
     // 1. output_0 (顶左): rect9 (#cbc9c9), rect68 (#e0dede)
-    final out0ColorBg = (key[0] == '1') ? '#ffef00' : '#cbc9c9';
-    final out0ColorFg = (key[0] == '1') ? '#ffef00' : '#e0dede';
+    final out0ColorBg = (key[0] == '1') ? '#ffef00' : ((key[0] == '2') ? '#44aaff' : '#cbc9c9');
+    final out0ColorFg = (key[0] == '1') ? '#ffef00' : ((key[0] == '2') ? '#44aaff' : '#e0dede');
     svgText = _setElementColor(svgText, 'rect9', '#cbc9c9', out0ColorBg);
     svgText = _setElementColor(svgText, 'rect68', '#e0dede', out0ColorFg);
 
     // 2. output_1 (顶中): rect11 (#cbc9c9), rect66 (#e0dede)
-    final out1ColorBg = (key[1] == '1') ? '#ffef00' : '#cbc9c9';
-    final out1ColorFg = (key[1] == '1') ? '#ffef00' : '#e0dede';
+    final out1ColorBg = (key[1] == '1') ? '#ffef00' : ((key[1] == '2') ? '#44aaff' : '#cbc9c9');
+    final out1ColorFg = (key[1] == '1') ? '#ffef00' : ((key[1] == '2') ? '#44aaff' : '#e0dede');
     svgText = _setElementColor(svgText, 'rect11', '#cbc9c9', out1ColorBg);
     svgText = _setElementColor(svgText, 'rect66', '#e0dede', out1ColorFg);
 
     // 3. output_2 (顶右): rect7 (#cbc9c9), rect70 (#e0dede)
-    final out2ColorBg = (key[2] == '1') ? '#ffef00' : '#cbc9c9';
-    final out2ColorFg = (key[2] == '1') ? '#ffef00' : '#e0dede';
+    final out2ColorBg = (key[2] == '1') ? '#ffef00' : ((key[2] == '2') ? '#44aaff' : '#cbc9c9');
+    final out2ColorFg = (key[2] == '1') ? '#ffef00' : ((key[2] == '2') ? '#44aaff' : '#e0dede');
     svgText = _setElementColor(svgText, 'rect7', '#cbc9c9', out2ColorBg);
     svgText = _setElementColor(svgText, 'rect70', '#e0dede', out2ColorFg);
 
     // 4. output_3 (液体右): path79 (#ffffff)
-    final out3ColorBg = (key[3] == '1') ? '#ffef00' : '#ffffff';
+    final out3ColorBg = (key[3] == '1') ? '#ffef00' : ((key[3] == '2') ? '#44aaff' : '#ffffff');
     svgText = _setElementColor(svgText, 'path79', '#ffffff', out3ColorBg);
 
     // 5. input_0 (底左): rect1 (#cbc9c9), rect61 (#e0dede)
-    final in0ColorBg = (key[4] == '1') ? '#ffef00' : '#cbc9c9';
-    final in0ColorFg = (key[4] == '1') ? '#ffef00' : '#e0dede';
+    final in0ColorBg = (key[4] == '1') ? '#ffef00' : ((key[4] == '2') ? '#44aaff' : '#cbc9c9');
+    final in0ColorFg = (key[4] == '1') ? '#ffef00' : ((key[4] == '2') ? '#44aaff' : '#e0dede');
     svgText = _setElementColor(svgText, 'rect1', '#cbc9c9', in0ColorBg);
     svgText = _setElementColor(svgText, 'rect61', '#e0dede', in0ColorFg);
 
     // 6. input_1 (底中): rect3 (#cbc9c9), rect59 (#e0dede)
-    final in1ColorBg = (key[5] == '1') ? '#ffef00' : '#cbc9c9';
-    final in1ColorFg = (key[5] == '1') ? '#ffef00' : '#e0dede';
+    final in1ColorBg = (key[5] == '1') ? '#ffef00' : ((key[5] == '2') ? '#44aaff' : '#cbc9c9');
+    final in1ColorFg = (key[5] == '1') ? '#ffef00' : ((key[5] == '2') ? '#44aaff' : '#e0dede');
     svgText = _setElementColor(svgText, 'rect3', '#cbc9c9', in1ColorBg);
     svgText = _setElementColor(svgText, 'rect59', '#e0dede', in1ColorFg);
 
     // 7. input_2 (底右): rect5 (#cbc9c9), rect63 (#e0dede)
-    final in2ColorBg = (key[6] == '1') ? '#ffef00' : '#cbc9c9';
-    final in2ColorFg = (key[6] == '1') ? '#ffef00' : '#e0dede';
+    final in2ColorBg = (key[6] == '1') ? '#ffef00' : ((key[6] == '2') ? '#44aaff' : '#cbc9c9');
+    final in2ColorFg = (key[6] == '1') ? '#ffef00' : ((key[6] == '2') ? '#44aaff' : '#e0dede');
     svgText = _setElementColor(svgText, 'rect5', '#cbc9c9', in2ColorBg);
     svgText = _setElementColor(svgText, 'rect63', '#e0dede', in2ColorFg);
 
     // 8. input_3 (液体左): circle73 (#ffef00)
-    final in3ColorBg = (key[7] == '1') ? '#ffef00' : '#ffef00';
+    final in3ColorBg = (key[7] == '2') ? '#44aaff' : '#ffef00';
     svgText = _setElementColor(svgText, 'circle73', '#ffef00', in3ColorBg);
 
     return svgText;
@@ -359,7 +359,7 @@ class RefiningUnitRenderer {
   }
 
   /// 使用 SVG 绘制精炼炉主体
-  static void _drawSvgBody(Canvas canvas, double w, double h, {double opacity = 1.0, Map<String, bool>? portConnections}) {
+  static void _drawSvgBody(Canvas canvas, double w, double h, {double opacity = 1.0, Map<String, int>? portConnections}) {
     final key = _getConnectionKey(portConnections);
     var picture = _svgCache[key];
 

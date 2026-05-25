@@ -87,7 +87,7 @@ class DepotAccessRenderer {
     Recipe? activeRecipe,
     bool isBlocked = false,
     double productionProgress = 0.0,
-    Map<String, bool>? portConnections,
+    Map<String, int>? portConnections,
     int detailLevel = 2,
   }) {
     final x = gridX * cellSize;
@@ -239,7 +239,7 @@ class DepotAccessRenderer {
     Canvas canvas,
     Building building,
     double cellSize,
-    Map<String, bool>? portConnections, {
+    Map<String, int>? portConnections, {
     double opacity = 1.0,
   }) {
     // 绘制输入端口
@@ -247,7 +247,7 @@ class DepotAccessRenderer {
       final port = building.ports.inputs[i];
       final px = port.relativeX * building.gridWidth * cellSize;
       final py = port.relativeY * building.gridHeight * cellSize;
-      final isConnected = portConnections?['input_$i'] ?? false;
+      final connectionState = portConnections?['input_$i'] ?? 0;
       _drawArrow(
         canvas,
         px,
@@ -255,7 +255,7 @@ class DepotAccessRenderer {
         port.direction,
         cellSize,
         isOutput: false,
-        isActive: isConnected,
+        connectionState: connectionState,
         opacity: opacity,
       );
     }
@@ -265,7 +265,7 @@ class DepotAccessRenderer {
       final port = building.ports.outputs[i];
       final px = port.relativeX * building.gridWidth * cellSize;
       final py = port.relativeY * building.gridHeight * cellSize;
-      final isConnected = portConnections?['output_$i'] ?? false;
+      final connectionState = portConnections?['output_$i'] ?? 0;
       _drawArrow(
         canvas,
         px,
@@ -273,7 +273,7 @@ class DepotAccessRenderer {
         port.direction,
         cellSize,
         isOutput: true,
-        isActive: isConnected,
+        connectionState: connectionState,
         opacity: opacity,
       );
     }
@@ -286,12 +286,17 @@ class DepotAccessRenderer {
     String direction,
     double cellSize, {
     required bool isOutput,
-    required bool isActive,
+    required int connectionState,
     double opacity = 1.0,
   }) {
-    final color = isActive
-        ? _portActiveColor.withValues(alpha: opacity)
-        : _portInactiveColor.withValues(alpha: opacity);
+    Color color;
+    if (connectionState == 1) {
+      color = _portActiveColor.withValues(alpha: opacity);
+    } else if (connectionState == 2) {
+      color = const Color(0xFF44AAFF).withValues(alpha: opacity);
+    } else {
+      color = _portInactiveColor.withValues(alpha: opacity);
+    }
 
     final arrowPaint = Paint()
       ..color = color

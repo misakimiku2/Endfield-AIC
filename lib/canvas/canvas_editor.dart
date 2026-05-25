@@ -97,6 +97,17 @@ class CanvasEditorState extends State<CanvasEditor>
   // 端口连接缓存：building id -> port key -> 是否连接
   Map<String, Map<String, bool>> _portConnectionsCache = {};
 
+  // 重绘触发计数器，确保图片缓存清理后，即使其他属性不变，也能正常强制触发 CustomPainter 完成重绘
+  int _repaintTrigger = 0;
+
+  void _forceRepaint() {
+    _EditorPainter.clearPictureCache();
+    _repaintTrigger++;
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   ProjectState get _project => widget.project;
 
   /// 重新计算所有端口连接关系（仅在数据变更时调用）
@@ -138,9 +149,7 @@ class CanvasEditorState extends State<CanvasEditor>
     _rebuildPortConnectionsCache();
     TransportBeltRenderer.init();
     RefiningUnitRenderer.init(onReady: () {
-      // SVG 加载完成后，清除静态缓存并触发重绘
-      _EditorPainter.clearPictureCache();
-      if (mounted) setState(() {});
+      _forceRepaint();
     });
   }
 
@@ -166,8 +175,11 @@ class CanvasEditorState extends State<CanvasEditor>
         oldWidget.placingBuilding == null) {
       _placingRotation = 0;
     }
-    if (oldWidget.conveyorMode && !widget.conveyorMode) {
-      _beltCtrl.reset();
+    if (widget.conveyorMode != oldWidget.conveyorMode) {
+      _forceRepaint();
+      if (oldWidget.conveyorMode && !widget.conveyorMode) {
+        _beltCtrl.reset();
+      }
     }
     if (!identical(widget.project, oldWidget.project)) {
       _beltCtrl.project = widget.project;
@@ -673,6 +685,7 @@ class CanvasEditorState extends State<CanvasEditor>
           },
           child: CustomPaint(
             painter: _EditorPainter(
+              repaintTrigger: _repaintTrigger,
               project: _project,
               dataLoader: widget.dataLoader,
               cellSize: _cellSize,
@@ -707,6 +720,7 @@ class CanvasEditorState extends State<CanvasEditor>
 }
 
 class _EditorPainter extends CustomPainter {
+  final int repaintTrigger;
   final ProjectState project;
   final DataLoader dataLoader;
   final double cellSize;
@@ -741,6 +755,7 @@ class _EditorPainter extends CustomPainter {
   }
 
   _EditorPainter({
+    required this.repaintTrigger,
     required this.project,
     required this.dataLoader,
     required this.cellSize,
@@ -855,13 +870,109 @@ class _EditorPainter extends CustomPainter {
       }
     }
 
+    // Build previewSet for checking which ports are currently covered by preview path
+    final Set<Offset> previewSet = {};
+    if (conveyorMode) {
+      if (conveyorConfirmedPath.isNotEmpty) {
+        previewSet.addAll(conveyorConfirmedPath);
+      }
+      if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
+        previewSet.addAll(conveyorPreviewPath!);
+      }
+    }
+
+    // 已确认段始终使用传送带本色渲染（不论有效还是无效） - (放到建筑下方渲染)
+    if (conveyorConfirmedPath.isNotEmpty) {
+      TransportBeltRenderer.renderConfirmedPreviewPath(
+        canvas, conveyorConfirmedPath, cellSize,
+        project.buildings,
+        fullPathContext: fullPathContext,
+        contextStartIndex: confirmedStartIndex,
+      );
+    }
+
+    // 实时段根据有效/无效状态分别渲染 - (放到建筑下方渲染)
+    if (conveyorPathInvalid) {
+      // 无效状态：仅实时段标红，但是同样传入 fullPathContext 使得转弯样式能与已确认段进行平滑衔接
+      if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
+        TransportBeltRenderer.renderPreviewPath(
+          canvas,
+          conveyorPreviewPath!,
+          cellSize,
+          <String>{},
+          project.buildings,
+          isInvalid: true,
+          fullPathContext: fullPathContext,
+          contextStartIndex: previewStartIndex,
+        );
+      }
+    } else {
+      // 有效状态：实时段为蓝色预览
+      if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
+        TransportBeltRenderer.renderPreviewPath(
+          canvas,
+          conveyorPreviewPath!,
+          cellSize,
+          <String>{},
+          project.buildings,
+          fullPathContext: fullPathContext,
+          contextStartIndex: previewStartIndex,
+        );
+      } else if (conveyorMode && mouseGridPos != null && conveyorConfirmedPath.isEmpty) {
+        // 传送带处于尚未锚定的预备状态且当前空节点鼠标浮动时，高亮选中指示格
+        TransportBeltRenderer.renderHoverHighlight(canvas, mouseGridPos!, cellSize);
+      }
+    }
+
     for (final pb in project.buildings) {
       if (!_isBuildingVisible(pb, viewport)) continue;
 
-      final portConnections = portConnectionsCache[pb.id] ?? <String, bool>{};
+      // Compute combined port states (actual + preview connections)
+      final combinedPorts = <String, int>{};
+      final actualConns = portConnectionsCache[pb.id] ?? <String, bool>{};
+      actualConns.forEach((key, isConnected) {
+        if (isConnected) {
+          combinedPorts[key] = 1; // 1 = connected yellow
+        }
+      });
+
+      if (conveyorMode) {
+        bool containsGrid(Offset portGrid) {
+          final px = portGrid.dx.round();
+          final py = portGrid.dy.round();
+          for (final cell in previewSet) {
+            if (cell.dx.round() == px && cell.dy.round() == py) {
+              return true;
+            }
+          }
+          return false;
+        }
+
+        for (int i = 0; i < pb.inputPorts.length; i++) {
+          final port = pb.inputPorts[i];
+          final portGrid = port.gridPosition(
+            pb.gridX, pb.gridY, pb.building.gridWidth, pb.building.gridHeight,
+            rotation: pb.rotation,
+          );
+          if (containsGrid(portGrid)) {
+            combinedPorts['input_$i'] = 2; // 2 = preview blue
+          }
+        }
+        for (int i = 0; i < pb.outputPorts.length; i++) {
+          final port = pb.outputPorts[i];
+          final portGrid = port.gridPosition(
+            pb.gridX, pb.gridY, pb.building.gridWidth, pb.building.gridHeight,
+            rotation: pb.rotation,
+          );
+          if (containsGrid(portGrid)) {
+            combinedPorts['output_$i'] = 2; // 2 = preview blue
+          }
+        }
+      }
 
       // 预渲染缓存 key
-      final portsHash = portConnections.entries.map((e) => '${e.key}:${e.value}').join(',');
+      final sortedEntries = combinedPorts.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+      final portsHash = sortedEntries.map((e) => '${e.key}:${e.value}').join(',');
       final cacheKey = '${pb.building.id}_${pb.rotation}_${detailLevel}_$portsHash';
 
       final x = pb.gridX * cellSize;
@@ -877,7 +988,7 @@ class _EditorPainter extends CustomPainter {
         recordCanvas.rotate(pb.rotation * math.pi / 2);
         recordCanvas.translate(-w / 2, -h / 2);
 
-        _renderBuildingStatic(recordCanvas, pb, cellSize, detailLevel, portConnections);
+        _renderBuildingStatic(recordCanvas, pb, cellSize, detailLevel, combinedPorts);
 
         cachedPicture = recorder.endRecording();
         if (_pictureCache.length >= _maxCacheSize) {
@@ -970,49 +1081,6 @@ class _EditorPainter extends CustomPainter {
       canvas.drawRect(Rect.fromLTWH(0, 0, hw, hh), highlightPaint);
 
       canvas.restore();
-    }
-
-    // 已确认段始终使用传送带本色渲染（不论有效还是无效）
-    if (conveyorConfirmedPath.isNotEmpty) {
-      TransportBeltRenderer.renderConfirmedPreviewPath(
-        canvas, conveyorConfirmedPath, cellSize,
-        project.buildings,
-        fullPathContext: fullPathContext,
-        contextStartIndex: confirmedStartIndex,
-      );
-    }
-
-    // 实时段根据有效/无效状态分别渲染
-    if (conveyorPathInvalid) {
-      // 无效状态：仅实时段标红，但是同样传入 fullPathContext 使得转弯样式能与已确认段进行平滑衔接
-      if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
-        TransportBeltRenderer.renderPreviewPath(
-          canvas,
-          conveyorPreviewPath!,
-          cellSize,
-          <String>{},
-          project.buildings,
-          isInvalid: true,
-          fullPathContext: fullPathContext,
-          contextStartIndex: previewStartIndex,
-        );
-      }
-    } else {
-      // 有效状态：实时段为蓝色预览
-      if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
-        TransportBeltRenderer.renderPreviewPath(
-          canvas,
-          conveyorPreviewPath!,
-          cellSize,
-          <String>{},
-          project.buildings,
-          fullPathContext: fullPathContext,
-          contextStartIndex: previewStartIndex,
-        );
-      } else if (conveyorMode && mouseGridPos != null && conveyorConfirmedPath.isEmpty) {
-        // 传送带处于尚未锚定的预备状态且当前空节点鼠标浮动时，高亮选中指示格
-        TransportBeltRenderer.renderHoverHighlight(canvas, mouseGridPos!, cellSize);
-      }
     }
 
     canvas.restore();
@@ -1117,7 +1185,7 @@ class _EditorPainter extends CustomPainter {
   }
 
   /// 渲染设备的静态部分到指定 Canvas（用于预渲染缓存）
-  void _renderBuildingStatic(Canvas canvas, PlacedBuilding pb, double cellSize, int detailLevel, Map<String, bool> portConnections) {
+  void _renderBuildingStatic(Canvas canvas, PlacedBuilding pb, double cellSize, int detailLevel, Map<String, int> portConnections) {
     Recipe? recipe;
     if (pb.activeRecipeId != null && detailLevel >= 1) {
       recipe = dataLoader.getRecipe(pb.activeRecipeId!);
@@ -1169,7 +1237,8 @@ class _EditorPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _EditorPainter oldDelegate) {
-    return project != oldDelegate.project ||
+    return repaintTrigger != oldDelegate.repaintTrigger ||
+        project != oldDelegate.project ||
         dataLoader != oldDelegate.dataLoader ||
         cellSize != oldDelegate.cellSize ||
         placingBuilding != oldDelegate.placingBuilding ||

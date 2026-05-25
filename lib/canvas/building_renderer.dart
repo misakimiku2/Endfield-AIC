@@ -23,7 +23,7 @@ class BuildingRenderer {
     Recipe? activeRecipe,
     bool isBlocked = false,
     double productionProgress = 0.0,
-    Map<String, bool>? portConnections,
+    Map<String, int>? portConnections,
     int detailLevel = 2,
   }) {
     final x = gridX * cellSize;
@@ -120,7 +120,7 @@ class BuildingRenderer {
     Building building,
     double cellSize,
     Recipe? activeRecipe,
-    Map<String, bool>? portConnections,
+    Map<String, int>? portConnections,
   ) {
     final w = building.gridWidth * cellSize;
     final h = building.gridHeight * cellSize;
@@ -138,12 +138,18 @@ class BuildingRenderer {
         const Radius.circular(1.0),
       );
 
-      final isConnected = portConnections?['input_${building.ports.inputs.indexOf(port)}'] ?? false;
-      portPaint.color = isConnected ? _portActiveColor : _portInactiveColor;
+      final connectionState = portConnections?['input_${building.ports.inputs.indexOf(port)}'] ?? 0;
+      if (connectionState == 1) {
+        portPaint.color = _portActiveColor;
+      } else if (connectionState == 2) {
+        portPaint.color = const Color(0xFF44AAFF);
+      } else {
+        portPaint.color = _portInactiveColor;
+      }
       canvas.drawRRect(portRect, portPaint);
       canvas.drawRRect(portRect, portStroke);
 
-      _drawPortArrow(canvas, px, py, port.direction, cellSize, isConnected);
+      _drawPortArrow(canvas, px, py, port.direction, cellSize, connectionState);
     }
 
     for (final port in building.ports.outputs) {
@@ -154,19 +160,34 @@ class BuildingRenderer {
         const Radius.circular(1.0),
       );
 
-      final isConnected = portConnections?['output_${building.ports.outputs.indexOf(port)}'] ?? false;
-      portPaint.color = isConnected ? _portActiveColor : _portInactiveColor;
+      final connectionState = portConnections?['output_${building.ports.outputs.indexOf(port)}'] ?? 0;
+      if (connectionState == 1) {
+        portPaint.color = _portActiveColor;
+      } else if (connectionState == 2) {
+        portPaint.color = const Color(0xFF44AAFF);
+      } else {
+        portPaint.color = _portInactiveColor;
+      }
       canvas.drawRRect(portRect, portPaint);
       canvas.drawRRect(portRect, portStroke);
 
-      _drawPortArrow(canvas, px, py, port.direction, cellSize, isConnected);
+      _drawPortArrow(canvas, px, py, port.direction, cellSize, connectionState);
     }
   }
 
   static void _drawPortArrow(
-    Canvas canvas, double px, double py, String direction, double cellSize, bool active) {
+    Canvas canvas, double px, double py, String direction, double cellSize, int connectionState) {
+    Color arrowColor;
+    if (connectionState == 1) {
+      arrowColor = _portActiveColor;
+    } else if (connectionState == 2) {
+      arrowColor = const Color(0xFF44AAFF);
+    } else {
+      arrowColor = _portInactiveColor;
+    }
+
     final arrowPaint = Paint()
-      ..color = active ? _portActiveColor : _portInactiveColor
+      ..color = arrowColor
       ..strokeWidth = 2.0
       ..style = PaintingStyle.stroke;
 
