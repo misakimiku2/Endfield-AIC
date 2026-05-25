@@ -802,6 +802,9 @@ class _EditorPainter extends CustomPainter {
     // 构建 fullPathContext（已确认段 + 实时段的完整路径）
     // 不论路径有效还是无效都构建上下文，这样即使渲染红色错误预览时，转角处的纹理也能计算正确
     List<Offset>? fullPathContext;
+    int confirmedStartIndex = 0;
+    int previewStartIndex = conveyorConfirmedPath.length;
+
     if (conveyorConfirmedPath.isNotEmpty && conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
       fullPathContext = [...conveyorConfirmedPath, ...conveyorPreviewPath!];
       // 去重：已确认段末尾和实时段开头可能重叠
@@ -809,6 +812,7 @@ class _EditorPainter extends CustomPainter {
           fullPathContext[conveyorConfirmedPath.length - 1].dx == fullPathContext[conveyorConfirmedPath.length].dx &&
           fullPathContext[conveyorConfirmedPath.length - 1].dy == fullPathContext[conveyorConfirmedPath.length].dy) {
         fullPathContext.removeAt(conveyorConfirmedPath.length);
+        previewStartIndex = conveyorConfirmedPath.length - 1;
       }
     }
 
@@ -973,6 +977,7 @@ class _EditorPainter extends CustomPainter {
       TransportBeltRenderer.renderConfirmedPreviewPath(
         canvas, conveyorConfirmedPath, cellSize,
         fullPathContext: fullPathContext,
+        contextStartIndex: confirmedStartIndex,
       );
     }
 
@@ -987,6 +992,7 @@ class _EditorPainter extends CustomPainter {
           <String>{},
           isInvalid: true,
           fullPathContext: fullPathContext,
+          contextStartIndex: previewStartIndex,
         );
       }
     } else {
@@ -998,6 +1004,7 @@ class _EditorPainter extends CustomPainter {
           cellSize,
           <String>{},
           fullPathContext: fullPathContext,
+          contextStartIndex: previewStartIndex,
         );
       } else if (conveyorMode && mouseGridPos != null && conveyorConfirmedPath.isEmpty) {
         // 传送带处于尚未锚定的预备状态且当前空节点鼠标浮动时，高亮选中指示格

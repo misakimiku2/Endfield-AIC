@@ -200,6 +200,7 @@ class TransportBeltRenderer {
     List<Offset> path,
     double cellSize, {
     List<Offset>? fullPathContext,
+    int contextStartIndex = 0,
   }) {
     for (int i = 0; i < path.length; i++) {
       final cell = path[i];
@@ -208,7 +209,11 @@ class TransportBeltRenderer {
 
       canvas.save();
       canvas.translate(cx, cy);
-      _drawSvgCellAtOrigin(canvas, path, i, cellSize, fullPathContext: fullPathContext);
+      _drawSvgCellAtOrigin(
+        canvas, path, i, cellSize, 
+        fullPathContext: fullPathContext,
+        contextStartIndex: contextStartIndex,
+      );
       canvas.restore();
     }
   }
@@ -419,11 +424,12 @@ class TransportBeltRenderer {
     Set<String> occupiedKeys, {
     bool isInvalid = false,
     List<Offset>? fullPathContext,
+    int contextStartIndex = 0,
   }) {
     if (path.isEmpty) return;
 
     if (isReady) {
-      _renderPreviewWithSvg(canvas, path, cellSize, occupiedKeys, isInvalid: isInvalid, fullPathContext: fullPathContext);
+      _renderPreviewWithSvg(canvas, path, cellSize, occupiedKeys, isInvalid: isInvalid, fullPathContext: fullPathContext, contextStartIndex: contextStartIndex);
     } else {
       _renderPreviewLegacy(canvas, path, cellSize, occupiedKeys, isInvalid: isInvalid);
     }
@@ -462,6 +468,7 @@ class TransportBeltRenderer {
     Set<String> occupiedKeys, {
     bool isInvalid = false,
     List<Offset>? fullPathContext,
+    int contextStartIndex = 0,
   }) {
     for (int i = 0; i < path.length; i++) {
       final cell = path[i];
@@ -484,6 +491,7 @@ class TransportBeltRenderer {
         isPreview: true,
         isOccupied: isOccupied,
         fullPathContext: fullPathContext,
+        contextStartIndex: contextStartIndex,
       );
       canvas.restore();
 
@@ -500,21 +508,15 @@ class TransportBeltRenderer {
     bool isPreview = false,
     bool isOccupied = false,
     List<Offset>? fullPathContext,
+    int contextStartIndex = 0,
   }) {
     // 确定用于转弯检测的路径和索引
     List<Offset> turnPath = path;
     int turnIndex = index;
 
     if (fullPathContext != null) {
-      final cell = path[index];
-      // 在全局路径上下文中查找当前格子的索引
-      for (int fi = 0; fi < fullPathContext.length; fi++) {
-        if (fullPathContext[fi].dx == cell.dx && fullPathContext[fi].dy == cell.dy) {
-          turnPath = fullPathContext;
-          turnIndex = fi;
-          break;
-        }
-      }
+      turnPath = fullPathContext;
+      turnIndex = contextStartIndex + index;
     }
 
     final turn = _isTurn(turnPath, turnIndex);
@@ -634,13 +636,14 @@ class TransportBeltRenderer {
     List<Offset> path,
     double cellSize, {
     List<Offset>? fullPathContext,
+    int contextStartIndex = 0,
   }) {
     if (path.length < 2) return;
 
     if (isReady) {
       // 使用 SVG 渲染，通过 saveLayer 降低透明度
       canvas.saveLayer(null, Paint()..color = const Color(0xCCFFFFFF));
-      _renderWithSvg(canvas, path, cellSize, fullPathContext: fullPathContext);
+      _renderWithSvg(canvas, path, cellSize, fullPathContext: fullPathContext, contextStartIndex: contextStartIndex);
       canvas.restore();
     } else {
       for (int i = 0; i < path.length; i++) {
