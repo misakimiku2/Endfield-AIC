@@ -91,6 +91,16 @@ class _EditorPageState extends State<EditorPage> {
         context,
         placedBuilding: pb,
         dataLoader: widget.dataLoader,
+        onMove: () {
+          _canvasKey.currentState?.startMoveFromDialog(pb);
+        },
+        onDelete: () {
+          _canvasKey.currentState?.deleteBuilding(pb);
+          setState(() {
+            _selectedBuilding = null;
+          });
+          widget.simulationEngine.attach(_project);
+        },
       );
     }
     setState(() {
@@ -282,6 +292,9 @@ class _EditorPageState extends State<EditorPage> {
     if (event is! KeyDownEvent) return false;
 
     if (event.logicalKey == LogicalKeyboardKey.escape) {
+      if (_canvasKey.currentState?.cancelMoveMode() ?? false) {
+        return true;
+      }
       _cancelPlacement();
       return true;
     }

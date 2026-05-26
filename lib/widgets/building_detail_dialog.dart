@@ -6,17 +6,23 @@ import '../data/data_loader.dart';
 class BuildingDetailDialog extends StatefulWidget {
   final PlacedBuilding placedBuilding;
   final DataLoader dataLoader;
+  final VoidCallback? onMove;
+  final VoidCallback? onDelete;
 
   const BuildingDetailDialog({
     super.key,
     required this.placedBuilding,
     required this.dataLoader,
+    this.onMove,
+    this.onDelete,
   });
 
   static Future<void> show(
     BuildContext context, {
     required PlacedBuilding placedBuilding,
     required DataLoader dataLoader,
+    VoidCallback? onMove,
+    VoidCallback? onDelete,
   }) {
     return showDialog<void>(
       context: context,
@@ -24,6 +30,8 @@ class BuildingDetailDialog extends StatefulWidget {
       builder: (_) => BuildingDetailDialog(
         placedBuilding: placedBuilding,
         dataLoader: dataLoader,
+        onMove: onMove,
+        onDelete: onDelete,
       ),
     );
   }
@@ -109,16 +117,41 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
         width: 720,
         height: 480,
         padding: const EdgeInsets.all(20),
-        child: Row(
+        child: Stack(
           children: [
-            Expanded(
-              flex: 5,
-              child: _buildResourcePanel(),
+            Row(
+              children: [
+                Expanded(
+                  flex: 5,
+                  child: _buildResourcePanel(),
+                ),
+                const SizedBox(width: 20),
+                Expanded(
+                  flex: 4,
+                  child: _buildSynthesisPanel(recipes),
+                ),
+              ],
             ),
-            const SizedBox(width: 20),
-            Expanded(
-              flex: 4,
-              child: _buildSynthesisPanel(recipes),
+            // 右上角关闭按钮
+            Positioned(
+              top: 0,
+              right: 0,
+              child: GestureDetector(
+                onTap: () => Navigator.of(context).pop(),
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF333333),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.close,
+                    size: 16,
+                    color: Color(0xFF999999),
+                  ),
+                ),
+              ),
             ),
           ],
         ),
@@ -200,6 +233,30 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   Widget _buildSynthesisPanel(List<Recipe> recipes) {
     return Column(
       children: [
+        // 移动 / 收纳 按钮
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _ActionButton(
+              icon: Icons.open_with,
+              label: '移动',
+              onTap: () {
+                Navigator.of(context).pop();
+                widget.onMove?.call();
+              },
+            ),
+            const SizedBox(width: 12),
+            _ActionButton(
+              icon: Icons.inventory_2_outlined,
+              label: '收纳',
+              onTap: () {
+                Navigator.of(context).pop();
+                widget.onDelete?.call();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
         Text(
           widget.placedBuilding.building.name,
           style: const TextStyle(
@@ -238,10 +295,10 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                       dataLoader: widget.dataLoader,
                     ),
                     const SizedBox(width: 12),
-                    Icon(
+                    const Icon(
                       Icons.arrow_forward,
                       size: 22,
-                      color: const Color(0xFF666666),
+                      color: Color(0xFF666666),
                     ),
                     const SizedBox(width: 12),
                     _SynthesisSlot(
@@ -267,16 +324,16 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: const Color(0xFF444444)),
             ),
-            child: Row(
+            child: const Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
                   Icons.list_alt_outlined,
                   size: 16,
-                  color: const Color(0xFF888888),
+                  color: Color(0xFF888888),
                 ),
-                const SizedBox(width: 8),
-                const Text(
+                SizedBox(width: 8),
+                Text(
                   '本设备可自动生产的配方一览',
                   style: TextStyle(
                     color: Color(0xFFAAAAAA),
@@ -454,6 +511,48 @@ class _SynthesisSlot extends StatelessWidget {
                 ),
         ),
       ],
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2A2A2A),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFF444444)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: const Color(0xFFAAAAAA)),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFFCCCCCC),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

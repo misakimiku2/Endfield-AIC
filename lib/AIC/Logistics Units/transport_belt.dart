@@ -25,6 +25,8 @@ class TransportBeltController {
   Set<String>? previewOccupied;
   Offset? mouseGridPos;
   ConveyorBelt? _mergeTarget;
+  /// 预览路径的转角上下文扩展（合并目标的路径，仅用于转角检测，不渲染为蓝色预览）
+  List<Offset>? previewContextExtension;
   String? _startingPortDirection;
   String? _incomingDirection;
 
@@ -43,6 +45,7 @@ class TransportBeltController {
     pathInvalid = false;
     previewPath = null;
     previewOccupied = null;
+    previewContextExtension = null;
     _mergeTarget = null;
     _startingPortDirection = null;
     _incomingDirection = null;
@@ -196,6 +199,21 @@ class TransportBeltController {
     }
 
     anchors.add(gridPos);
+
+    // 转角吸附：点击位置相邻有兼容的传送带起点时，自动合并
+    if (fullPath.length >= 2) {
+      final lastCell = fullPath.last;
+      final adjacent = _findAdjacentBeltStart(lastCell);
+      if (adjacent != null) {
+        final (adjBelt, adjCell) = adjacent;
+        fullPath.add(adjCell);
+        _mergeTarget = adjBelt;
+        _finish();
+        notifyListeners();
+        return true;
+      }
+    }
+
     _updatePreview();
     notifyListeners();
     return true;
@@ -325,9 +343,54 @@ class TransportBeltController {
     return null;
   }
 
+  /// 查找与 fromCell 相邻且方向兼容的传送带起点（转角吸附）
+  /// 返回 (传送带, 起点坐标) 或 null
+  /// 只有当从 fromCell 到相邻起点的方向与传送带出方向一致时才吸附，
+  /// 这样确保路径在连接点处与传送带方向吻合，不会产生S弯
+  (ConveyorBelt, Offset)? _findAdjacentBeltStart(Offset fromCell) {
+    final fx = fromCell.dx.toInt();
+    final fy = fromCell.dy.toInt();
+    // 检查四个方向
+    const dirs = [Offset(1, 0), Offset(-1, 0), Offset(0, 1), Offset(0, -1)];
+    for (final d in dirs) {
+      final nx = fx + d.dx.toInt();
+      final ny = fy + d.dy.toInt();
+      final neighbor = Offset(nx.toDouble(), ny.toDouble());
+      final belt = _findBeltStartCell(neighbor);
+      if (belt == null) continue;
+      // 排除已在路径中的格子
+      if (fullPath.any((c) => c.dx == neighbor.dx && c.dy == neighbor.dy)) continue;
+      // 检查方向兼容性：从 fromCell 到 neighbor 的方向必须与传送带出方向一致
+      final toDx = d.dx.toInt();
+      final toDy = d.dy.toInt();
+      if (_directionMatchesBeltOutgoing(toDx, toDy, belt)) {
+        return (belt, neighbor);
+      }
+    }
+    return null;
+  }
+
+  /// 检查给定方向是否与传送带的出方向一致
+  bool _directionMatchesBeltOutgoing(int dx, int dy, ConveyorBelt belt) {
+    int beltDx, beltDy;
+    if (belt.path.length >= 2) {
+      final beltStart = belt.path.first;
+      final beltNext = belt.path[1];
+      beltDx = (beltNext.dx - beltStart.dx).toInt();
+      beltDy = (beltNext.dy - beltStart.dy).toInt();
+    } else if (belt.forcedDirection != null) {
+      final dir = belt.forcedDirection!;
+      beltDx = switch (dir) { 'right' => 1, 'left' => -1, _ => 0 };
+      beltDy = switch (dir) { 'down' => 1, 'up' => -1, _ => 0 };
+    } else {
+      return false;
+    }
+    return dx == beltDx && dy == beltDy;
+  }
+
   /// 检查新路径在连接点处的方向是否与目标传送带起始方向一致
   bool _isDirectionCompatible(List<Offset> newPath, ConveyorBelt targetBelt) {
-    if (newPath.length < 2 || targetBelt.path.length < 2) return false;
+    if (newPath.length < 2) return false;
 
     // 新路径在连接点处的方向（倒数第二格 → 最后一格）
     final lastCell = newPath.last;
@@ -335,13 +398,29 @@ class TransportBeltController {
     final newDx = lastCell.dx - prevCell.dx;
     final newDy = lastCell.dy - prevCell.dy;
 
-    // 目标传送带在起点处的方向（第一格 → 第二格）
-    final beltStart = targetBelt.path.first;
-    final beltNext = targetBelt.path[1];
-    final beltDx = beltNext.dx - beltStart.dx;
-    final beltDy = beltNext.dy - beltStart.dy;
+    // 目标传送带在起点处的方向
+    int beltDx, beltDy;
+    if (targetBelt.path.length >= 2) {
+      final beltStart = targetBelt.path.first;
+      final beltNext = targetBelt.path[1];
+      beltDx = (beltNext.dx - beltStart.dx).toInt();
+      beltDy = (beltNext.dy - beltStart.dy).toInt();
+    } else if (targetBelt.forcedDirection != null) {
+      // 单格传送带：使用 forcedDirection 推断方向
+      final dir = targetBelt.forcedDirection!;
+      beltDx = switch (dir) {
+        'right' => 1, 'left' => -1, _ => 0,
+      };
+      beltDy = switch (dir) {
+        'down' => 1, 'up' => -1, _ => 0,
+      };
+    } else {
+      return false;
+    }
 
-    return newDx == beltDx && newDy == beltDy;
+    // 方向兼容：不允许反方向合并（新路径到达方向与目标传送带出方向相反）
+    // 直线合并和转角合并都允许
+    return !(newDx == -beltDx && newDy == -beltDy);
   }
 
   ConveyorBelt? _findBeltAtCell(Offset gridPos) {
@@ -370,10 +449,10 @@ class TransportBeltController {
     final gx = gridPos.dx.toInt();
     final gy = gridPos.dy.toInt();
     for (final pb in project.buildings) {
-      final bx = pb.gridX.toInt();
-      final by = pb.gridY.toInt();
-      if (gx >= bx && gx < bx + pb.building.gridWidth &&
-          gy >= by && gy < by + pb.building.gridHeight) {
+      final bx = pb.effectiveGridX.toInt();
+      final by = pb.effectiveGridY.toInt();
+      if (gx >= bx && gx < bx + pb.effectiveWidth &&
+          gy >= by && gy < by + pb.effectiveHeight) {
         return true;
       }
     }
@@ -389,11 +468,10 @@ class TransportBeltController {
       }
     }
     for (final pb in project.buildings) {
-      final bx = pb.gridX.toInt();
-      final by = pb.gridY.toInt();
-      final bw = pb.building.gridWidth;
-      final bh = pb.building.gridHeight;
-      if (gx >= bx && gx < bx + bw && gy >= by && gy < by + bh) return true;
+      final bx = pb.effectiveGridX.toInt();
+      final by = pb.effectiveGridY.toInt();
+      if (gx >= bx && gx < bx + pb.effectiveWidth &&
+          gy >= by && gy < by + pb.effectiveHeight) return true;
     }
     return false;
   }
@@ -406,10 +484,10 @@ class TransportBeltController {
       }
     }
     for (final pb in project.buildings) {
-      final bx = pb.gridX.toInt();
-      final by = pb.gridY.toInt();
-      for (int dx = 0; dx < pb.building.gridWidth; dx++) {
-        for (int dy = 0; dy < pb.building.gridHeight; dy++) {
+      final bx = pb.effectiveGridX.toInt();
+      final by = pb.effectiveGridY.toInt();
+      for (int dx = 0; dx < pb.effectiveWidth; dx++) {
+        for (int dy = 0; dy < pb.effectiveHeight; dy++) {
           cells.add('${bx + dx}_${by + dy}');
         }
       }
@@ -542,11 +620,36 @@ class TransportBeltController {
       if (mergeBelt != null && excludeCell != null) {
         if (!_isDirectionCompatible(livePath, mergeBelt)) {
           pathInvalid = true;
+          previewContextExtension = null;
         } else {
           pathInvalid = false;
+          // 将合并目标的路径作为转角上下文扩展（仅用于转角检测，不渲染为蓝色预览）
+          if (mergeBelt.path.length > 1) {
+            previewContextExtension = mergeBelt.path.sublist(1);
+          } else {
+            previewContextExtension = null;
+          }
         }
+      } else if (livePath.length >= 2) {
+        // 转角吸附：预览路径末尾检测相邻的传送带起点
+        final lastCell = livePath.last;
+        final adjacent = _findAdjacentBeltStart(lastCell);
+        if (adjacent != null) {
+          // 将相邻传送带起点追加到预览路径（只有1格，可以显示为蓝色预览）
+          previewPath = [...livePath, adjacent.$2];
+          // 如果相邻传送带有多格，将其余格子作为转角上下文扩展
+          if (adjacent.$1.path.length > 1) {
+            previewContextExtension = adjacent.$1.path.sublist(1);
+          } else {
+            previewContextExtension = null;
+          }
+        } else {
+          previewContextExtension = null;
+        }
+        pathInvalid = false;
       } else {
         pathInvalid = false;
+        previewContextExtension = null;
       }
     }
   }

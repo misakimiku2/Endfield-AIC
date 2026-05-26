@@ -229,6 +229,7 @@ class RefiningUnitRenderer {
     double cellSize,
     double opacity, {
     int rotation = 0,
+    bool isBlocked = false,
   }) {
     final x = gridX * cellSize;
     final y = gridY * cellSize;
@@ -244,16 +245,18 @@ class RefiningUnitRenderer {
       canvas.save();
       canvas.translate(w / 2, h / 2);
       canvas.translate(-w / 2, -h / 2);
-      _drawSvgBody(canvas, w, h, opacity: opacity * 0.5, portConnections: null);
+      _drawSvgBody(canvas, w, h, opacity: opacity * 0.5, portConnections: null, tintBlue: !isBlocked, tintRed: isBlocked);
       canvas.restore();
     } else {
+      // 碰撞时红色，否则蓝色
+      final previewColor = isBlocked ? const Color(0xFFFF4444) : const Color(0xFF44AAFF);
       final paint = Paint()
-        ..color = _bodyColor.withValues(alpha: opacity * 0.3)
+        ..color = previewColor.withValues(alpha: opacity * 0.15)
         ..style = PaintingStyle.fill;
       canvas.drawRect(Rect.fromLTWH(0, 0, w, h), paint);
 
       final borderPaint = Paint()
-        ..color = _bodyColor.withValues(alpha: opacity)
+        ..color = previewColor.withValues(alpha: opacity * 0.7)
         ..strokeWidth = 2.0
         ..style = PaintingStyle.stroke;
       canvas.drawRect(Rect.fromLTWH(0, 0, w, h), borderPaint);
@@ -359,7 +362,7 @@ class RefiningUnitRenderer {
   }
 
   /// 使用 SVG 绘制精炼炉主体
-  static void _drawSvgBody(Canvas canvas, double w, double h, {double opacity = 1.0, Map<String, int>? portConnections}) {
+  static void _drawSvgBody(Canvas canvas, double w, double h, {double opacity = 1.0, Map<String, int>? portConnections, bool tintBlue = false, bool tintRed = false}) {
     final key = _getConnectionKey(portConnections);
     var picture = _svgCache[key];
 
@@ -373,8 +376,15 @@ class RefiningUnitRenderer {
 
     canvas.save();
 
-    if (opacity < 1.0) {
-      // 使用 saveLayer 实现半透明
+    if (tintRed) {
+      canvas.saveLayer(Rect.fromLTWH(0, 0, w, h), Paint()
+        ..color = Color.fromRGBO(255, 255, 255, opacity)
+        ..colorFilter = const ColorFilter.mode(Color(0xFFFF4444), BlendMode.srcATop));
+    } else if (tintBlue) {
+      canvas.saveLayer(Rect.fromLTWH(0, 0, w, h), Paint()
+        ..color = Color.fromRGBO(255, 255, 255, opacity)
+        ..colorFilter = const ColorFilter.mode(Color(0xFF44AAFF), BlendMode.srcATop));
+    } else if (opacity < 1.0) {
       canvas.saveLayer(Rect.fromLTWH(0, 0, w, h), Paint()..color = Color.fromRGBO(255, 255, 255, opacity));
     }
 
@@ -383,7 +393,7 @@ class RefiningUnitRenderer {
     canvas.scale(scaleX, scaleY);
     canvas.drawPicture(picture.picture);
 
-    if (opacity < 1.0) {
+    if (tintRed || tintBlue || opacity < 1.0) {
       canvas.restore();
     }
 

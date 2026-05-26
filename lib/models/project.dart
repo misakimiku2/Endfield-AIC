@@ -137,12 +137,24 @@ class PlacedBuilding {
           ),
         );
 
+  /// 旋转后的有效宽度（90°/270° 时宽高互换）
+  int get effectiveWidth => (rotation % 2 == 1) ? building.gridHeight : building.gridWidth;
+
+  /// 旋转后的有效高度（90°/270° 时宽高互换）
+  int get effectiveHeight => (rotation % 2 == 1) ? building.gridWidth : building.gridHeight;
+
+  /// 旋转后的有效网格 X（调整原点使旋转后占地居中于同一中心点）
+  double get effectiveGridX => gridX + (building.gridWidth - effectiveWidth) / 2.0;
+
+  /// 旋转后的有效网格 Y（调整原点使旋转后占地居中于同一中心点）
+  double get effectiveGridY => gridY + (building.gridHeight - effectiveHeight) / 2.0;
+
   Rect getBounds(double cellSize) {
     return Rect.fromLTWH(
-      gridX * cellSize,
-      gridY * cellSize,
-      building.gridWidth * cellSize,
-      building.gridHeight * cellSize,
+      effectiveGridX * cellSize,
+      effectiveGridY * cellSize,
+      effectiveWidth * cellSize,
+      effectiveHeight * cellSize,
     );
   }
 

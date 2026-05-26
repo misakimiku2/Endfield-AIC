@@ -274,6 +274,7 @@ class BuildingRenderer {
     double cellSize,
     double opacity, {
     int rotation = 0,
+    bool isBlocked = false,
   }) {
     final x = gridX * cellSize;
     final y = gridY * cellSize;
@@ -285,13 +286,15 @@ class BuildingRenderer {
     canvas.rotate(rotation * math.pi / 2);
     canvas.translate(-w / 2, -h / 2);
 
+    // 碰撞时红色，否则蓝色（与传送带预览一致 #44AAFF）
+    final previewColor = isBlocked ? const Color(0xFFFF4444) : const Color(0xFF44AAFF);
     final paint = Paint()
-      ..color = building.color.withValues(alpha: opacity * 0.3)
+      ..color = previewColor.withValues(alpha: opacity * 0.15)
       ..style = PaintingStyle.fill;
     canvas.drawRect(Rect.fromLTWH(0, 0, w, h), paint);
 
     final borderPaint = Paint()
-      ..color = building.color.withValues(alpha: opacity)
+      ..color = previewColor.withValues(alpha: opacity * 0.7)
       ..strokeWidth = 2.0
       ..style = PaintingStyle.stroke;
     canvas.drawRect(Rect.fromLTWH(0, 0, w, h), borderPaint);

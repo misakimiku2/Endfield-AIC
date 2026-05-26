@@ -9,7 +9,7 @@ import '../models/recipe.dart';
 import '../models/project.dart';
 import '../data/data_loader.dart';
 import '../AIC/Production I/refining_unit.dart';
-import '../AIC/Production I/Depot Access/depot_access.dart';
+import '../AIC/Depot Access/depot_access.dart';
 import 'grid_painter.dart';
 import 'building_renderer.dart';
 import '../AIC/Logistics Units/transport_belt.dart';
@@ -89,8 +89,14 @@ class CanvasEditorState extends State<CanvasEditor>
   double _movingOriginalGridX = 0;
   double _movingOriginalGridY = 0;
 
+  // 移动模式下：端口传送带快照（用于取消移动时恢复）
+  List<ConveyorBelt>? _portBeltsSnapshot;
+
   // 端口连接缓存：building id -> port key -> 是否连接
   Map<String, Map<String, bool>> _portConnectionsCache = {};
+
+  // 记录最近一次 onPointerDown 是否为左键
+  bool _lastPointerWasPrimary = false;
 
   // 重绘触发计数器，确保图片缓存清理后，即使其他属性不变，也能正常强制触发 CustomPainter 完成重绘
   int _repaintTrigger = 0;
@@ -144,6 +150,9 @@ class CanvasEditorState extends State<CanvasEditor>
     _rebuildPortConnectionsCache();
     TransportBeltRenderer.init();
     RefiningUnitRenderer.init(onReady: () {
+      _forceRepaint();
+    });
+    DepotAccessRenderer.init(onReady: () {
       _forceRepaint();
     });
   }
@@ -255,6 +264,42 @@ class CanvasEditorState extends State<CanvasEditor>
         _placingRotation = (_placingRotation + 1) % 4;
       });
     }
+  }
+
+  void startMoveFromDialog(PlacedBuilding pb) {
+    _movingBuilding = pb;
+    _movingRotation = pb.rotation;
+    _movingOriginalGridX = pb.gridX;
+    _movingOriginalGridY = pb.gridY;
+
+    // 保存所有传送带的完整快照（用于取消移动时恢复）
+    _portBeltsSnapshot = _project.conveyors.map((b) => ConveyorBelt(
+      id: b.id,
+      path: List<Offset>.from(b.path),
+      itemId: b.itemId,
+      isBlocked: b.isBlocked,
+      forcedDirection: b.forcedDirection,
+      incomingDirection: b.incomingDirection,
+    )).toList();
+
+    // 从工程中移除建筑
+    _project.buildings.remove(pb);
+
+    // 移除设备端口上的传送带格子（视觉隐藏）
+    _removePortBeltCells(pb);
+
+    _rebuildPortConnectionsCache();
+    widget.onProjectChanged(_project);
+    setState(() {});
+  }
+
+  /// 从工程中删除设备，同时移除其端口上的传送带格子
+  void deleteBuilding(PlacedBuilding pb) {
+    _project.buildings.remove(pb);
+    _removePortBeltCells(pb);
+    _rebuildPortConnectionsCache();
+    widget.onProjectChanged(_project);
+    setState(() {});
   }
 
   Offset _screenToWorld(Offset screenPos, Size size) {
@@ -407,6 +452,24 @@ class CanvasEditorState extends State<CanvasEditor>
     return null;
   }
 
+  /// 检查格子是否位于设备的输入/输出端口上
+  bool _isCellOnBuildingPort(Offset gridPos) {
+    final gx = gridPos.dx.round();
+    final gy = gridPos.dy.round();
+    for (final pb in _project.buildings) {
+      final rot = pb.rotation;
+      final gw = pb.building.gridWidth;
+      final gh = pb.building.gridHeight;
+      for (final port in [...pb.inputPorts, ...pb.outputPorts]) {
+        final portGrid = port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
+        if (portGrid.dx.round() == gx && portGrid.dy.round() == gy) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   List<ConveyorBelt> _findConnectedBelts(ConveyorBelt startBelt) {
     final connected = <ConveyorBelt>[startBelt];
     final visited = <String>{startBelt.id};
@@ -556,11 +619,20 @@ class CanvasEditorState extends State<CanvasEditor>
     );
 
     final bounds = newBuilding.getBounds(_cellSize);
-    final overlaps = _project.buildings.any(
+    final buildingOverlaps = _project.buildings.any(
       (b) => b.overlaps(bounds, _cellSize),
     );
+    // 检测传送带碰撞
+    final cells = <String>{};
+    for (int dx = 0; dx < building.gridWidth; dx++) {
+      for (int dy = 0; dy < building.gridHeight; dy++) {
+        cells.add('${(cx + dx).toInt()}_${(cy + dy).toInt()}');
+      }
+    }
+    final beltOverlap = _project.conveyors.any((b) =>
+        b.path.any((c) => cells.contains('${c.dx.toInt()}_${c.dy.toInt()}')));
 
-    if (!overlaps) {
+    if (!buildingOverlaps && !beltOverlap) {
       _project.buildings.add(newBuilding);
       _project.offsetX = _targetOffsetX;
       _project.offsetY = _targetOffsetY;
@@ -600,18 +672,132 @@ class CanvasEditorState extends State<CanvasEditor>
     _movingOriginalGridX = _longPressTargetBuilding!.gridX;
     _movingOriginalGridY = _longPressTargetBuilding!.gridY;
 
+    // 保存所有传送带的完整快照（用于取消移动时恢复）
+    _portBeltsSnapshot = _project.conveyors.map((b) => ConveyorBelt(
+      id: b.id,
+      path: List<Offset>.from(b.path),
+      itemId: b.itemId,
+      isBlocked: b.isBlocked,
+      forcedDirection: b.forcedDirection,
+      incomingDirection: b.incomingDirection,
+    )).toList();
+
     // 从工程中移除建筑
     _project.buildings.remove(_longPressTargetBuilding);
     _longPressTargetBuilding = null;
     _longPressStartTime = null;
     _longPressScreenPos = null;
 
+    // 移除设备端口上的传送带格子（视觉隐藏）
+    _removePortBeltCells(_movingBuilding!);
+
     _rebuildPortConnectionsCache();
     widget.onProjectChanged(_project);
   }
 
-  void _cancelMoveMode() {
-    if (_movingBuilding == null) return;
+  /// 移除设备输入/输出端口上的传送带格子
+  void _removePortBeltCells(PlacedBuilding pb) {
+    final portCells = <Offset>[];
+    final rot = pb.rotation;
+    final gw = pb.building.gridWidth;
+    final gh = pb.building.gridHeight;
+    for (final port in [...pb.inputPorts, ...pb.outputPorts]) {
+      portCells.add(port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot));
+    }
+
+    final toRemove = <ConveyorBelt>[];
+    final toAdd = <ConveyorBelt>[];
+
+    for (final belt in _project.conveyors) {
+      // 找到该传送带路径中所有位于端口上的格子索引
+      final portIndices = <int>[];
+      for (int i = 0; i < belt.path.length; i++) {
+        for (final portCell in portCells) {
+          if (belt.path[i].dx.toInt() == portCell.dx.toInt() &&
+              belt.path[i].dy.toInt() == portCell.dy.toInt()) {
+            portIndices.add(i);
+            break;
+          }
+        }
+      }
+
+      if (portIndices.isEmpty) continue;
+
+      toRemove.add(belt);
+
+      // 将路径按端口格子拆分为多段
+      int start = 0;
+      for (final portIdx in portIndices) {
+        if (portIdx > start) {
+          final segment = belt.path.sublist(start, portIdx);
+          String? incomingDir = belt.incomingDirection;
+          // 非首段：从前一个格子到本段首格推断入方向
+          if (start > 0) {
+            final dx = belt.path[start].dx - belt.path[start - 1].dx;
+            final dy = belt.path[start].dy - belt.path[start - 1].dy;
+            if (dx > 0) {
+              incomingDir = 'right';
+            } else if (dx < 0) {
+              incomingDir = 'left';
+            } else if (dy > 0) {
+              incomingDir = 'down';
+            } else if (dy < 0) {
+              incomingDir = 'up';
+            }
+          }
+          String? forcedDir;
+          if (segment.length == 1) forcedDir = incomingDir;
+          toAdd.add(ConveyorBelt(
+            id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
+            path: segment,
+            itemId: belt.itemId,
+            isBlocked: belt.isBlocked,
+            forcedDirection: forcedDir,
+            incomingDirection: incomingDir,
+          ));
+        }
+        start = portIdx + 1;
+      }
+      // 最后一段
+      if (start < belt.path.length) {
+        final segment = belt.path.sublist(start);
+        String? incomingDir;
+        if (start > 0) {
+          final dx = belt.path[start].dx - belt.path[start - 1].dx;
+          final dy = belt.path[start].dy - belt.path[start - 1].dy;
+          if (dx > 0) {
+            incomingDir = 'right';
+          } else if (dx < 0) {
+            incomingDir = 'left';
+          } else if (dy > 0) {
+            incomingDir = 'down';
+          } else if (dy < 0) {
+            incomingDir = 'up';
+          }
+        }
+        String? forcedDir;
+        if (segment.length == 1) forcedDir = incomingDir;
+        toAdd.add(ConveyorBelt(
+          id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
+          path: segment,
+          itemId: belt.itemId,
+          isBlocked: belt.isBlocked,
+          forcedDirection: forcedDir,
+          incomingDirection: incomingDir,
+        ));
+      }
+    }
+
+    for (final old in toRemove) {
+      _project.conveyors.remove(old);
+    }
+    for (final newBelt in toAdd) {
+      _project.conveyors.add(newBelt);
+    }
+  }
+
+  bool cancelMoveMode() {
+    if (_movingBuilding == null) return false;
     // 恢复到原始位置
     _movingBuilding!.gridX = _movingOriginalGridX;
     _movingBuilding!.gridY = _movingOriginalGridY;
@@ -619,9 +805,18 @@ class CanvasEditorState extends State<CanvasEditor>
     _movingBuilding = null;
     _movingRotation = 0;
 
+    // 恢复传送带快照（撤销端口格子的移除）
+    if (_portBeltsSnapshot != null) {
+      _project.conveyors
+        ..clear()
+        ..addAll(_portBeltsSnapshot!);
+      _portBeltsSnapshot = null;
+    }
+
     _rebuildPortConnectionsCache();
     widget.onProjectChanged(_project);
     setState(() {});
+    return true;
   }
 
   void _placeMovingBuilding(Offset gridPos) {
@@ -634,14 +829,25 @@ class CanvasEditorState extends State<CanvasEditor>
     _movingBuilding!.rotation = _movingRotation;
 
     final bounds = _movingBuilding!.getBounds(_cellSize);
-    final overlaps = _project.buildings.any(
+    final buildingOverlaps = _project.buildings.any(
       (b) => b.overlaps(bounds, _cellSize),
     );
+    // 检测传送带碰撞
+    final cells = <String>{};
+    for (int dx = 0; dx < _movingBuilding!.building.gridWidth; dx++) {
+      for (int dy = 0; dy < _movingBuilding!.building.gridHeight; dy++) {
+        cells.add('${(cx + dx).toInt()}_${(cy + dy).toInt()}');
+      }
+    }
+    final beltOverlap = _project.conveyors.any((b) =>
+        b.path.any((c) => cells.contains('${c.dx.toInt()}_${c.dy.toInt()}')));
 
-    if (!overlaps) {
+    if (!buildingOverlaps && !beltOverlap) {
       _project.buildings.add(_movingBuilding!);
       _movingBuilding = null;
       _movingRotation = 0;
+      // 放置成功：丢弃快照，端口格子保持移除状态
+      _portBeltsSnapshot = null;
       _project.offsetX = _targetOffsetX;
       _project.offsetY = _targetOffsetY;
       _project.scale = _targetScale;
@@ -664,7 +870,7 @@ class CanvasEditorState extends State<CanvasEditor>
     if (event is KeyDownEvent) {
       if (event.logicalKey == LogicalKeyboardKey.escape) {
         if (_movingBuilding != null) {
-          _cancelMoveMode();
+          cancelMoveMode();
           return KeyEventResult.handled;
         }
         if (widget.conveyorMode && _beltCtrl.handleKeyEscape()) {
@@ -724,6 +930,7 @@ class CanvasEditorState extends State<CanvasEditor>
           }
         },
         onPointerDown: (event) {
+          _lastPointerWasPrimary = event.buttons & kPrimaryMouseButton != 0;
           // 中键拖拽
           if (event.buttons & kMiddleMouseButton != 0 && _middleDragPointerId == null) {
             _middleDragPointerId = event.pointer;
@@ -765,6 +972,11 @@ class CanvasEditorState extends State<CanvasEditor>
             }
             setState(() {});
           }
+          // 右键：移动模式下取消
+          if (event.buttons & kSecondaryMouseButton != 0 && _movingBuilding != null) {
+            cancelMoveMode();
+            setState(() {});
+          }
         },
         onPointerMove: (event) {
           if (event.pointer == _middleDragPointerId && _lastMiddlePos != null) {
@@ -794,15 +1006,18 @@ class CanvasEditorState extends State<CanvasEditor>
             return;
           }
 
+          // 仅左键释放时处理传送带弹窗和建筑选中
+          final isPrimaryButton = _lastPointerWasPrimary;
+
           final renderBox = context.findRenderObject() as RenderBox;
           final localPos = event.localPosition;
           final gridPos = _screenToGrid(localPos, renderBox.size);
 
           if (_isLongPressing && _longPressProgress < 1.0) {
             _cancelLongPress();
-            if (!widget.conveyorMode && widget.placingBuilding == null) {
+            if (isPrimaryButton && !widget.conveyorMode && widget.placingBuilding == null) {
               final clickedBelt = _findBeltAtCell(gridPos);
-              if (clickedBelt != null) {
+              if (clickedBelt != null && !_isCellOnBuildingPort(gridPos)) {
                 _showConveyorBeltDialog(clickedBelt, gridPos);
                 setState(() {});
                 return;
@@ -810,12 +1025,13 @@ class CanvasEditorState extends State<CanvasEditor>
             }
             _handleSingleClick(localPos, renderBox.size);
             setState(() {});
-          } else if (!_isLongPressing &&
+          } else if (isPrimaryButton &&
+                     !_isLongPressing &&
                      !widget.conveyorMode &&
                      widget.placingBuilding == null &&
                      _movingBuilding == null) {
             final clickedBelt = _findBeltAtCell(gridPos);
-            if (clickedBelt != null) {
+            if (clickedBelt != null && !_isCellOnBuildingPort(gridPos)) {
               _showConveyorBeltDialog(clickedBelt, gridPos);
               setState(() {});
             }
@@ -860,6 +1076,7 @@ class CanvasEditorState extends State<CanvasEditor>
               conveyorPathInvalid: _beltCtrl.pathInvalid,
               conveyorForkCell: _beltCtrl.anchors.isNotEmpty ? _beltCtrl.anchors.first : null,
               conveyorIncomingDirection: _beltCtrl.incomingDirection,
+              previewContextExtension: _beltCtrl.previewContextExtension,
               displayScale: _displayScale,
               displayOffsetX: _displayOffsetX,
               displayOffsetY: _displayOffsetY,
@@ -896,6 +1113,7 @@ class _EditorPainter extends CustomPainter {
   final bool conveyorPathInvalid;
   final Offset? conveyorForkCell;
   final String? conveyorIncomingDirection;
+  final List<Offset>? previewContextExtension;
   final double displayScale;
   final double displayOffsetX;
   final double displayOffsetY;
@@ -932,6 +1150,7 @@ class _EditorPainter extends CustomPainter {
     this.conveyorPathInvalid = false,
     this.conveyorForkCell,
     this.conveyorIncomingDirection,
+    this.previewContextExtension,
     required this.displayScale,
     required this.displayOffsetX,
     required this.displayOffsetY,
@@ -983,15 +1202,26 @@ class _EditorPainter extends CustomPainter {
     int confirmedStartIndex = 0;
     int previewStartIndex = conveyorConfirmedPath.length;
 
-    if (conveyorConfirmedPath.isNotEmpty && conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
-      fullPathContext = [...conveyorConfirmedPath, ...conveyorPreviewPath!];
-      // 去重：已确认段末尾和实时段开头可能重叠
-      if (fullPathContext.length >= 2 &&
-          fullPathContext[conveyorConfirmedPath.length - 1].dx == fullPathContext[conveyorConfirmedPath.length].dx &&
-          fullPathContext[conveyorConfirmedPath.length - 1].dy == fullPathContext[conveyorConfirmedPath.length].dy) {
-        fullPathContext.removeAt(conveyorConfirmedPath.length);
-        previewStartIndex = conveyorConfirmedPath.length - 1;
+    if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
+      if (conveyorConfirmedPath.isNotEmpty) {
+        fullPathContext = [...conveyorConfirmedPath, ...conveyorPreviewPath!];
+        // 去重：已确认段末尾和实时段开头可能重叠
+        if (fullPathContext.length >= 2 &&
+            fullPathContext[conveyorConfirmedPath.length - 1].dx == fullPathContext[conveyorConfirmedPath.length].dx &&
+            fullPathContext[conveyorConfirmedPath.length - 1].dy == fullPathContext[conveyorConfirmedPath.length].dy) {
+          fullPathContext.removeAt(conveyorConfirmedPath.length);
+          previewStartIndex = conveyorConfirmedPath.length - 1;
+        }
+      } else {
+        // 第一段创建时 confirmedPath 为空，仅用 previewPath 构建上下文
+        fullPathContext = [...conveyorPreviewPath!];
+        previewStartIndex = 0;
       }
+    }
+
+    // 追加转角上下文扩展（合并目标的路径，仅用于转角检测，不渲染为蓝色预览）
+    if (previewContextExtension != null && previewContextExtension!.isNotEmpty && fullPathContext != null) {
+      fullPathContext.addAll(previewContextExtension!);
     }
 
     // 调试：视口与裁剪统计（有裁剪时才输出，且每2秒最多一次）
@@ -1195,23 +1425,29 @@ class _EditorPainter extends CustomPainter {
     if (placingBuilding != null && mouseGridPos != null) {
       final cx = mouseGridPos!.dx - (placingBuilding!.gridWidth ~/ 2).toDouble();
       final cy = mouseGridPos!.dy - (placingBuilding!.gridHeight ~/ 2).toDouble();
+      final isBlocked = _isPreviewBlocked(placingBuilding!, cx, cy, placingRotation);
 
       if (placingBuilding!.id == RefiningUnitConfig.id) {
         RefiningUnitRenderer.renderPlaceholder(
           canvas, placingBuilding!, cx, cy, cellSize, 0.6,
-          rotation: placingRotation,
+          rotation: placingRotation, isBlocked: isBlocked,
         );
       } else if (placingBuilding!.id == DepotLoaderConfig.id ||
           placingBuilding!.id == DepotUnloaderConfig.id) {
         DepotAccessRenderer.renderPlaceholder(
           canvas, placingBuilding!, cx, cy, cellSize, 0.6,
-          rotation: placingRotation,
+          rotation: placingRotation, isBlocked: isBlocked,
         );
       } else {
         BuildingRenderer.renderPlaceholder(
           canvas, placingBuilding!, cx, cy, cellSize, 0.6,
-          rotation: placingRotation,
+          rotation: placingRotation, isBlocked: isBlocked,
         );
+      }
+
+      // 碰撞时绘制阻拦对象红色叠加
+      if (isBlocked) {
+        _drawBlockedOverlays(canvas, placingBuilding!, cx, cy, placingRotation);
       }
     }
 
@@ -1220,23 +1456,29 @@ class _EditorPainter extends CustomPainter {
       final mb = movingBuilding!;
       final cx = mouseGridPos!.dx - (mb.building.gridWidth ~/ 2).toDouble();
       final cy = mouseGridPos!.dy - (mb.building.gridHeight ~/ 2).toDouble();
+      final isBlocked = _isPreviewBlocked(mb.building, cx, cy, movingRotation);
 
       if (mb.building.id == RefiningUnitConfig.id) {
         RefiningUnitRenderer.renderPlaceholder(
           canvas, mb.building, cx, cy, cellSize, 0.6,
-          rotation: movingRotation,
+          rotation: movingRotation, isBlocked: isBlocked,
         );
       } else if (mb.building.id == DepotLoaderConfig.id ||
           mb.building.id == DepotUnloaderConfig.id) {
         DepotAccessRenderer.renderPlaceholder(
           canvas, mb.building, cx, cy, cellSize, 0.6,
-          rotation: movingRotation,
+          rotation: movingRotation, isBlocked: isBlocked,
         );
       } else {
         BuildingRenderer.renderPlaceholder(
           canvas, mb.building, cx, cy, cellSize, 0.6,
-          rotation: movingRotation,
+          rotation: movingRotation, isBlocked: isBlocked,
         );
+      }
+
+      // 碰撞时绘制阻拦对象红色叠加
+      if (isBlocked) {
+        _drawBlockedOverlays(canvas, mb.building, cx, cy, movingRotation);
       }
     }
 
@@ -1334,6 +1576,119 @@ class _EditorPainter extends CustomPainter {
     return _Viewport(minX, minY, maxX, maxY);
   }
 
+  /// 判断预览建筑是否与现有建筑或传送带碰撞
+  bool _isPreviewBlocked(Building building, double gridX, double gridY, int rotation) {
+    final tempPb = PlacedBuilding(
+      id: '_preview',
+      building: building,
+      gridX: gridX,
+      gridY: gridY,
+      rotation: rotation,
+    );
+    final bounds = tempPb.getBounds(cellSize);
+
+    // 检测与现有建筑的碰撞
+    for (final pb in project.buildings) {
+      if (pb.overlaps(bounds, cellSize)) return true;
+    }
+
+    // 检测与传送带的碰撞
+    final previewCells = _getGridCells(building, gridX, gridY, rotation);
+    for (final belt in project.conveyors) {
+      for (final cell in belt.path) {
+        if (previewCells.contains(Offset(cell.dx.roundToDouble(), cell.dy.roundToDouble()))) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /// 获取建筑占用的网格坐标集合
+  Set<Offset> _getGridCells(Building building, double gridX, double gridY, int rotation) {
+    final cells = <Offset>{};
+    // 考虑旋转后的有效尺寸
+    int effW, effH;
+    double effX, effY;
+    if (rotation % 2 == 1) {
+      effW = building.gridHeight;
+      effH = building.gridWidth;
+    } else {
+      effW = building.gridWidth;
+      effH = building.gridHeight;
+    }
+    effX = gridX + (building.gridWidth - effW) / 2.0;
+    effY = gridY + (building.gridHeight - effH) / 2.0;
+
+    for (int dx = 0; dx < effW; dx++) {
+      for (int dy = 0; dy < effH; dy++) {
+        cells.add(Offset((effX + dx).roundToDouble(), (effY + dy).roundToDouble()));
+      }
+    }
+    return cells;
+  }
+
+  /// 绘制碰撞对象的红色叠加层
+  void _drawBlockedOverlays(Canvas canvas, Building building, double gridX, double gridY, int rotation) {
+    const cellMargin = 3.0;
+    final previewCells = _getGridCells(building, gridX, gridY, rotation);
+    final previewSet = previewCells.map((c) => '${c.dx.toInt()}_${c.dy.toInt()}').toSet();
+
+    // 阻拦的建筑：整体变红
+    for (final pb in project.buildings) {
+      final tempPb = PlacedBuilding(
+        id: '_temp', building: pb.building,
+        gridX: pb.gridX, gridY: pb.gridY, rotation: pb.rotation,
+      );
+      final bounds = tempPb.getBounds(cellSize);
+      final testPb = PlacedBuilding(
+        id: '_preview', building: building,
+        gridX: gridX, gridY: gridY, rotation: rotation,
+      );
+      if (!testPb.overlaps(bounds, cellSize)) continue;
+
+      final x = pb.gridX * cellSize;
+      final y = pb.gridY * cellSize;
+      final w = pb.building.gridWidth * cellSize;
+      final h = pb.building.gridHeight * cellSize;
+
+      canvas.save();
+      canvas.translate(x + w / 2, y + h / 2);
+      canvas.rotate(pb.rotation * math.pi / 2);
+      canvas.translate(-w / 2, -h / 2);
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, w, h),
+        Paint()..color = const Color(0x55FF4444),
+      );
+      canvas.restore();
+    }
+
+    // 阻拦的传送带：仅阻拦网格变红（与传送带模式下的blocked样式一致）
+    for (final belt in project.conveyors) {
+      for (final cell in belt.path) {
+        final key = '${cell.dx.round()}_${cell.dy.round()}';
+        if (previewSet.contains(key)) {
+          final x = cell.dx * cellSize + cellMargin;
+          final y = cell.dy * cellSize + cellMargin;
+          final w = cellSize - cellMargin * 2;
+          final h = cellSize - cellMargin * 2;
+          final rect = RRect.fromRectAndRadius(
+            Rect.fromLTWH(x, y, w, h),
+            const Radius.circular(3.0),
+          );
+          canvas.drawRRect(rect, Paint()..color = const Color(0x60FF4444));
+          canvas.drawRRect(
+            rect,
+            Paint()
+              ..color = const Color(0xAAFF4444)
+              ..strokeWidth = 1.0
+              ..style = PaintingStyle.stroke,
+          );
+        }
+      }
+    }
+  }
+
   /// 判断设备是否在视口内
   bool _isBuildingVisible(PlacedBuilding pb, _Viewport vp) {
     final x = pb.gridX * cellSize;
@@ -1428,6 +1783,7 @@ class _EditorPainter extends CustomPainter {
         conveyorPathInvalid != oldDelegate.conveyorPathInvalid ||
         conveyorForkCell != oldDelegate.conveyorForkCell ||
         conveyorIncomingDirection != oldDelegate.conveyorIncomingDirection ||
+        previewContextExtension != oldDelegate.previewContextExtension ||
         !_listEquals(conveyorConfirmedPath, oldDelegate.conveyorConfirmedPath) ||
         !_listEquals(conveyorPreviewPath, oldDelegate.conveyorPreviewPath) ||
         !_setEquals(conveyorPreviewOccupied, oldDelegate.conveyorPreviewOccupied) ||
