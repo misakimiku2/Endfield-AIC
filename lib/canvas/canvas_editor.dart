@@ -14,6 +14,7 @@ import 'grid_painter.dart';
 import 'building_renderer.dart';
 import '../AIC/Logistics Units/transport_belt.dart';
 import '../AIC/Logistics Units/transport_belt_renderer.dart';
+import '../widgets/conveyor_belt_dialog.dart';
 
 class CanvasEditor extends StatefulWidget {
   final DataLoader dataLoader;
@@ -50,12 +51,6 @@ class CanvasEditorState extends State<CanvasEditor>
   int? _middleDragPointerId;
   Offset? _lastMiddlePos;
   bool _isMiddleDragging = false;
-
-  // 手动双击检测，避免 GestureDetector 的 300ms 等待
-  DateTime? _lastTapTime;
-  Offset? _lastTapPos;
-  static const int _doubleTapMs = 400;
-  static const double _doubleTapDistance = 20.0;
 
   late Ticker _ticker;
   double _displayScale = 1.0;
@@ -401,6 +396,154 @@ class CanvasEditorState extends State<CanvasEditor>
     }
   }
 
+  ConveyorBelt? _findBeltAtCell(Offset gridPos) {
+    final gx = gridPos.dx.toInt();
+    final gy = gridPos.dy.toInt();
+    for (final belt in _project.conveyors) {
+      for (final cell in belt.path) {
+        if (cell.dx.toInt() == gx && cell.dy.toInt() == gy) return belt;
+      }
+    }
+    return null;
+  }
+
+  List<ConveyorBelt> _findConnectedBelts(ConveyorBelt startBelt) {
+    final connected = <ConveyorBelt>[startBelt];
+    final visited = <String>{startBelt.id};
+
+    void traverseFrom(ConveyorBelt belt) {
+      if (belt.path.isEmpty) return;
+
+      final firstCell = belt.path.first;
+      final lastCell = belt.path.last;
+
+      for (final other in _project.conveyors) {
+        if (visited.contains(other.id)) continue;
+        if (other.path.isEmpty) continue;
+
+        final otherFirst = other.path.first;
+        final otherLast = other.path.last;
+
+        final connectsAtStart = (firstCell.dx == otherLast.dx && firstCell.dy == otherLast.dy) ||
+            (lastCell.dx == otherFirst.dx && lastCell.dy == otherFirst.dy);
+
+        if (connectsAtStart) {
+          visited.add(other.id);
+          connected.add(other);
+          traverseFrom(other);
+        }
+      }
+    }
+
+    traverseFrom(startBelt);
+    return connected;
+  }
+
+  void _showConveyorBeltDialog(ConveyorBelt belt, Offset clickedCell) {
+    final allLineBelts = _findConnectedBelts(belt);
+    final targetBeltId = belt.id;
+    final lineIds = allLineBelts.map((b) => b.id).toSet();
+
+    ConveyorBeltDialog.show(
+      context,
+      belt: belt,
+      allBelts: allLineBelts,
+      dataLoader: widget.dataLoader,
+      onStoreSingle: () => _removeBeltCell(targetBeltId, clickedCell),
+      onStoreLine: () => _storeBeltLineByIds(lineIds),
+      onCollectAll: () => _collectAllFromLine(allLineBelts),
+    );
+  }
+
+  /// 从传送带路径中移除点击的那一格，必要时拆分为两条传送带
+  void _removeBeltCell(String beltId, Offset cell) {
+    final belt = _project.conveyors.where((b) => b.id == beltId).firstOrNull;
+    if (belt == null) return;
+
+    final gx = cell.dx.toInt();
+    final gy = cell.dy.toInt();
+
+    // 找到点击格在路径中的索引
+    int cellIndex = -1;
+    for (int i = 0; i < belt.path.length; i++) {
+      if (belt.path[i].dx.toInt() == gx && belt.path[i].dy.toInt() == gy) {
+        cellIndex = i;
+        break;
+      }
+    }
+
+    if (cellIndex < 0) return;
+
+    setState(() {
+      // 移除原传送带
+      _project.conveyors.removeWhere((b) => b.id == beltId);
+
+      // 移除格之前的路径段 (0 ~ cellIndex-1)
+      if (cellIndex > 0) {
+        final beforePath = belt.path.sublist(0, cellIndex);
+        _project.conveyors.add(ConveyorBelt(
+          id: 'belt_${DateTime.now().millisecondsSinceEpoch}_a',
+          path: beforePath,
+          itemId: belt.itemId,
+          isBlocked: belt.isBlocked,
+          incomingDirection: belt.incomingDirection,
+        ));
+      }
+
+      // 移除格之后的路径段 (cellIndex+1 ~ end)
+      if (cellIndex < belt.path.length - 1) {
+        final afterPath = belt.path.sublist(cellIndex + 1);
+        // 计算下游首格的入方向
+        String? incomingDir;
+        if (cellIndex + 1 < belt.path.length) {
+          final dx = belt.path[cellIndex + 1].dx - belt.path[cellIndex].dx;
+          final dy = belt.path[cellIndex + 1].dy - belt.path[cellIndex].dy;
+          if (dx > 0) {
+            incomingDir = 'right';
+          } else if (dx < 0) {
+            incomingDir = 'left';
+          } else if (dy > 0) {
+            incomingDir = 'down';
+          } else if (dy < 0) {
+            incomingDir = 'up';
+          }
+        }
+        String? forcedDir;
+        if (afterPath.length == 1) forcedDir = incomingDir;
+        _project.conveyors.add(ConveyorBelt(
+          id: 'belt_${DateTime.now().millisecondsSinceEpoch}_b',
+          path: afterPath,
+          itemId: belt.itemId,
+          isBlocked: belt.isBlocked,
+          forcedDirection: forcedDir,
+          incomingDirection: incomingDir,
+        ));
+      }
+
+      _rebuildPortConnectionsCache();
+      widget.onProjectChanged(_project);
+    });
+  }
+
+  void _storeBeltLineByIds(Set<String> beltIds) {
+    setState(() {
+      _project.conveyors.removeWhere((b) => beltIds.contains(b.id));
+      _rebuildPortConnectionsCache();
+      widget.onProjectChanged(_project);
+    });
+  }
+
+  void _collectAllFromLine(List<ConveyorBelt> belts) {
+    for (final belt in belts) {
+      if (belt.itemId.isNotEmpty) {
+        setState(() {
+          belt.itemId = '';
+        });
+      }
+    }
+    widget.onProjectChanged(_project);
+  }
+
   void _placeBuilding(Building building, Offset gridPos, {int rotation = 0}) {
     final cx = gridPos.dx - (building.gridWidth ~/ 2).toDouble();
     final cy = gridPos.dy - (building.gridHeight ~/ 2).toDouble();
@@ -507,7 +650,7 @@ class CanvasEditorState extends State<CanvasEditor>
     }
   }
 
-  void _handleDoubleTap(Offset screenPos, Size size) {
+  void _handleSingleClick(Offset screenPos, Size size) {
     final gridPos = _screenToGrid(screenPos, size);
     final pb = _getBuildingAt(gridPos);
     widget.onBuildingSelected?.call(pb);
@@ -650,28 +793,32 @@ class CanvasEditorState extends State<CanvasEditor>
             _isMiddleDragging = false;
             return;
           }
-          // 长按未完成：视为点击
+
+          final renderBox = context.findRenderObject() as RenderBox;
+          final localPos = event.localPosition;
+          final gridPos = _screenToGrid(localPos, renderBox.size);
+
           if (_isLongPressing && _longPressProgress < 1.0) {
             _cancelLongPress();
-            final renderBox = context.findRenderObject() as RenderBox;
-            final localPos = event.localPosition;
-            final now = DateTime.now();
-
-            if (_lastTapTime != null &&
-                now.difference(_lastTapTime!).inMilliseconds < _doubleTapMs &&
-                _lastTapPos != null &&
-                (localPos - _lastTapPos!).distance < _doubleTapDistance) {
-              // 双击
-              _handleDoubleTap(localPos, renderBox.size);
-              _lastTapTime = null;
-              _lastTapPos = null;
-            } else {
-              // 单击
-              _handleTap(localPos, renderBox.size);
-              _lastTapTime = now;
-              _lastTapPos = localPos;
+            if (!widget.conveyorMode && widget.placingBuilding == null) {
+              final clickedBelt = _findBeltAtCell(gridPos);
+              if (clickedBelt != null) {
+                _showConveyorBeltDialog(clickedBelt, gridPos);
+                setState(() {});
+                return;
+              }
             }
+            _handleSingleClick(localPos, renderBox.size);
             setState(() {});
+          } else if (!_isLongPressing &&
+                     !widget.conveyorMode &&
+                     widget.placingBuilding == null &&
+                     _movingBuilding == null) {
+            final clickedBelt = _findBeltAtCell(gridPos);
+            if (clickedBelt != null) {
+              _showConveyorBeltDialog(clickedBelt, gridPos);
+              setState(() {});
+            }
           }
         },
         onPointerCancel: (event) {
@@ -1117,8 +1264,8 @@ class _EditorPainter extends CustomPainter {
 
     canvas.restore();
 
-    // 长按圆形进度条（屏幕空间绘制）
-    if (isLongPressing && longPressScreenPos != null) {
+    // 长按圆形进度条（屏幕空间绘制，进度超过阈值才显示，避免快速点击闪烁）
+    if (isLongPressing && longPressScreenPos != null && longPressProgress > 0.15) {
       final center = longPressScreenPos!;
       const radius = 24.0;
       const strokeW = 4.0;
