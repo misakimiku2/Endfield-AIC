@@ -1,63 +1,6 @@
 {
   "version": "1.0.0",
   "buildings": {
-    "shredder_3x3": {
-      "id": "shredder_3x3",
-      "name": "粉碎机",
-      "grid_width": 3,
-      "grid_height": 3,
-      "color": "#555555",
-      "category": "processing",
-      "max_inputs": 1,
-      "max_outputs": 1,
-      "ports": {
-        "inputs": [
-          {"relative_x": 0.5, "relative_y": 0.0, "direction": "up"}
-        ],
-        "outputs": [
-          {"relative_x": 0.5, "relative_y": 1.0, "direction": "down"}
-        ]
-      }
-    },
-    "furnace_3x3": {
-      "id": "furnace_3x3",
-      "name": "熔炉",
-      "grid_width": 3,
-      "grid_height": 3,
-      "color": "#CC4400",
-      "category": "processing",
-      "max_inputs": 2,
-      "max_outputs": 1,
-      "ports": {
-        "inputs": [
-          {"relative_x": 0.25, "relative_y": 0.0, "direction": "up"},
-          {"relative_x": 0.75, "relative_y": 0.0, "direction": "up"}
-        ],
-        "outputs": [
-          {"relative_x": 0.5, "relative_y": 1.0, "direction": "down"}
-        ]
-      }
-    },
-    "assembler_4x4": {
-      "id": "assembler_4x4",
-      "name": "组装机",
-      "grid_width": 4,
-      "grid_height": 4,
-      "color": "#3355AA",
-      "category": "assembly",
-      "max_inputs": 3,
-      "max_outputs": 1,
-      "ports": {
-        "inputs": [
-          {"relative_x": 0.25, "relative_y": 0.0, "direction": "up"},
-          {"relative_x": 0.5, "relative_y": 0.0, "direction": "up"},
-          {"relative_x": 0.75, "relative_y": 0.0, "direction": "up"}
-        ],
-        "outputs": [
-          {"relative_x": 0.5, "relative_y": 1.0, "direction": "down"}
-        ]
-      }
-    },
     "refining_unit_3x3": {
       "id": "refining_unit_3x3",
       "name": "精炼炉",

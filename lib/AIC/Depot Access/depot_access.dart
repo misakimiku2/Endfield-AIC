@@ -74,10 +74,12 @@ class DepotAccessRenderer {
   static String? _baseLoaderSvgStr;
   static String? _baseUnloaderSvgStr;
   static final Map<String, PictureInfo> _svgCache = {};
+  static VoidCallback? _onReadyCallback;
 
   /// 预加载仓库存取口 SVG 资源
   /// [onReady] 加载完成后的回调，用于通知外部刷新缓存和重绘
   static Future<void> init({VoidCallback? onReady}) async {
+    _onReadyCallback = onReady;
     if (_initialized || _initializing) return;
     _initializing = true;
 
@@ -86,16 +88,19 @@ class DepotAccessRenderer {
       _baseLoaderSvgStr = await rootBundle.loadString('assets/svg/Depot_Loader.svg');
       _baseUnloaderSvgStr = await rootBundle.loadString('assets/svg/Depot_Unloader.svg');
 
-      // 2. 清理 Inkscape 并预载默认图
+      // 2. 生成默认状态 SVG 并清理 Inkscape
       const defaultLoaderKey = 'L0';
       const defaultUnloaderKey = 'U0';
 
-      final loaderSvg = _cleanInkscapeSvg(_baseLoaderSvgStr!);
-      final unloaderSvg = _cleanInkscapeSvg(_baseUnloaderSvgStr!);
+      final defaultLoaderSvg = _generateModifiedSvg(_baseLoaderSvgStr!, '0');
+      final defaultUnloaderSvg = _generateModifiedSvg(_baseUnloaderSvgStr!, '0');
+
+      final cleanedLoaderSvg = _cleanInkscapeSvg(defaultLoaderSvg);
+      final cleanedUnloaderSvg = _cleanInkscapeSvg(defaultUnloaderSvg);
 
       // 3. 解析为 PictureInfo 并缓存
-      _loaderPicture = await vg.loadPicture(SvgStringLoader(loaderSvg), null);
-      _unloaderPicture = await vg.loadPicture(SvgStringLoader(unloaderSvg), null);
+      _loaderPicture = await vg.loadPicture(SvgStringLoader(cleanedLoaderSvg), null);
+      _unloaderPicture = await vg.loadPicture(SvgStringLoader(cleanedUnloaderSvg), null);
 
       _svgCache[defaultLoaderKey] = _loaderPicture!;
       _svgCache[defaultUnloaderKey] = _unloaderPicture!;
@@ -230,6 +235,57 @@ class DepotAccessRenderer {
     canvas.restore();
   }
 
+  /// 根据端口连接状态生成修改后的 SVG
+  /// [baseSvg] 原始 SVG 字符串
+  /// [state] 端口连接状态：'0'=未连接, '1'=已连接(黄色), '2'=预览(蓝色)
+  static String _generateModifiedSvg(String baseSvg, String state) {
+    var svgText = baseSvg;
+
+    // rect1 是端口区域矩形，默认颜色 #d3d3d3
+    final portColor = (state == '1') ? '#ffef00' : ((state == '2') ? '#44aaff' : '#d3d3d3');
+    svgText = _setElementColor(svgText, 'rect1', '#d3d3d3', portColor);
+
+    return svgText;
+  }
+
+  /// 替换 SVG 中指定 id 元素的颜色
+  static String _setElementColor(String svg, String elementId, String oldColor, String newColor) {
+    final regExp = RegExp(
+      '(<[a-zA-Z0-9_-]+[^>]*?id="$elementId"[^>]*?>)',
+      multiLine: true,
+      dotAll: true,
+    );
+
+    return svg.replaceAllMapped(regExp, (match) {
+      final tag = match.group(1)!;
+      return tag
+          .replaceAll(oldColor.toLowerCase(), newColor)
+          .replaceAll(oldColor.toUpperCase(), newColor);
+    });
+  }
+
+  /// 异步预加载指定连接状态的 SVG
+  static void _preloadSvgForState(String key, bool isLoader) async {
+    final baseSvg = isLoader ? _baseLoaderSvgStr : _baseUnloaderSvgStr;
+    if (baseSvg == null) return;
+
+    // 使用默认图占位，防止重复预载
+    final defaultPicture = isLoader ? _loaderPicture! : _unloaderPicture!;
+    _svgCache[key] = defaultPicture;
+
+    try {
+      final state = key.substring(1); // 去掉前缀 'L' 或 'U'
+      final modifiedSvg = _generateModifiedSvg(baseSvg, state);
+      final cleanedSvg = _cleanInkscapeSvg(modifiedSvg);
+      final PictureInfo picture = await vg.loadPicture(SvgStringLoader(cleanedSvg), null);
+      _svgCache[key] = picture;
+      _onReadyCallback?.call();
+    } catch (e) {
+      debugPrint('Failed to load modified depot SVG for state $key: $e');
+      _svgCache.remove(key);
+    }
+  }
+
   /// 使用 SVG 绘制仓库存取口主体
   static void _drawSvgBody(
     Canvas canvas,
@@ -244,7 +300,13 @@ class DepotAccessRenderer {
     final isLoader = buildingId == DepotLoaderConfig.id;
     final key = _getConnectionKey(buildingId, portConnections);
 
-    var picture = _svgCache[key] ?? (isLoader ? _loaderPicture : _unloaderPicture);
+    var picture = _svgCache[key];
+
+    if (picture == null) {
+      // 首次遇到新状态，异步预加载
+      _preloadSvgForState(key, isLoader);
+      picture = isLoader ? _loaderPicture : _unloaderPicture;
+    }
 
     if (picture == null) return;
     final svgSize = picture.size;
@@ -291,16 +353,19 @@ class DepotAccessRenderer {
   }
 
   static String _getConnectionKey(String buildingId, Map<String, int>? portConnections) {
-    if (portConnections == null) {
-      return buildingId == DepotLoaderConfig.id ? 'L0' : 'U0';
-    }
     final isLoader = buildingId == DepotLoaderConfig.id;
+    final prefix = isLoader ? 'L' : 'U';
+
+    if (portConnections == null) {
+      return '${prefix}0';
+    }
+
     if (isLoader) {
       // 存货口只有 1 个输入端口
-      return 'L${portConnections['input_0'] ?? 0}';
+      return '$prefix${portConnections['input_0'] ?? 0}';
     } else {
       // 取货口只有 1 个输出端口
-      return 'U${portConnections['output_0'] ?? 0}';
+      return '$prefix${portConnections['output_0'] ?? 0}';
     }
   }
 }

@@ -622,11 +622,22 @@ class CanvasEditorState extends State<CanvasEditor>
     final buildingOverlaps = _project.buildings.any(
       (b) => b.overlaps(bounds, _cellSize),
     );
-    // 检测传送带碰撞
+    // 检测传送带碰撞（使用旋转后的有效占地）
+    int effW, effH;
+    double effX, effY;
+    if (rotation % 2 == 1) {
+      effW = building.gridHeight;
+      effH = building.gridWidth;
+    } else {
+      effW = building.gridWidth;
+      effH = building.gridHeight;
+    }
+    effX = cx + (building.gridWidth - effW) / 2.0;
+    effY = cy + (building.gridHeight - effH) / 2.0;
     final cells = <String>{};
-    for (int dx = 0; dx < building.gridWidth; dx++) {
-      for (int dy = 0; dy < building.gridHeight; dy++) {
-        cells.add('${(cx + dx).toInt()}_${(cy + dy).toInt()}');
+    for (int dx = 0; dx < effW; dx++) {
+      for (int dy = 0; dy < effH; dy++) {
+        cells.add('${(effX + dx).toInt()}_${(effY + dy).toInt()}');
       }
     }
     final beltOverlap = _project.conveyors.any((b) =>
@@ -796,6 +807,14 @@ class CanvasEditorState extends State<CanvasEditor>
     }
   }
 
+  /// 是否正在创建传送带（已有锚点）
+  bool get isCreatingConveyorBelt => _beltCtrl.anchors.isNotEmpty;
+
+  /// 完成传送带创建（ESC 按下且有锚点时调用）
+  void finishConveyorBeltCreation() {
+    _beltCtrl.handleKeyEscape();
+  }
+
   bool cancelMoveMode() {
     if (_movingBuilding == null) return false;
     // 恢复到原始位置
@@ -832,15 +851,27 @@ class CanvasEditorState extends State<CanvasEditor>
     final buildingOverlaps = _project.buildings.any(
       (b) => b.overlaps(bounds, _cellSize),
     );
-    // 检测传送带碰撞
-    final cells = <String>{};
-    for (int dx = 0; dx < _movingBuilding!.building.gridWidth; dx++) {
-      for (int dy = 0; dy < _movingBuilding!.building.gridHeight; dy++) {
-        cells.add('${(cx + dx).toInt()}_${(cy + dy).toInt()}');
+    // 检测传送带碰撞（使用旋转后的有效占地）
+    final mb = _movingBuilding!;
+    int effW2, effH2;
+    double effX2, effY2;
+    if (_movingRotation % 2 == 1) {
+      effW2 = mb.building.gridHeight;
+      effH2 = mb.building.gridWidth;
+    } else {
+      effW2 = mb.building.gridWidth;
+      effH2 = mb.building.gridHeight;
+    }
+    effX2 = cx + (mb.building.gridWidth - effW2) / 2.0;
+    effY2 = cy + (mb.building.gridHeight - effH2) / 2.0;
+    final cells2 = <String>{};
+    for (int dx = 0; dx < effW2; dx++) {
+      for (int dy = 0; dy < effH2; dy++) {
+        cells2.add('${(effX2 + dx).toInt()}_${(effY2 + dy).toInt()}');
       }
     }
     final beltOverlap = _project.conveyors.any((b) =>
-        b.path.any((c) => cells.contains('${c.dx.toInt()}_${c.dy.toInt()}')));
+        b.path.any((c) => cells2.contains('${c.dx.toInt()}_${c.dy.toInt()}')));
 
     if (!buildingOverlaps && !beltOverlap) {
       _project.buildings.add(_movingBuilding!);
@@ -1630,7 +1661,6 @@ class _EditorPainter extends CustomPainter {
 
   /// 绘制碰撞对象的红色叠加层
   void _drawBlockedOverlays(Canvas canvas, Building building, double gridX, double gridY, int rotation) {
-    const cellMargin = 3.0;
     final previewCells = _getGridCells(building, gridX, gridY, rotation);
     final previewSet = previewCells.map((c) => '${c.dx.toInt()}_${c.dy.toInt()}').toSet();
 
@@ -1663,28 +1693,20 @@ class _EditorPainter extends CustomPainter {
       canvas.restore();
     }
 
-    // 阻拦的传送带：仅阻拦网格变红（与传送带模式下的blocked样式一致）
+    // 阻拦的传送带：使用红色传送带预览渲染
     for (final belt in project.conveyors) {
+      final blockedKeys = <String>{};
       for (final cell in belt.path) {
         final key = '${cell.dx.round()}_${cell.dy.round()}';
         if (previewSet.contains(key)) {
-          final x = cell.dx * cellSize + cellMargin;
-          final y = cell.dy * cellSize + cellMargin;
-          final w = cellSize - cellMargin * 2;
-          final h = cellSize - cellMargin * 2;
-          final rect = RRect.fromRectAndRadius(
-            Rect.fromLTWH(x, y, w, h),
-            const Radius.circular(3.0),
-          );
-          canvas.drawRRect(rect, Paint()..color = const Color(0x60FF4444));
-          canvas.drawRRect(
-            rect,
-            Paint()
-              ..color = const Color(0xAAFF4444)
-              ..strokeWidth = 1.0
-              ..style = PaintingStyle.stroke,
-          );
+          blockedKeys.add(key);
         }
+      }
+      if (blockedKeys.isNotEmpty) {
+        TransportBeltRenderer.renderBlockedBeltCells(
+          canvas, belt.path, cellSize, blockedKeys, project.buildings,
+          incomingDirection: belt.incomingDirection,
+        );
       }
     }
   }

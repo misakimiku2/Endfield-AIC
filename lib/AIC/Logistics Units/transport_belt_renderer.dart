@@ -879,6 +879,82 @@ class TransportBeltRenderer {
     }
   }
 
+  /// 渲染传送带路径中被阻拦的格子为红色传送带预览
+  /// 用于设备创建/移动时，遇到传送带的阻拦叠加显示
+  static void renderBlockedBeltCells(
+    Canvas canvas,
+    List<Offset> beltPath,
+    double cellSize,
+    Set<String> blockedKeys,
+    List<PlacedBuilding> buildings, {
+    String? incomingDirection,
+  }) {
+    if (beltPath.isEmpty) return;
+
+    if (isReady) {
+      for (int i = 0; i < beltPath.length; i++) {
+        final cell = beltPath[i];
+        final key = '${cell.dx.toInt()}_${cell.dy.toInt()}';
+        if (!blockedKeys.contains(key)) continue;
+
+        final cx = cell.dx * cellSize + cellSize / 2;
+        final cy = cell.dy * cellSize + cellSize / 2;
+
+        canvas.save();
+        canvas.translate(cx, cy);
+        canvas.saveLayer(null, Paint()..color = const Color(0x99FFFFFF));
+
+        final clip = getLocalClipRect(
+          path: beltPath,
+          index: i,
+          cellSize: cellSize,
+          buildings: buildings,
+        );
+        if (clip != null) {
+          canvas.clipRect(clip);
+        }
+
+        _drawSvgCellAtOrigin(
+          canvas,
+          beltPath,
+          i,
+          cellSize,
+          isPreview: true,
+          isOccupied: true,
+          incomingDirection: incomingDirection,
+        );
+        canvas.restore();
+        canvas.restore();
+      }
+    } else {
+      // SVG 未加载时回退到旧版红色圆角矩形
+      for (int i = 0; i < beltPath.length; i++) {
+        final cell = beltPath[i];
+        final key = '${cell.dx.toInt()}_${cell.dy.toInt()}';
+        if (!blockedKeys.contains(key)) continue;
+
+        final x = cell.dx * cellSize + _cellMargin;
+        final y = cell.dy * cellSize + _cellMargin;
+        final w = cellSize - _cellMargin * 2;
+        final h = cellSize - _cellMargin * 2;
+
+        final rect = RRect.fromRectAndRadius(
+          Rect.fromLTWH(x, y, w, h),
+          const Radius.circular(3.0),
+        );
+
+        canvas.drawRRect(rect, Paint()..color = _previewOccupiedFill);
+        canvas.drawRRect(
+          rect,
+          Paint()
+            ..color = _previewOccupiedBorder
+            ..strokeWidth = 1.0
+            ..style = PaintingStyle.stroke,
+        );
+      }
+    }
+  }
+
   static void renderHoverHighlight(Canvas canvas, Offset gridPos, double cellSize) {
     final x = gridPos.dx * cellSize + _cellMargin;
     final y = gridPos.dy * cellSize + _cellMargin;

@@ -33,9 +33,6 @@ class _EditorPageState extends State<EditorPage> {
 
   static const List<String> _dockOrder = [
     'refining_unit_3x3',
-    'shredder_3x3',
-    'furnace_3x3',
-    'assembler_4x4',
     'depot_loader_3x1',
     'depot_unloader_3x1',
   ];
@@ -293,6 +290,11 @@ class _EditorPageState extends State<EditorPage> {
 
     if (event.logicalKey == LogicalKeyboardKey.escape) {
       if (_canvasKey.currentState?.cancelMoveMode() ?? false) {
+        return true;
+      }
+      // 如果正在创建传送带已有锚点，完成创建
+      if (_canvasKey.currentState?.isCreatingConveyorBelt ?? false) {
+        _canvasKey.currentState?.finishConveyorBeltCreation();
         return true;
       }
       _cancelPlacement();

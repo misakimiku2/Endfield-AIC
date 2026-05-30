@@ -28,9 +28,6 @@ class _EquipmentDockState extends State<EquipmentDock>
 
   static const List<String> _dockOrder = [
     'refining_unit_3x3',
-    'shredder_3x3',
-    'furnace_3x3',
-    'assembler_4x4',
     'depot_loader_3x1',
     'depot_unloader_3x1',
   ];
