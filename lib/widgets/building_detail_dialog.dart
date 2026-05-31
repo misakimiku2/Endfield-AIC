@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import '../models/project.dart';
 import '../models/recipe.dart';
 import '../data/data_loader.dart';
@@ -45,11 +47,33 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   static const List<String> _tabLabels = ['矿物', '植物', '产物'];
 
   late final List<_ResourceItem> _allItems;
+  String? _logoSvgString;
 
   @override
   void initState() {
     super.initState();
     _allItems = _buildResourceList();
+    _loadLogo();
+  }
+
+  Future<void> _loadLogo() async {
+    final logoPath = widget.placedBuilding.building.logoAssetPath;
+    if (logoPath.isEmpty) return;
+    try {
+      final raw = await rootBundle.loadString(logoPath);
+      final white = raw
+          .replaceAllMapped(
+            RegExp(r'fill:\s*#[0-9a-fA-F]+'),
+            (_) => 'fill:#ffffff',
+          )
+          .replaceAllMapped(
+            RegExp(r'fill-opacity:\s*[\d.]+'),
+            (_) => 'fill-opacity:1',
+          );
+      if (mounted) {
+        setState(() => _logoSvgString = white);
+      }
+    } catch (_) {}
   }
 
   List<_ResourceItem> _buildResourceList() {
@@ -108,54 +132,160 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
         widget.dataLoader.getRecipesForBuilding(pb.building.id);
 
     return Dialog(
-      backgroundColor: const Color(0xFF252525),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: Color(0xFF444444)),
-      ),
-      child: Container(
-        width: 720,
-        height: 480,
-        padding: const EdgeInsets.all(20),
-        child: Stack(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final screenWidth = MediaQuery.of(context).size.width;
+          final dialogWidth = (screenWidth - 48).clamp(1280.0, 1460.0);
+
+          return Container(
+            width: dialogWidth,
+            height: 720,
+        decoration: BoxDecoration(
+          color: const Color(0xFF252525),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF444444)),
+        ),
+        child: Column(
           children: [
-            Row(
-              children: [
-                Expanded(
-                  flex: 5,
-                  child: _buildResourcePanel(),
-                ),
-                const SizedBox(width: 20),
-                Expanded(
-                  flex: 4,
-                  child: _buildSynthesisPanel(recipes),
-                ),
-              ],
-            ),
-            // 右上角关闭按钮
-            Positioned(
-              top: 0,
-              right: 0,
-              child: GestureDetector(
-                onTap: () => Navigator.of(context).pop(),
-                child: Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF333333),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Icon(
-                    Icons.close,
-                    size: 16,
-                    color: Color(0xFF999999),
-                  ),
+            _buildWindowInfoBar(),
+            _buildSeparator(),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Stack(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 5,
+                          child: _buildResourcePanel(),
+                        ),
+                        const SizedBox(width: 20),
+                        Expanded(
+                          flex: 4,
+                          child: _buildSynthesisPanel(recipes),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ),
           ],
         ),
+      );
+        },
       ),
+    );
+  }
+
+  Widget _buildWindowInfoBar() {
+    final building = widget.placedBuilding.building;
+    return SizedBox(
+      height: 77,
+      child: Row(
+        children: [
+          const SizedBox(width: 16),
+          _buildLogo(),
+          _buildSeparatorVertical(),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Text(
+                building.name,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          _buildSeparatorVertical(),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Text(
+                '耗电功率值：${building.powerConsumption.toStringAsFixed(0)}W',
+                style: const TextStyle(
+                  color: Color(0xFFA6A6A6),
+                  fontSize: 16,
+                ),
+              ),
+            ),
+          ),
+          const Spacer(),
+          _buildCloseButton(),
+          const SizedBox(width: 24),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSeparatorVertical() {
+    return Container(
+      width: 2,
+      height: 60,
+      margin: const EdgeInsets.symmetric(horizontal: 10),
+      color: const Color(0xFF444444),
+    );
+  }
+
+  Widget _buildLogo() {
+    if (_logoSvgString != null) {
+      return SizedBox(
+        width: 42,
+        height: 42,
+        child: SvgPicture.string(
+          _logoSvgString!,
+          fit: BoxFit.contain,
+        ),
+      );
+    }
+    return Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        color: widget.placedBuilding.building.color.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: widget.placedBuilding.building.color.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Center(
+        child: Icon(
+          Icons.factory,
+          size: 32,
+          color: widget.placedBuilding.building.color.withValues(alpha: 0.6),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCloseButton() {
+    return GestureDetector(
+      onTap: () => Navigator.of(context).pop(),
+      child: SizedBox(
+        width: 26,
+        height: 26,
+        child: SvgPicture.asset(
+          'assets/png/window/Close_button.svg',
+          width: 26,
+          height: 26,
+          fit: BoxFit.contain,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSeparator() {
+    return Container(
+      height: 1,
+      color: const Color(0xFF444444),
     );
   }
 
@@ -233,7 +363,6 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   Widget _buildSynthesisPanel(List<Recipe> recipes) {
     return Column(
       children: [
-        // 移动 / 收纳 按钮
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [

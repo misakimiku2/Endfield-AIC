@@ -10,6 +10,9 @@
       "category": "basic_production",
       "max_inputs": 4,
       "max_outputs": 4,
+      "power_consumption": 5.0,
+      "svg_asset": "assets/svg/3x3_unit.svg",
+      "logo_asset": "assets/svg/LOGO/Refining_Unit_Logo.svg",
       "ports": {
         "inputs": [
           {"relative_x": 0.167, "relative_y": 1.0, "direction": "down", "port_type": "solid"},
@@ -34,6 +37,9 @@
       "category": "depot_access",
       "max_inputs": 1,
       "max_outputs": 0,
+      "power_consumption": 0.0,
+      "svg_asset": "assets/svg/Depot.svg",
+      "logo_asset": "assets/svg/LOGO/Depot_Loader_logo.svg",
       "ports": {
         "inputs": [
           {"relative_x": 0.5, "relative_y": 0.0, "direction": "up", "port_type": "solid"}
@@ -50,6 +56,9 @@
       "category": "depot_access",
       "max_inputs": 0,
       "max_outputs": 1,
+      "power_consumption": 0.0,
+      "svg_asset": "assets/svg/Depot.svg",
+      "logo_asset": "assets/svg/LOGO/Depot_Unloader_logo.svg",
       "ports": {
         "inputs": [],
         "outputs": [

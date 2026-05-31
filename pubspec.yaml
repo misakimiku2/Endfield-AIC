@@ -23,3 +23,5 @@ flutter:
   assets:
     - assets/data/
     - assets/svg/
+    - assets/svg/LOGO/
+    - assets/png/window/

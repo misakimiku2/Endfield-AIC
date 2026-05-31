@@ -1442,6 +1442,17 @@ class _EditorPainter extends CustomPainter {
       canvas.drawPicture(cachedPicture);
       canvas.restore();
 
+      // Logo 单独绘制（不缓存），始终不随设备/画布旋转
+      if (pb.building.id == RefiningUnitConfig.id && RefiningUnitRenderer.isReady) {
+        RefiningUnitRenderer.renderLogo(
+          canvas, x, y, w, h, pb.rotation, displayAngle,
+        );
+      } else if ((pb.building.id == DepotLoaderConfig.id || pb.building.id == DepotUnloaderConfig.id) && DepotAccessRenderer.isReady) {
+        DepotAccessRenderer.renderLogo(
+          canvas, x, y, w, h, pb.building.id, pb.rotation, displayAngle,
+        );
+      }
+
       // 动态部分：进度条（每帧绘制，不缓存）
       if (detailLevel >= 1 && pb.productionProgress > 0 && pb.productionProgress < 1.0) {
         canvas.save();
@@ -1462,12 +1473,14 @@ class _EditorPainter extends CustomPainter {
         RefiningUnitRenderer.renderPlaceholder(
           canvas, placingBuilding!, cx, cy, cellSize, 0.6,
           rotation: placingRotation, isBlocked: isBlocked,
+          canvasRotation: displayAngle,
         );
       } else if (placingBuilding!.id == DepotLoaderConfig.id ||
           placingBuilding!.id == DepotUnloaderConfig.id) {
         DepotAccessRenderer.renderPlaceholder(
           canvas, placingBuilding!, cx, cy, cellSize, 0.6,
           rotation: placingRotation, isBlocked: isBlocked,
+          canvasRotation: displayAngle,
         );
       } else {
         BuildingRenderer.renderPlaceholder(
@@ -1493,12 +1506,14 @@ class _EditorPainter extends CustomPainter {
         RefiningUnitRenderer.renderPlaceholder(
           canvas, mb.building, cx, cy, cellSize, 0.6,
           rotation: movingRotation, isBlocked: isBlocked,
+          canvasRotation: displayAngle,
         );
       } else if (mb.building.id == DepotLoaderConfig.id ||
           mb.building.id == DepotUnloaderConfig.id) {
         DepotAccessRenderer.renderPlaceholder(
           canvas, mb.building, cx, cy, cellSize, 0.6,
           rotation: movingRotation, isBlocked: isBlocked,
+          canvasRotation: displayAngle,
         );
       } else {
         BuildingRenderer.renderPlaceholder(

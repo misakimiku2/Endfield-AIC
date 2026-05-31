@@ -51,6 +51,9 @@ class Building {
   final int maxInputs;
   final int maxOutputs;
   final PortsLayout ports;
+  final double powerConsumption;
+  final String svgAssetPath;
+  final String logoAssetPath;
 
   const Building({
     required this.id,
@@ -62,6 +65,9 @@ class Building {
     required this.maxInputs,
     required this.maxOutputs,
     required this.ports,
+    this.powerConsumption = 0,
+    this.svgAssetPath = '',
+    this.logoAssetPath = '',
   });
 
   factory Building.fromJson(Map<String, dynamic> json) {
@@ -79,6 +85,9 @@ class Building {
       maxInputs: json['max_inputs'] as int,
       maxOutputs: json['max_outputs'] as int,
       ports: PortsLayout.fromJson(json['ports'] as Map<String, dynamic>),
+      powerConsumption: (json['power_consumption'] as num?)?.toDouble() ?? 0,
+      svgAssetPath: (json['svg_asset'] as String?) ?? '',
+      logoAssetPath: (json['logo_asset'] as String?) ?? '',
     );
   }
 }

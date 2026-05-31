@@ -299,6 +299,86 @@ class BuildingRenderer {
       ..style = PaintingStyle.stroke;
     canvas.drawRect(Rect.fromLTWH(0, 0, w, h), borderPaint);
 
+    drawPortArrows(canvas, building, w, h, cellSize, opacity: opacity);
+
     canvas.restore();
+  }
+
+  /// 绘制端口方向箭头（创建/移动设备时显示，放置后消失）
+  /// 进料口：绿色三角形，指向建筑内部（物料流入方向）
+  /// 出料口：黄色三角形，指向建筑外部（物料流出方向）
+  static void drawPortArrows(
+    Canvas canvas,
+    Building building,
+    double w,
+    double h,
+    double cellSize, {
+    double opacity = 1.0,
+  }) {
+    final arrowLen = cellSize * 0.35;
+    final arrowWid = cellSize * 0.25;
+
+    for (final port in building.ports.inputs) {
+      final px = port.relativeX * w;
+      final py = port.relativeY * h;
+      final flowDir = _oppositeDirection(port.direction);
+      _drawTriangleArrow(canvas, px, py, flowDir, arrowLen, arrowWid,
+          Color(0xCC44FF44).withValues(alpha: 0.8 * opacity));
+    }
+
+    for (final port in building.ports.outputs) {
+      final px = port.relativeX * w;
+      final py = port.relativeY * h;
+      _drawTriangleArrow(canvas, px, py, port.direction, arrowLen, arrowWid,
+          Color(0xCCFFEF00).withValues(alpha: 0.8 * opacity));
+    }
+  }
+
+  static String _oppositeDirection(String direction) {
+    switch (direction) {
+      case 'up':
+        return 'down';
+      case 'down':
+        return 'up';
+      case 'left':
+        return 'right';
+      case 'right':
+        return 'left';
+      default:
+        return direction;
+    }
+  }
+
+  static void _drawTriangleArrow(Canvas canvas, double cx, double cy,
+      String direction, double length, double width, Color color) {
+    final halfLen = length / 2;
+    final halfWid = width / 2;
+    final path = Path();
+
+    switch (direction) {
+      case 'up':
+        path.moveTo(cx, cy - halfLen);
+        path.lineTo(cx - halfWid, cy + halfLen);
+        path.lineTo(cx + halfWid, cy + halfLen);
+        break;
+      case 'down':
+        path.moveTo(cx, cy + halfLen);
+        path.lineTo(cx - halfWid, cy - halfLen);
+        path.lineTo(cx + halfWid, cy - halfLen);
+        break;
+      case 'left':
+        path.moveTo(cx - halfLen, cy);
+        path.lineTo(cx + halfLen, cy - halfWid);
+        path.lineTo(cx + halfLen, cy + halfWid);
+        break;
+      case 'right':
+        path.moveTo(cx + halfLen, cy);
+        path.lineTo(cx - halfLen, cy - halfWid);
+        path.lineTo(cx - halfLen, cy + halfWid);
+        break;
+    }
+    path.close();
+
+    canvas.drawPath(path, Paint()..color = color);
   }
 }

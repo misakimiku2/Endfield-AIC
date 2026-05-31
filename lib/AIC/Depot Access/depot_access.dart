@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../models/building.dart';
 import '../../models/recipe.dart';
+import '../../canvas/building_renderer.dart';
 
 /// 仓库存货口配置
 class DepotLoaderConfig {
@@ -57,7 +58,8 @@ class DepotUnloaderConfig {
   ];
 }
 
-/// 仓库存取货口共用渲染器（SVG 版本）
+/// 仓库存取货口共用渲染器（模块化：基础单元 + Logo）
+/// Logo 单独绘制，始终不随设备/画布旋转
 class DepotAccessRenderer {
   // 颜色常量
   static const Color _frameColor = Color(0xFF333333);
@@ -65,18 +67,38 @@ class DepotAccessRenderer {
   static const Color _loaderBodyColor = Color(0xFF44AA88);
   static const Color _unloaderBodyColor = Color(0xFFAA8844);
 
-  // SVG 缓存
-  static PictureInfo? _loaderPicture;
-  static PictureInfo? _unloaderPicture;
+  // 模块定位常量（基于原始 50.8×16.933333 坐标系的相对比例）
+  static const double _baseSvgW = 50.8;
+  static const double _baseSvgH = 16.933333;
+
+  // Loader Logo 在基础坐标系中的位置
+  static const double _loaderLogoRelX = 20.058723 / _baseSvgW;
+  static const double _loaderLogoRelY = 3.3388142 / _baseSvgH;
+  static const double _loaderLogoRelW = 9.3906411 / _baseSvgW;
+  static const double _loaderLogoRelH = 12.213725 / _baseSvgH;
+
+  // Unloader Logo 在基础坐标系中的位置
+  static const double _unloaderLogoRelX = 20.704502 / _baseSvgW;
+  static const double _unloaderLogoRelY = 3.3385737 / _baseSvgH;
+  static const double _unloaderLogoRelW = 9.3909903 / _baseSvgW;
+  static const double _unloaderLogoRelH = 12.214105 / _baseSvgH;
+
+  // SVG 源字符串
+  static String? _baseSvgStr;
+
+  // 基础单元 PictureInfo 和缓存
+  static PictureInfo? _baseSvgPicture;
+  static final Map<String, PictureInfo> _baseSvgCache = {};
+
+  // Logo PictureInfo
+  static PictureInfo? _loaderLogoPicture;
+  static PictureInfo? _unloaderLogoPicture;
+
   static bool _initialized = false;
   static bool _initializing = false;
-
-  static String? _baseLoaderSvgStr;
-  static String? _baseUnloaderSvgStr;
-  static final Map<String, PictureInfo> _svgCache = {};
   static VoidCallback? _onReadyCallback;
 
-  /// 预加载仓库存取口 SVG 资源
+  /// 预加载仓库存取口 SVG 资源（模块化：基础单元 + Logo）
   /// [onReady] 加载完成后的回调，用于通知外部刷新缓存和重绘
   static Future<void> init({VoidCallback? onReady}) async {
     _onReadyCallback = onReady;
@@ -84,33 +106,29 @@ class DepotAccessRenderer {
     _initializing = true;
 
     try {
-      // 1. 加载原始 SVG 字符串
-      _baseLoaderSvgStr = await rootBundle.loadString('assets/svg/Depot_Loader.svg');
-      _baseUnloaderSvgStr = await rootBundle.loadString('assets/svg/Depot_Unloader.svg');
+      // 1. 加载各模块原始 SVG 字符串
+      _baseSvgStr = await rootBundle.loadString('assets/svg/Depot.svg');
+      final loaderLogoSvgStr = await rootBundle.loadString('assets/svg/LOGO/Depot_Loader_logo.svg');
+      final unloaderLogoSvgStr = await rootBundle.loadString('assets/svg/LOGO/Depot_Unloader_logo.svg');
 
       // 2. 生成默认状态 SVG 并清理 Inkscape
-      const defaultLoaderKey = 'L0';
-      const defaultUnloaderKey = 'U0';
-
-      final defaultLoaderSvg = _generateModifiedSvg(_baseLoaderSvgStr!, '0');
-      final defaultUnloaderSvg = _generateModifiedSvg(_baseUnloaderSvgStr!, '0');
-
-      final cleanedLoaderSvg = _cleanInkscapeSvg(defaultLoaderSvg);
-      final cleanedUnloaderSvg = _cleanInkscapeSvg(defaultUnloaderSvg);
+      final baseDefaultSvg = _cleanInkscapeSvg(_generateBaseModifiedSvg(_baseSvgStr!, '0'));
+      final loaderLogoSvg = _cleanInkscapeSvg(loaderLogoSvgStr);
+      final unloaderLogoSvg = _cleanInkscapeSvg(unloaderLogoSvgStr);
 
       // 3. 解析为 PictureInfo 并缓存
-      _loaderPicture = await vg.loadPicture(SvgStringLoader(cleanedLoaderSvg), null);
-      _unloaderPicture = await vg.loadPicture(SvgStringLoader(cleanedUnloaderSvg), null);
+      _baseSvgPicture = await vg.loadPicture(SvgStringLoader(baseDefaultSvg), null);
+      _baseSvgCache['0'] = _baseSvgPicture!;
 
-      _svgCache[defaultLoaderKey] = _loaderPicture!;
-      _svgCache[defaultUnloaderKey] = _unloaderPicture!;
+      _loaderLogoPicture = await vg.loadPicture(SvgStringLoader(loaderLogoSvg), null);
+      _unloaderLogoPicture = await vg.loadPicture(SvgStringLoader(unloaderLogoSvg), null);
 
       _initialized = true;
 
       // 4. 通知外部刷新
       onReady?.call();
     } catch (e) {
-      debugPrint('Failed to load depot access SVG: $e');
+      debugPrint('Failed to load depot access SVGs: $e');
     } finally {
       _initializing = false;
     }
@@ -120,39 +138,32 @@ class DepotAccessRenderer {
   static String _cleanInkscapeSvg(String svg) {
     var result = svg;
 
-    // 移除 <sodipodi:namedview> 块
     result = result.replaceAll(
       RegExp(r'<sodipodi:namedview[\s\S]*?</sodipodi:namedview>', multiLine: true), '',
     );
-
-    // 移除 <inkscape:path-effect> 自闭合标签
     result = result.replaceAll(
       RegExp(r'<inkscape:path-effect[\s\S]*?/>', multiLine: true), '',
     );
-
-    // 移除 <image> 元素
     result = result.replaceAll(
       RegExp(r'<image[\s\S]*?/>', multiLine: true), '',
     );
-
-    // 移除 Inkscape/Sodipodi 特有属性
     result = result.replaceAll(RegExp(r'\s+inkscape:[a-zA-Z-]+="[^"]*"'), '');
     result = result.replaceAll(RegExp(r'\s+sodipodi:[a-zA-Z-]+="[^"]*"'), '');
-
-    // 移除 Inkscape 命名空间声明
     result = result.replaceAll(RegExp(r'\s+xmlns:inkscape="[^"]*"'), '');
     result = result.replaceAll(RegExp(r'\s+xmlns:sodipodi="[^"]*"'), '');
-
-    // 移除空的 <defs></defs>
     result = result.replaceAll(RegExp(r'<defs\s*>\s*</defs>'), '');
 
     return result;
   }
 
   /// SVG 是否已加载完成
-  static bool get isReady => _initialized && _loaderPicture != null && _unloaderPicture != null;
+  static bool get isReady =>
+      _initialized &&
+      _baseSvgPicture != null &&
+      _loaderLogoPicture != null &&
+      _unloaderLogoPicture != null;
 
-  /// 渲染仓库存取货口
+  /// 渲染仓库存取货口（不含 Logo，Logo 需通过 [renderLogo] 单独绘制）
   static void render(
     Canvas canvas,
     Building building,
@@ -176,7 +187,7 @@ class DepotAccessRenderer {
     canvas.rotate(rotation * math.pi / 2);
     canvas.translate(-w / 2, -h / 2);
 
-    // 1. 绘制设备主体 (SVG)
+    // 1. 绘制设备主体（不含 Logo）
     if (isReady) {
       _drawSvgBody(canvas, w, h, building.id, portConnections: portConnections);
     } else {
@@ -194,7 +205,7 @@ class DepotAccessRenderer {
     canvas.restore();
   }
 
-  /// 渲染放置预览
+  /// 渲染放置预览（半透明，不含 Logo，Logo 需单独绘制）
   static void renderPlaceholder(
     Canvas canvas,
     Building building,
@@ -204,6 +215,7 @@ class DepotAccessRenderer {
     double opacity, {
     int rotation = 0,
     bool isBlocked = false,
+    double canvasRotation = 0.0,
   }) {
     final x = gridX * cellSize;
     final y = gridY * cellSize;
@@ -216,9 +228,12 @@ class DepotAccessRenderer {
     canvas.translate(-w / 2, -h / 2);
 
     if (isReady) {
-      _drawSvgBody(canvas, w, h, building.id, opacity: opacity * 0.5, portConnections: null, tintBlue: !isBlocked, tintRed: isBlocked);
+      _drawSvgBody(canvas, w, h, building.id,
+          opacity: opacity * 0.5,
+          portConnections: null,
+          tintBlue: !isBlocked,
+          tintRed: isBlocked);
     } else {
-      // 碰撞时红色，否则蓝色
       final previewColor = isBlocked ? const Color(0xFFFF4444) : const Color(0xFF44AAFF);
       final paint = Paint()
         ..color = previewColor.withValues(alpha: opacity * 0.15)
@@ -232,23 +247,128 @@ class DepotAccessRenderer {
       canvas.drawRect(Rect.fromLTWH(0, 0, w, h), borderPaint);
     }
 
+    BuildingRenderer.drawPortArrows(canvas, building, w, h, cellSize, opacity: opacity);
+
+    canvas.restore();
+
+    // Logo 单独绘制，反旋转抵消设备旋转 + 画布旋转
+    if (isReady) {
+      renderLogo(
+        canvas, x, y, w, h, building.id, rotation, canvasRotation,
+        opacity: opacity * 0.5,
+        tintBlue: !isBlocked,
+        tintRed: isBlocked,
+      );
+    }
+  }
+
+  /// 单独渲染 Logo，始终不随设备旋转和画布旋转
+  /// [x], [y] 建筑在画布坐标系中的左上角位置
+  /// [w], [h] 建筑的像素尺寸
+  /// [buildingId] 建筑ID，用于选择对应的 Logo
+  /// [buildingRotation] 建筑自身的旋转（0/1/2/3）
+  /// [canvasRotation] 画布/视图旋转角度（弧度）
+  static void renderLogo(
+    Canvas canvas,
+    double x,
+    double y,
+    double w,
+    double h,
+    String buildingId,
+    int buildingRotation,
+    double canvasRotation, {
+    double opacity = 1.0,
+    bool tintBlue = false,
+    bool tintRed = false,
+  }) {
+    final isLoader = buildingId == DepotLoaderConfig.id;
+    final logoPicture = isLoader ? _loaderLogoPicture : _unloaderLogoPicture;
+    if (logoPicture == null) return;
+
+    final buildingAngle = buildingRotation * math.pi / 2;
+    final counterAngle = -(buildingAngle + canvasRotation);
+
+    final logoRelX = isLoader ? _loaderLogoRelX : _unloaderLogoRelX;
+    final logoRelY = isLoader ? _loaderLogoRelY : _unloaderLogoRelY;
+    final logoRelW = isLoader ? _loaderLogoRelW : _unloaderLogoRelW;
+    final logoRelH = isLoader ? _loaderLogoRelH : _unloaderLogoRelH;
+
+    canvas.save();
+    canvas.translate(x + w / 2, y + h / 2);
+    canvas.rotate(buildingAngle);
+    canvas.translate(-w / 2, -h / 2);
+
+    final logoCx = logoRelX * w + logoRelW * w / 2;
+    final logoCy = logoRelY * h + logoRelH * h / 2;
+
+    if (tintRed) {
+      canvas.saveLayer(
+          Rect.fromLTWH(0, 0, w, h),
+          Paint()
+            ..color = Color.fromRGBO(255, 255, 255, opacity)
+            ..colorFilter = const ColorFilter.mode(Color(0xFFFF4444), BlendMode.srcATop));
+    } else if (tintBlue) {
+      canvas.saveLayer(
+          Rect.fromLTWH(0, 0, w, h),
+          Paint()
+            ..color = Color.fromRGBO(255, 255, 255, opacity)
+            ..colorFilter = const ColorFilter.mode(Color(0xFF44AAFF), BlendMode.srcATop));
+    } else if (opacity < 1.0) {
+      canvas.saveLayer(
+          Rect.fromLTWH(0, 0, w, h),
+          Paint()..color = Color.fromRGBO(255, 255, 255, opacity));
+    }
+
+    canvas.save();
+    canvas.translate(logoCx, logoCy);
+    canvas.rotate(counterAngle);
+    canvas.translate(-logoCx, -logoCy);
+    _drawPictureScaled(
+      canvas,
+      logoPicture,
+      logoRelX * w,
+      logoRelY * h,
+      logoRelW * w,
+      logoRelH * h,
+    );
+    canvas.restore();
+
+    if (tintRed || tintBlue || opacity < 1.0) {
+      canvas.restore();
+    }
+
     canvas.restore();
   }
 
-  /// 根据端口连接状态生成修改后的 SVG
-  /// [baseSvg] 原始 SVG 字符串
-  /// [state] 端口连接状态：'0'=未连接, '1'=已连接(黄色), '2'=预览(蓝色)
-  static String _generateModifiedSvg(String baseSvg, String state) {
-    var svgText = baseSvg;
+  // ==================== SVG 预加载 ====================
 
-    // rect1 是端口区域矩形，默认颜色 #d3d3d3
+  static void _preloadBaseSvgForState(String stateKey) async {
+    if (_baseSvgStr == null || _baseSvgCache.containsKey(stateKey)) return;
+    _baseSvgCache[stateKey] = _baseSvgPicture!;
+
+    try {
+      final modifiedSvg = _generateBaseModifiedSvg(_baseSvgStr!, stateKey);
+      final cleanedSvg = _cleanInkscapeSvg(modifiedSvg);
+      final PictureInfo picture = await vg.loadPicture(SvgStringLoader(cleanedSvg), null);
+      _baseSvgCache[stateKey] = picture;
+      _onReadyCallback?.call();
+    } catch (e) {
+      debugPrint('Failed to preload base depot SVG for state $stateKey: $e');
+      _baseSvgCache.remove(stateKey);
+    }
+  }
+
+  // ==================== SVG 动态颜色修改 ====================
+
+  /// 修改基础单元 SVG 的端口颜色
+  /// state: '0'=未连接, '1'=已连接(黄色), '2'=预览(蓝色)
+  static String _generateBaseModifiedSvg(String baseSvg, String state) {
+    var svgText = baseSvg;
     final portColor = (state == '1') ? '#ffef00' : ((state == '2') ? '#44aaff' : '#d3d3d3');
     svgText = _setElementColor(svgText, 'rect1', '#d3d3d3', portColor);
-
     return svgText;
   }
 
-  /// 替换 SVG 中指定 id 元素的颜色
   static String _setElementColor(String svg, String elementId, String oldColor, String newColor) {
     final regExp = RegExp(
       '(<[a-zA-Z0-9_-]+[^>]*?id="$elementId"[^>]*?>)',
@@ -264,29 +384,33 @@ class DepotAccessRenderer {
     });
   }
 
-  /// 异步预加载指定连接状态的 SVG
-  static void _preloadSvgForState(String key, bool isLoader) async {
-    final baseSvg = isLoader ? _baseLoaderSvgStr : _baseUnloaderSvgStr;
-    if (baseSvg == null) return;
+  // ==================== 连接键生成 ====================
 
-    // 使用默认图占位，防止重复预载
-    final defaultPicture = isLoader ? _loaderPicture! : _unloaderPicture!;
-    _svgCache[key] = defaultPicture;
+  static String _getConnectionKey(String buildingId, Map<String, int>? portConnections) {
+    if (portConnections == null) return '0';
 
-    try {
-      final state = key.substring(1); // 去掉前缀 'L' 或 'U'
-      final modifiedSvg = _generateModifiedSvg(baseSvg, state);
-      final cleanedSvg = _cleanInkscapeSvg(modifiedSvg);
-      final PictureInfo picture = await vg.loadPicture(SvgStringLoader(cleanedSvg), null);
-      _svgCache[key] = picture;
-      _onReadyCallback?.call();
-    } catch (e) {
-      debugPrint('Failed to load modified depot SVG for state $key: $e');
-      _svgCache.remove(key);
+    final isLoader = buildingId == DepotLoaderConfig.id;
+    if (isLoader) {
+      return portConnections['input_0']?.toString() ?? '0';
+    } else {
+      return portConnections['output_0']?.toString() ?? '0';
     }
   }
 
-  /// 使用 SVG 绘制仓库存取口主体
+  // ==================== SVG 渲染 ====================
+
+  static void _drawPictureScaled(Canvas canvas, PictureInfo picture,
+      double x, double y, double width, double height) {
+    canvas.save();
+    canvas.translate(x, y);
+    final scaleX = width / picture.size.width;
+    final scaleY = height / picture.size.height;
+    canvas.scale(scaleX, scaleY);
+    canvas.drawPicture(picture.picture);
+    canvas.restore();
+  }
+
+  /// 使用 SVG 绘制仓库存取口主体（不含 Logo）
   static void _drawSvgBody(
     Canvas canvas,
     double w,
@@ -297,38 +421,37 @@ class DepotAccessRenderer {
     bool tintBlue = false,
     bool tintRed = false,
   }) {
-    final isLoader = buildingId == DepotLoaderConfig.id;
-    final key = _getConnectionKey(buildingId, portConnections);
+    final stateKey = _getConnectionKey(buildingId, portConnections);
 
-    var picture = _svgCache[key];
-
+    var picture = _baseSvgCache[stateKey];
     if (picture == null) {
-      // 首次遇到新状态，异步预加载
-      _preloadSvgForState(key, isLoader);
-      picture = isLoader ? _loaderPicture : _unloaderPicture;
+      _preloadBaseSvgForState(stateKey);
+      picture = _baseSvgPicture;
     }
 
     if (picture == null) return;
-    final svgSize = picture.size;
 
     canvas.save();
 
     if (tintRed) {
-      canvas.saveLayer(Rect.fromLTWH(0, 0, w, h), Paint()
-        ..color = Color.fromRGBO(255, 255, 255, opacity)
-        ..colorFilter = const ColorFilter.mode(Color(0xFFFF4444), BlendMode.srcATop));
+      canvas.saveLayer(
+          Rect.fromLTWH(0, 0, w, h),
+          Paint()
+            ..color = Color.fromRGBO(255, 255, 255, opacity)
+            ..colorFilter = const ColorFilter.mode(Color(0xFFFF4444), BlendMode.srcATop));
     } else if (tintBlue) {
-      canvas.saveLayer(Rect.fromLTWH(0, 0, w, h), Paint()
-        ..color = Color.fromRGBO(255, 255, 255, opacity)
-        ..colorFilter = const ColorFilter.mode(Color(0xFF44AAFF), BlendMode.srcATop));
+      canvas.saveLayer(
+          Rect.fromLTWH(0, 0, w, h),
+          Paint()
+            ..color = Color.fromRGBO(255, 255, 255, opacity)
+            ..colorFilter = const ColorFilter.mode(Color(0xFF44AAFF), BlendMode.srcATop));
     } else if (opacity < 1.0) {
-      canvas.saveLayer(Rect.fromLTWH(0, 0, w, h), Paint()..color = Color.fromRGBO(255, 255, 255, opacity));
+      canvas.saveLayer(
+          Rect.fromLTWH(0, 0, w, h),
+          Paint()..color = Color.fromRGBO(255, 255, 255, opacity));
     }
 
-    final scaleX = w / svgSize.width;
-    final scaleY = h / svgSize.height;
-    canvas.scale(scaleX, scaleY);
-    canvas.drawPicture(picture.picture);
+    _drawPictureScaled(canvas, picture, 0, 0, w, h);
 
     if (tintRed || tintBlue || opacity < 1.0) {
       canvas.restore();
@@ -350,22 +473,5 @@ class DepotAccessRenderer {
       ..strokeWidth = 3.0
       ..style = PaintingStyle.stroke;
     canvas.drawRect(Rect.fromLTWH(0, 0, w, h), framePaint);
-  }
-
-  static String _getConnectionKey(String buildingId, Map<String, int>? portConnections) {
-    final isLoader = buildingId == DepotLoaderConfig.id;
-    final prefix = isLoader ? 'L' : 'U';
-
-    if (portConnections == null) {
-      return '${prefix}0';
-    }
-
-    if (isLoader) {
-      // 存货口只有 1 个输入端口
-      return '$prefix${portConnections['input_0'] ?? 0}';
-    } else {
-      // 取货口只有 1 个输出端口
-      return '$prefix${portConnections['output_0'] ?? 0}';
-    }
   }
 }
