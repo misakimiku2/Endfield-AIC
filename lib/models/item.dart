@@ -7,6 +7,8 @@ class Item {
   final String subType;
   final Color color;
   final String iconSvg;
+  final String imageAssetPath;
+  final int level;
 
   const Item({
     required this.id,
@@ -15,6 +17,8 @@ class Item {
     required this.subType,
     required this.color,
     required this.iconSvg,
+    required this.imageAssetPath,
+    required this.level,
   });
 
   factory Item.fromJson(Map<String, dynamic> json) {
@@ -28,11 +32,9 @@ class Item {
       category: json['category'] as String,
       subType: json['sub_type'] as String,
       color: Color.fromARGB(255, r, g, b),
-      iconSvg: json['icon_svg'] as String,
+      iconSvg: json['icon_svg'] as String? ?? '',
+      imageAssetPath: json['image_asset_path'] as String? ?? '',
+      level: json['level'] as int? ?? 1,
     );
   }
-
-  bool get isRaw => category == 'raw';
-  bool get isIntermediate => category == 'intermediate';
-  bool get isFinal => category == 'final';
 }

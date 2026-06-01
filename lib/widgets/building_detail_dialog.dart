@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -44,16 +47,44 @@ class BuildingDetailDialog extends StatefulWidget {
 
 class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   int _resourceTabIndex = 0;
-  static const List<String> _tabLabels = ['矿物', '植物', '产物'];
+  static const List<String> _tabLabels = ['植物', '矿物', '可用物品', '产物'];
+  static const Map<String, String> _categoryToTabLabel = {
+    'plant': '植物',
+    'mineral_ore': '矿物',
+    'usable': '可用物品',
+    'product': '产物',
+  };
 
   late final List<_ResourceItem> _allItems;
   String? _logoSvgString;
+  final ScrollController _gridScrollController = ScrollController();
+  final GlobalKey _gridContainerKey = GlobalKey();
+  bool _scrollbarVisible = false;
+  Timer? _scrollbarFadeTimer;
+  bool _isDraggingScrollbar = false;
+  double _dragStartY = 0;
+  double _dragStartOffset = 0;
 
   @override
   void initState() {
     super.initState();
     _allItems = _buildResourceList();
     _loadLogo();
+  }
+
+  @override
+  void dispose() {
+    _scrollbarFadeTimer?.cancel();
+    _gridScrollController.dispose();
+    super.dispose();
+  }
+
+  void _onGridScrolled() {
+    _scrollbarFadeTimer?.cancel();
+    if (!_scrollbarVisible) setState(() => _scrollbarVisible = true);
+    _scrollbarFadeTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) setState(() => _scrollbarVisible = false);
+    });
   }
 
   Future<void> _loadLogo() async {
@@ -83,36 +114,17 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
     for (final item in widget.dataLoader.items.values) {
       if (!seenNames.contains(item.name)) {
         seenNames.add(item.name);
-        String category;
-        if (_isMineral(item)) {
-          category = '矿物';
-        } else if (_isPlant(item)) {
-          category = '植物';
-        } else {
-          category = '产物';
-        }
+        final category = _categoryToTabLabel[item.category] ?? '产物';
         items.add(_ResourceItem(
           id: item.id,
           name: item.name,
           category: category,
           color: item.color,
+          imageAssetPath: item.imageAssetPath,
         ));
       }
     }
     return items;
-  }
-
-  bool _isMineral(dynamic item) {
-    final name = item.name;
-    const minerals = ['源矿', '紫晶矿', '蓝铁矿', '赤铜矿'];
-    return minerals.any((m) => name.contains(m));
-  }
-
-  bool _isPlant(dynamic item) {
-    final subType = item.subType.toString().toLowerCase();
-    return subType == 'plant' ||
-        ['荞花', '柑实', '酮化灌木', '砂叶', '锦草', '芽针']
-            .any((p) => item.name.contains(p));
   }
 
   List<_ResourceItem> get _filteredItems {
@@ -154,20 +166,13 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.all(20),
-                child: Stack(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          flex: 5,
-                          child: _buildResourcePanel(),
-                        ),
-                        const SizedBox(width: 20),
-                        Expanded(
-                          flex: 4,
-                          child: _buildSynthesisPanel(recipes),
-                        ),
-                      ],
+                    _buildResourcePanel(),
+                    const SizedBox(width: 20),
+                    Expanded(
+                      child: _buildSynthesisPanel(recipes),
                     ),
                   ],
                 ),
@@ -290,73 +295,240 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   }
 
   Widget _buildResourcePanel() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(3, (index) {
-            final isActive = index == _resourceTabIndex;
-            return Padding(
-              padding: EdgeInsets.only(left: index > 0 ? 8 : 0),
-              child: GestureDetector(
-                onTap: () => setState(() => _resourceTabIndex = index),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: isActive
-                        ? const Color(0xFF3A3A3A)
-                        : const Color(0xFF1E1E1E),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: isActive
-                          ? const Color(0xFFFFCC00)
-                          : const Color(0xFF3A3A3A),
-                    ),
-                  ),
-                  child: Text(
-                    _tabLabels[index],
-                    style: TextStyle(
-                      color: isActive
-                          ? const Color(0xFFFFCC00)
-                          : const Color(0xFF999999),
-                      fontSize: 13,
-                      fontWeight:
-                          isActive ? FontWeight.w600 : FontWeight.w500,
-                    ),
-                  ),
+    return Container(
+      width: 440,
+      height: 520,
+      decoration: BoxDecoration(
+        color: const Color(0xFF373737),
+        borderRadius: BorderRadius.circular(15),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          Column(
+            children: [
+              const SizedBox(height: 24),
+              _buildTabBar(),
+              const SizedBox(height: 24),
+              _buildGridArea(),
+            ],
+          ),
+          Positioned(
+            right: 6.085,
+            top: 72,
+            bottom: 0,
+            child: Center(
+              child: _buildGridScrollbar(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabBar() {
+    const tabIcons = [
+      'assets/svg/Plant_icon.svg',
+      'assets/svg/Mineral_Ore_icon.svg',
+      'assets/svg/Usable_Items_icon.svg',
+      'assets/svg/Products_icon.svg',
+    ];
+
+    const tabWidth = 93.75;
+    const totalWidth = 375.0;
+
+    return Center(
+      child: SizedBox(
+        width: totalWidth,
+        height: 32,
+        child: Stack(
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF6E6E6E),
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              left: _resourceTabIndex * tabWidth,
+              top: 0,
+              child: Container(
+                width: tabWidth,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
                 ),
               ),
-            );
-          }),
-        ),
-        const SizedBox(height: 14),
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E1E1E),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF333333)),
             ),
+            Row(
+              children: List.generate(4, (index) {
+                final isSelected = index == _resourceTabIndex;
+                return SizedBox(
+                  width: tabWidth,
+                  height: 32,
+                  child: GestureDetector(
+                    onTap: () => setState(() => _resourceTabIndex = index),
+                    behavior: HitTestBehavior.opaque,
+                    child: isSelected
+                        ? Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SvgPicture.asset(
+                                tabIcons[index],
+                                width: 18,
+                                height: 18,
+                                colorFilter: const ColorFilter.mode(
+                                  Color(0xFF212121),
+                                  BlendMode.srcIn,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _tabLabels[index],
+                                style: const TextStyle(
+                                  color: Color(0xFF212121),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          )
+                        : Center(
+                            child: SvgPicture.asset(
+                              tabIcons[index],
+                              width: 20,
+                              height: 20,
+                              colorFilter: const ColorFilter.mode(
+                                Color(0xFF929292),
+                                BlendMode.srcIn,
+                              ),
+                            ),
+                          ),
+                  ),
+                );
+              }),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGridArea() {
+    return Center(
+      child: Listener(
+        onPointerSignal: (event) {
+          if (event is PointerScrollEvent && _gridScrollController.hasClients) {
+            final maxExtent = _gridScrollController.position.maxScrollExtent;
+            final target = (_gridScrollController.offset + event.scrollDelta.dy * 1.5)
+                .clamp(0.0, maxExtent);
+            _gridScrollController.animateTo(
+              target,
+              duration: const Duration(milliseconds: 150),
+              curve: Curves.easeOutCubic,
+            );
+            _onGridScrolled();
+          }
+        },
+        child: Container(
+          key: _gridContainerKey,
+          width: 395.66,
+          height: 438,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10.95),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
             child: GridView.builder(
-              gridDelegate:
-                  const SliverGridDelegateWithFixedCrossAxisCount(
+              controller: _gridScrollController,
+              padding: EdgeInsets.zero,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 4,
-                mainAxisSpacing: 8,
-                crossAxisSpacing: 8,
-                childAspectRatio: 1.0,
+                mainAxisSpacing: 7.3,
+                crossAxisSpacing: 7.3,
+                childAspectRatio: 93.44 / 93.62,
               ),
               itemCount: _filteredItems.length,
               itemBuilder: (context, index) {
                 final item = _filteredItems[index];
-                return _ResourceGridTile(item: item);
+                return _ResourceGridTile(item: item, gridContainerKey: _gridContainerKey);
               },
             ),
           ),
         ),
-      ],
+      ),
+    );
+  }
+
+  Widget _buildGridScrollbar() {
+    return SizedBox(
+      width: 10,
+      height: 438,
+      child: AnimatedOpacity(
+        opacity: (_scrollbarVisible || _isDraggingScrollbar) ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 300),
+        child: ListenableBuilder(
+          listenable: _gridScrollController,
+          builder: (context, _) {
+            if (!_gridScrollController.hasClients) return const SizedBox.shrink();
+            final position = _gridScrollController.position;
+            final maxExtent = position.maxScrollExtent;
+            if (maxExtent <= 0) return const SizedBox.shrink();
+
+            const trackHeight = 438.0;
+            final thumbHeight =
+                (trackHeight * trackHeight / (trackHeight + maxExtent)).clamp(30.0, trackHeight);
+            final scrollFraction = position.pixels / maxExtent;
+            final thumbTop = scrollFraction * (trackHeight - thumbHeight);
+
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned(
+                  top: thumbTop,
+                  left: 0,
+                  right: 0,
+                  height: thumbHeight,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onVerticalDragStart: (details) {
+                      _dragStartY = details.globalPosition.dy;
+                      _dragStartOffset = position.pixels;
+                      _scrollbarFadeTimer?.cancel();
+                      setState(() => _isDraggingScrollbar = true);
+                    },
+                    onVerticalDragUpdate: (details) {
+                      final delta = details.globalPosition.dy - _dragStartY;
+                      final scrollDelta = delta * (maxExtent / (trackHeight - thumbHeight));
+                      final target = (_dragStartOffset + scrollDelta).clamp(0.0, maxExtent);
+                      _gridScrollController.jumpTo(target);
+                    },
+                    onVerticalDragEnd: (_) {
+                      setState(() => _isDraggingScrollbar = false);
+                      _onGridScrolled();
+                    },
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: _isDraggingScrollbar ? 0.7 : 0.5),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
     );
   }
 
@@ -484,62 +656,129 @@ class _ResourceItem {
   final String name;
   final String category;
   final Color color;
+  final String imageAssetPath;
 
   _ResourceItem({
     required this.id,
     required this.name,
     required this.category,
     required this.color,
+    required this.imageAssetPath,
   });
 }
 
-class _ResourceGridTile extends StatelessWidget {
+class _ResourceGridTile extends StatefulWidget {
   final _ResourceItem item;
+  final GlobalKey gridContainerKey;
 
-  const _ResourceGridTile({required this.item});
+  const _ResourceGridTile({required this.item, required this.gridContainerKey});
+
+  @override
+  State<_ResourceGridTile> createState() => _ResourceGridTileState();
+}
+
+class _ResourceGridTileState extends State<_ResourceGridTile> {
+  bool _hovering = false;
+  double _tooltipBottomOffset = 8.0;
+
+  void _onEnter(PointerEnterEvent _) {
+    double bottomOffset = 8.0;
+
+    final tileBox = context.findRenderObject() as RenderBox;
+    final gridBox =
+        widget.gridContainerKey.currentContext?.findRenderObject() as RenderBox?;
+
+    if (gridBox != null) {
+      final tilePos = tileBox.localToGlobal(Offset.zero, ancestor: gridBox);
+      final tileSize = tileBox.size;
+      final gridSize = gridBox.size;
+
+      final tooltipBottomInGrid = tilePos.dy + tileSize.height - 8.0;
+
+      if (tooltipBottomInGrid > gridSize.height) {
+        bottomOffset =
+            (tileSize.height - (gridSize.height - tilePos.dy)).clamp(0.0, tileSize.height);
+      }
+    }
+
+    setState(() {
+      _tooltipBottomOffset = bottomOffset;
+      _hovering = true;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: item.name,
-      child: Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFF2A2A2A),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFF3A3A3A)),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: item.color.withValues(alpha: 0.2),
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: item.color.withValues(alpha: 0.5),
+    return MouseRegion(
+      onEnter: _onEnter,
+      onExit: (_) => setState(() => _hovering = false),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          SvgPicture.asset(
+            'assets/svg/objective_case.svg',
+            fit: BoxFit.fill,
+          ),
+          Center(
+            child: widget.item.imageAssetPath.isNotEmpty
+                ? Image.asset(
+                    widget.item.imageAssetPath,
+                    width: 93,
+                    height: 93,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                    isAntiAlias: true,
+                    errorBuilder: (_, __, ___) => Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: widget.item.color.withValues(alpha: 0.2),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: widget.item.color.withValues(alpha: 0.5),
+                        ),
+                      ),
+                    ),
+                  )
+                : Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: widget.item.color.withValues(alpha: 0.2),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: widget.item.color.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ),
+          ),
+          if (_hovering)
+            Positioned(
+              bottom: _tooltipBottomOffset,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[900]?.withValues(alpha: 0.9),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      widget.item.name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                      ),
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ),
               ),
             ),
-            const SizedBox(height: 4),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: Text(
-                item.name.length > 5
-                    ? '${item.name.substring(0, 5)}...'
-                    : item.name,
-                style: const TextStyle(
-                  color: Color(0xFFBBBBBB),
-                  fontSize: 9,
-                ),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }

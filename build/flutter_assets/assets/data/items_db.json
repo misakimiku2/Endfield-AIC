@@ -1,253 +1,955 @@
 {
-  "version": "1.0.0",
+  "version": "2.0.0",
   "items": {
-    "raw_ore": {
-      "id": "raw_ore",
-      "name": "源石粗矿",
-      "category": "raw",
-      "sub_type": "mineral",
-      "color": "#FFAA00",
-      "icon_svg": "raw_ore_symbol"
-    },
-    "iron_ore": {
-      "id": "iron_ore",
-      "name": "铁矿",
-      "category": "raw",
-      "sub_type": "mineral",
-      "color": "#B87333",
-      "icon_svg": "iron_ore_symbol"
-    },
-    "raw_water": {
-      "id": "raw_water",
-      "name": "工业用水",
-      "category": "raw",
-      "sub_type": "liquid",
-      "color": "#4488FF",
-      "icon_svg": "water_symbol"
-    },
-    "special_crop": {
-      "id": "special_crop",
-      "name": "特种农作物",
-      "category": "raw",
-      "sub_type": "plant",
-      "color": "#44CC44",
-      "icon_svg": "crop_symbol"
-    },
-    "ore_powder": {
-      "id": "ore_powder",
-      "name": "源石粉末",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#D1D1D1",
-      "icon_svg": "powder_symbol"
-    },
-    "iron_plate": {
-      "id": "iron_plate",
-      "name": "铁板",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#8B8682",
-      "icon_svg": "plate_symbol"
-    },
-    "precision_parts": {
-      "id": "precision_parts",
-      "name": "精密器件",
-      "category": "intermediate",
-      "sub_type": "machinery",
-      "color": "#CCCCFF",
-      "icon_svg": "parts_symbol"
-    },
-    "power_cell": {
-      "id": "power_cell",
-      "name": "集成能量电池",
-      "category": "final",
-      "sub_type": "machinery",
-      "color": "#00FF66",
-      "icon_svg": "cell_symbol"
-    },
-    "advanced_alloy": {
-      "id": "advanced_alloy",
-      "name": "高阶合金",
-      "category": "final",
-      "sub_type": "mineral",
-      "color": "#EEDD44",
-      "icon_svg": "alloy_symbol"
-    },
-    "industrial_control_unit": {
-      "id": "industrial_control_unit",
-      "name": "工业控制单元",
-      "category": "final",
-      "sub_type": "machinery",
-      "color": "#FF4444",
-      "icon_svg": "icu_symbol"
-    },
     "originium_ore": {
       "id": "originium_ore",
       "name": "源矿",
-      "category": "raw",
-      "sub_type": "mineral",
+      "category": "mineral_ore",
+      "sub_type": "mineral_ore",
       "color": "#FFAA00",
-      "icon_svg": "originium_ore_symbol"
+      "icon_svg": "originium_ore_symbol",
+      "image_asset_path": "assets/png/Natural Resources/Originium_Ore.png",
+      "level": 1
     },
     "amethyst_ore": {
       "id": "amethyst_ore",
       "name": "紫晶矿",
-      "category": "raw",
-      "sub_type": "mineral",
+      "category": "mineral_ore",
+      "sub_type": "mineral_ore",
       "color": "#9966CC",
-      "icon_svg": "amethyst_ore_symbol"
+      "icon_svg": "amethyst_ore_symbol",
+      "image_asset_path": "assets/png/Natural Resources/Amethyst_Ore.png",
+      "level": 1
     },
     "ferrium_ore": {
       "id": "ferrium_ore",
       "name": "蓝铁矿",
-      "category": "raw",
-      "sub_type": "mineral",
+      "category": "mineral_ore",
+      "sub_type": "mineral_ore",
       "color": "#4488BB",
-      "icon_svg": "ferrium_ore_symbol"
+      "icon_svg": "ferrium_ore_symbol",
+      "image_asset_path": "assets/png/Natural Resources/Ferrium_Ore.png",
+      "level": 1
     },
     "cuprium_ore": {
       "id": "cuprium_ore",
       "name": "赤铜矿",
-      "category": "raw",
-      "sub_type": "mineral",
+      "category": "mineral_ore",
+      "sub_type": "mineral_ore",
       "color": "#CC6644",
-      "icon_svg": "cuprium_ore_symbol"
+      "icon_svg": "cuprium_ore_symbol",
+      "image_asset_path": "assets/png/Natural Resources/Cuprium_Ore.png",
+      "level": 1
     },
-    "clean_water": {
-      "id": "clean_water",
-      "name": "清水",
-      "category": "raw",
-      "sub_type": "liquid",
+    "buckflower": {
+      "id": "buckflower",
+      "name": "荞花",
+      "category": "plant",
+      "sub_type": "plant",
+      "color": "#44CC44",
+      "icon_svg": "buckflower_symbol",
+      "image_asset_path": "assets/png/Natural Resources/Buckflower.png",
+      "level": 1
+    },
+    "citrome": {
+      "id": "citrome",
+      "name": "柑实",
+      "category": "plant",
+      "sub_type": "plant",
+      "color": "#66BB44",
+      "icon_svg": "citrome_symbol",
+      "image_asset_path": "assets/png/Natural Resources/Citrome.png",
+      "level": 1
+    },
+    "aketine": {
+      "id": "aketine",
+      "name": "酮化灌木",
+      "category": "plant",
+      "sub_type": "plant",
+      "color": "#88AA33",
+      "icon_svg": "aketine_symbol",
+      "image_asset_path": "assets/png/Natural Resources/Aketine.png",
+      "level": 1
+    },
+    "sandleaf": {
+      "id": "sandleaf",
+      "name": "砂叶",
+      "category": "plant",
+      "sub_type": "plant",
+      "color": "#AACC33",
+      "icon_svg": "sandleaf_symbol",
+      "image_asset_path": "assets/png/Natural Resources/Sandleaf.png",
+      "level": 1
+    },
+    "jincao": {
+      "id": "jincao",
+      "name": "锦草",
+      "category": "plant",
+      "sub_type": "plant",
+      "color": "#55DD55",
+      "icon_svg": "jincao_symbol",
+      "image_asset_path": "assets/png/Natural Resources/Jincao.png",
+      "level": 1
+    },
+    "yazhen": {
+      "id": "yazhen",
+      "name": "芽针",
+      "category": "plant",
+      "sub_type": "plant",
+      "color": "#33CC66",
+      "icon_svg": "yazhen_symbol",
+      "image_asset_path": "assets/png/Natural Resources/Yazhen.png",
+      "level": 1
+    },
+    "buckflower_powder": {
+      "id": "buckflower_powder",
+      "name": "荞花粉末",
+      "category": "usable",
+      "sub_type": "usable",
       "color": "#44AAFF",
-      "icon_svg": "water_symbol"
+      "icon_svg": "buckflower_powder_symbol",
+      "image_asset_path": "assets/png/AIC Products/Buckflower_Powder.png",
+      "level": 2
     },
-    "waste_water": {
-      "id": "waste_water",
-      "name": "污水",
-      "category": "intermediate",
-      "sub_type": "liquid",
-      "color": "#556644",
-      "icon_svg": "waste_water_symbol"
+    "citrome_powder": {
+      "id": "citrome_powder",
+      "name": "柑实粉末",
+      "category": "usable",
+      "sub_type": "usable",
+      "color": "#44AAFF",
+      "icon_svg": "citrome_powder_symbol",
+      "image_asset_path": "assets/png/AIC Products/Citrome_Powder.png",
+      "level": 2
     },
-    "origocrust_powder": {
-      "id": "origocrust_powder",
-      "name": "晶体外壳粉末",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#D4C4A0",
-      "icon_svg": "powder_symbol"
+    "jincao_powder": {
+      "id": "jincao_powder",
+      "name": "锦草粉末",
+      "category": "usable",
+      "sub_type": "usable",
+      "color": "#44AAFF",
+      "icon_svg": "jincao_powder_symbol",
+      "image_asset_path": "assets/png/AIC Products/Jincao_Powder.png",
+      "level": 2
+    },
+    "yazhen_powder": {
+      "id": "yazhen_powder",
+      "name": "芽针粉末",
+      "category": "usable",
+      "sub_type": "usable",
+      "color": "#44AAFF",
+      "icon_svg": "yazhen_powder_symbol",
+      "image_asset_path": "assets/png/AIC Products/Yazhen_Powder.png",
+      "level": 2
+    },
+    "canned_citrome_c": {
+      "id": "canned_citrome_c",
+      "name": "柑实罐头",
+      "category": "usable",
+      "sub_type": "usable",
+      "color": "#44AAFF",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 3
+    },
+    "canned_citrome_b": {
+      "id": "canned_citrome_b",
+      "name": "优质柑实罐头",
+      "category": "usable",
+      "sub_type": "usable",
+      "color": "#44AAFF",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 3
+    },
+    "canned_citrome_a": {
+      "id": "canned_citrome_a",
+      "name": "精选柑实罐头",
+      "category": "usable",
+      "sub_type": "usable",
+      "color": "#44AAFF",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 4
+    },
+    "buck_capsule_c": {
+      "id": "buck_capsule_c",
+      "name": "荞愈胶囊",
+      "category": "usable",
+      "sub_type": "usable",
+      "color": "#44AAFF",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 3
+    },
+    "buck_capsule_b": {
+      "id": "buck_capsule_b",
+      "name": "优质荞愈胶囊",
+      "category": "usable",
+      "sub_type": "usable",
+      "color": "#44AAFF",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 3
+    },
+    "buck_capsule_a": {
+      "id": "buck_capsule_a",
+      "name": "精选荞愈胶囊",
+      "category": "usable",
+      "sub_type": "usable",
+      "color": "#44AAFF",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 4
+    },
+    "yazhen_syringe_c": {
+      "id": "yazhen_syringe_c",
+      "name": "芽针针剂",
+      "category": "usable",
+      "sub_type": "usable",
+      "color": "#44AAFF",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 3
+    },
+    "yazhen_syringe_a": {
+      "id": "yazhen_syringe_a",
+      "name": "优质芽针针剂",
+      "category": "usable",
+      "sub_type": "usable",
+      "color": "#44AAFF",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 4
+    },
+    "jincao_drink": {
+      "id": "jincao_drink",
+      "name": "棉草软饮",
+      "category": "usable",
+      "sub_type": "usable",
+      "color": "#44AAFF",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 3
+    },
+    "jincao_tea": {
+      "id": "jincao_tea",
+      "name": "优质棉草软饮",
+      "category": "usable",
+      "sub_type": "usable",
+      "color": "#44AAFF",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 4
     },
     "origocrust": {
       "id": "origocrust",
       "name": "晶体外壳",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#C8B888",
-      "icon_svg": "origocrust_symbol"
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "origocrust_symbol",
+      "image_asset_path": "assets/png/AIC Products/Origocrust.png",
+      "level": 2
     },
     "ferrium": {
       "id": "ferrium",
       "name": "蓝铁块",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#5588BB",
-      "icon_svg": "ferrium_symbol"
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "ferrium_symbol",
+      "image_asset_path": "assets/png/AIC Products/Ferrium.png",
+      "level": 2
     },
     "amethyst_fiber": {
       "id": "amethyst_fiber",
       "name": "紫晶纤维",
-      "category": "intermediate",
-      "sub_type": "mineral",
+      "category": "product",
+      "sub_type": "product",
       "color": "#9966CC",
-      "icon_svg": "amethyst_fiber_symbol"
+      "icon_svg": "amethyst_fiber_symbol",
+      "image_asset_path": "assets/png/AIC Products/Amethyst_Fiber.png",
+      "level": 2
     },
     "packed_origocrust": {
       "id": "packed_origocrust",
       "name": "密制晶体",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#AA9966",
-      "icon_svg": "packed_origocrust_symbol"
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "packed_origocrust_symbol",
+      "image_asset_path": "assets/png/AIC Products/Packed_Origocrust.png",
+      "level": 3
     },
     "steel": {
       "id": "steel",
       "name": "钢块",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#8899AA",
-      "icon_svg": "steel_symbol"
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "steel_symbol",
+      "image_asset_path": "assets/png/AIC Products/Steel.png",
+      "level": 3
     },
     "cryston_fiber": {
       "id": "cryston_fiber",
       "name": "高晶纤维",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#7766BB",
-      "icon_svg": "cryston_fiber_symbol"
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "cryston_fiber_symbol",
+      "image_asset_path": "assets/png/AIC Products/Cryston_Fiber.png",
+      "level": 3
     },
     "stabilized_carbon": {
       "id": "stabilized_carbon",
       "name": "稳定碳块",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#444444",
-      "icon_svg": "stabilized_carbon_symbol"
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "stabilized_carbon_symbol",
+      "image_asset_path": "assets/png/AIC Products/Stabilized_Carbon.png",
+      "level": 3
     },
     "dense_origocrust_powder": {
       "id": "dense_origocrust_powder",
       "name": "致密晶体粉末",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#B8A878",
-      "icon_svg": "dense_powder_symbol"
-    },
-    "dense_ferrium_powder": {
-      "id": "dense_ferrium_powder",
-      "name": "致密蓝铁粉末",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#446688",
-      "icon_svg": "dense_powder_symbol"
-    },
-    "dense_originium_powder": {
-      "id": "dense_originium_powder",
-      "name": "致密源石粉末",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#CC9900",
-      "icon_svg": "dense_powder_symbol"
-    },
-    "dense_carbon_powder": {
-      "id": "dense_carbon_powder",
-      "name": "致密碳粉末",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#333333",
-      "icon_svg": "dense_powder_symbol"
-    },
-    "cryston_powder": {
-      "id": "cryston_powder",
-      "name": "高晶粉末",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#6655AA",
-      "icon_svg": "powder_symbol"
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "dense_origocrust_powder_symbol",
+      "image_asset_path": "assets/png/AIC Products/Dense_Origocrust_Powder.png",
+      "level": 3
     },
     "carbon": {
       "id": "carbon",
       "name": "碳块",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#555555",
-      "icon_svg": "carbon_symbol"
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "carbon_symbol",
+      "image_asset_path": "assets/png/AIC Products/Carbon.png",
+      "level": 2
     },
     "cuprium": {
       "id": "cuprium",
       "name": "赤铜块",
-      "category": "intermediate",
-      "sub_type": "mineral",
-      "color": "#CC6644",
-      "icon_svg": "cuprium_symbol"
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "cuprium_symbol",
+      "image_asset_path": "assets/png/AIC Products/Cuprium.png",
+      "level": 2
+    },
+    "cuprium_powder": {
+      "id": "cuprium_powder",
+      "name": "赤铜粉末",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "cuprium_powder_symbol",
+      "image_asset_path": "assets/png/AIC Products/Cuprium_Powder.png",
+      "level": 2
+    },
+    "ferrium_powder": {
+      "id": "ferrium_powder",
+      "name": "蓝铁粉末",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "ferrium_powder_symbol",
+      "image_asset_path": "assets/png/AIC Products/Ferrium_Powder.png",
+      "level": 2
+    },
+    "amethyst_powder": {
+      "id": "amethyst_powder",
+      "name": "紫晶粉末",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "amethyst_powder_symbol",
+      "image_asset_path": "assets/png/AIC Products/Amethyst_Powder.png",
+      "level": 2
+    },
+    "originium_powder": {
+      "id": "originium_powder",
+      "name": "源石粉末",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "originium_powder_symbol",
+      "image_asset_path": "assets/png/AIC Products/Originium_Powder.png",
+      "level": 2
+    },
+    "carbon_powder": {
+      "id": "carbon_powder",
+      "name": "碳粉末",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "carbon_powder_symbol",
+      "image_asset_path": "assets/png/AIC Products/Carbon_Powder.png",
+      "level": 2
+    },
+    "origocrust_powder": {
+      "id": "origocrust_powder",
+      "name": "晶体外壳粉末",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "origocrust_powder_symbol",
+      "image_asset_path": "assets/png/AIC Products/Origocrust_Powder.png",
+      "level": 2
+    },
+    "aketine_powder": {
+      "id": "aketine_powder",
+      "name": "酮化灌木粉末",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "aketine_powder_symbol",
+      "image_asset_path": "assets/png/AIC Products/Aketine_Powder.png",
+      "level": 2
+    },
+    "sandleaf_powder": {
+      "id": "sandleaf_powder",
+      "name": "砂叶粉末",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "sandleaf_powder_symbol",
+      "image_asset_path": "assets/png/AIC Products/Sandleaf_Powder.png",
+      "level": 2
+    },
+    "ferrium_part": {
+      "id": "ferrium_part",
+      "name": "铁制零件",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "ferrium_part_symbol",
+      "image_asset_path": "assets/png/AIC Products/Ferrium_Part.png",
+      "level": 2
+    },
+    "amethyst_part": {
+      "id": "amethyst_part",
+      "name": "紫晶零件",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "amethyst_part_symbol",
+      "image_asset_path": "assets/png/AIC Products/Amethyst_Part.png",
+      "level": 2
+    },
+    "steel_part": {
+      "id": "steel_part",
+      "name": "钢制零件",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "steel_part_symbol",
+      "image_asset_path": "assets/png/AIC Products/Steel_Part.png",
+      "level": 3
+    },
+    "cryston_part": {
+      "id": "cryston_part",
+      "name": "高晶零件",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "cryston_part_symbol",
+      "image_asset_path": "assets/png/AIC Products/Cryston_Part.png",
+      "level": 3
+    },
+    "cuprium_part": {
+      "id": "cuprium_part",
+      "name": "赤铜零件",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "cuprium_part_symbol",
+      "image_asset_path": "assets/png/AIC Products/Cuprium_Part.png",
+      "level": 3
+    },
+    "hetonite_part": {
+      "id": "hetonite_part",
+      "name": "赫铜零件",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "hetonite_part_symbol",
+      "image_asset_path": "assets/png/AIC Products/Hetonite_Part.png",
+      "level": 3
+    },
+    "ferrium_bottle": {
+      "id": "ferrium_bottle",
+      "name": "蓝铁瓶",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "ferrium_bottle_symbol",
+      "image_asset_path": "assets/png/AIC Products/Ferrium_Bottle.png",
+      "level": 2
+    },
+    "amethyst_bottle": {
+      "id": "amethyst_bottle",
+      "name": "紫晶质瓶",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "amethyst_bottle_symbol",
+      "image_asset_path": "assets/png/AIC Products/Amethyst_Bottle.png",
+      "level": 2
+    },
+    "steel_bottle": {
+      "id": "steel_bottle",
+      "name": "钢质瓶",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "steel_bottle_symbol",
+      "image_asset_path": "assets/png/AIC Products/Steel_Bottle.png",
+      "level": 3
+    },
+    "cryston_bottle": {
+      "id": "cryston_bottle",
+      "name": "高晶质瓶",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "cryston_bottle_symbol",
+      "image_asset_path": "assets/png/AIC Products/Cryston_Bottle.png",
+      "level": 3
+    },
+    "cuprium_bottle": {
+      "id": "cuprium_bottle",
+      "name": "赤铜瓶",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "cuprium_bottle_symbol",
+      "image_asset_path": "assets/png/AIC Products/Cuprium_Bottle.png",
+      "level": 3
+    },
+    "hetonite_bottle": {
+      "id": "hetonite_bottle",
+      "name": "赫铜瓶",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "hetonite_bottle_symbol",
+      "image_asset_path": "assets/png/AIC Products/Hetonite_Bottle.png",
+      "level": 3
+    },
+    "buckflower_seed": {
+      "id": "buckflower_seed",
+      "name": "荞花种子",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 1
+    },
+    "citrome_seed": {
+      "id": "citrome_seed",
+      "name": "柑实种子",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 1
+    },
+    "aketine_seed": {
+      "id": "aketine_seed",
+      "name": "酮化树种",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 1
+    },
+    "sandleaf_seed": {
+      "id": "sandleaf_seed",
+      "name": "砂叶种子",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 1
+    },
+    "jincao_seed": {
+      "id": "jincao_seed",
+      "name": "锦草种子",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 1
+    },
+    "yazhen_seed": {
+      "id": "yazhen_seed",
+      "name": "芽针种子",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 1
+    },
+    "amethyst_component": {
+      "id": "amethyst_component",
+      "name": "紫晶装备原件",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Amethyst_Component.png",
+      "level": 2
+    },
+    "ferrium_component": {
+      "id": "ferrium_component",
+      "name": "蓝铁装备原件",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Ferrium_Component.png",
+      "level": 2
+    },
+    "cryston_component": {
+      "id": "cryston_component",
+      "name": "高晶装备原件",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Cryston_Component.png",
+      "level": 3
+    },
+    "xiranite_component": {
+      "id": "xiranite_component",
+      "name": "息壤装备原件",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Xiranite_Component.png",
+      "level": 4
+    },
+    "cuprium_component": {
+      "id": "cuprium_component",
+      "name": "赤铜装备原件",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Cuprium_Component.png",
+      "level": 4
+    },
+    "hetonite_component": {
+      "id": "hetonite_component",
+      "name": "赫铜装备原件",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Hetonite_Component.png",
+      "level": 4
+    },
+    "ferrium_bottle_clean_water": {
+      "id": "ferrium_bottle_clean_water",
+      "name": "蓝铁瓶（清水）",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 2
+    },
+    "ferrium_bottle_jincao_solution": {
+      "id": "ferrium_bottle_jincao_solution",
+      "name": "蓝铁瓶（棉草溶液）",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 2
+    },
+    "ferrium_bottle_yazhen_solution": {
+      "id": "ferrium_bottle_yazhen_solution",
+      "name": "蓝铁瓶（芽针溶液）",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 2
+    },
+    "ferrium_bottle_liquid_xiranite": {
+      "id": "ferrium_bottle_liquid_xiranite",
+      "name": "蓝铁瓶（液化息壤）",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 2
+    },
+    "cuprium_bottle_jincao_solution": {
+      "id": "cuprium_bottle_jincao_solution",
+      "name": "赤铜瓶（棉草溶液）",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 2
+    },
+    "hetonite_bottle_yazhen_solution": {
+      "id": "hetonite_bottle_yazhen_solution",
+      "name": "赤铜瓶（芽针溶液）",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 3
+    },
+    "industrial_explosive": {
+      "id": "industrial_explosive",
+      "name": "工业爆炸物",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "",
+      "level": 3
+    },
+    "lc_valley_battery": {
+      "id": "lc_valley_battery",
+      "name": "低容谷底电池",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/LC_Valley_Battery.png",
+      "level": 3
+    },
+    "sc_valley_battery": {
+      "id": "sc_valley_battery",
+      "name": "中容谷底电池",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/SC_Valley_Battery.png",
+      "level": 3
+    },
+    "hc_valley_battery": {
+      "id": "hc_valley_battery",
+      "name": "高容谷底电池",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/HC_Valley_Battery.png",
+      "level": 4
+    },
+    "lc_wuling_battery": {
+      "id": "lc_wuling_battery",
+      "name": "低容武陵电池",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/LC_Wuling_Battery.png",
+      "level": 4
+    },
+    "sc_wuling_battery": {
+      "id": "sc_wuling_battery",
+      "name": "中容武陵电池",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/SC_Wuling_Battery.png",
+      "level": 4
+    },
+    "dense_ferrium_powder": {
+      "id": "dense_ferrium_powder",
+      "name": "致密蓝铁粉末",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Dense_Ferrium_Powder.png",
+      "level": 3
+    },
+    "cryston_powder": {
+      "id": "cryston_powder",
+      "name": "高晶粉末",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Cryston_Powder.png",
+      "level": 3
+    },
+    "dense_originium_powder": {
+      "id": "dense_originium_powder",
+      "name": "致密源石粉末",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Dense_Originium_Powder.png",
+      "level": 3
+    },
+    "dense_carbon_powder": {
+      "id": "dense_carbon_powder",
+      "name": "致密碳粉末",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Dense_Carbon_Powder.png",
+      "level": 3
+    },
+    "ground_buckflower_powder": {
+      "id": "ground_buckflower_powder",
+      "name": "细磨荞花粉末",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Ground_Buckflower_Powder.png",
+      "level": 3
+    },
+    "ground_citrome_powder": {
+      "id": "ground_citrome_powder",
+      "name": "细磨柑实粉末",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Ground_Citrome_Powder.png",
+      "level": 3
+    },
+    "jincao_solution": {
+      "id": "jincao_solution",
+      "name": "棉草溶液",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Jincao_Solution.png",
+      "level": 3
+    },
+    "yazhen_solution": {
+      "id": "yazhen_solution",
+      "name": "芽针溶液",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Yazhen_Solution.png",
+      "level": 3
+    },
+    "liquid_xiranite": {
+      "id": "liquid_xiranite",
+      "name": "液化息壤",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Liquid_Xiranite.png",
+      "level": 3
+    },
+    "liquid_heavy_xiranite": {
+      "id": "liquid_heavy_xiranite",
+      "name": "液化重息壤",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Liquid_Heavy_Xiranite.png",
+      "level": 3
+    },
+    "cuprium_solution": {
+      "id": "cuprium_solution",
+      "name": "赤铜溶液",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Cuprium_Solution.png",
+      "level": 3
+    },
+    "xircon_effluent": {
+      "id": "xircon_effluent",
+      "name": "壤晶废液",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Xircon_Effluent.png",
+      "level": 3
+    },
+    "inert_xircon_effluent": {
+      "id": "inert_xircon_effluent",
+      "name": "惰性壤晶废液",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Inert_Xircon_Effluent.png",
+      "level": 3
+    },
+    "xircon": {
+      "id": "xircon",
+      "name": "壤晶",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Xircon.png",
+      "level": 3
+    },
+    "hetonite": {
+      "id": "hetonite",
+      "name": "赫铜块",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Hetonite.png",
+      "level": 3
+    },
+    "xiranite": {
+      "id": "xiranite",
+      "name": "息壤",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Xiranite.png",
+      "level": 2
+    },
+    "heavy_xiranite": {
+      "id": "heavy_xiranite",
+      "name": "重息壤",
+      "category": "product",
+      "sub_type": "product",
+      "color": "#9966CC",
+      "icon_svg": "",
+      "image_asset_path": "assets/png/AIC Products/Heavy_Xiranite.png",
+      "level": 3
     }
   }
 }

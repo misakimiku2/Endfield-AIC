@@ -13,12 +13,14 @@ class DataLoader {
   Map<String, Recipe> get recipes => _recipes;
   Map<String, Building> get buildings => _buildings;
 
-  List<Item> get rawItems =>
-      _items.values.where((i) => i.isRaw).toList();
-  List<Item> get intermediateItems =>
-      _items.values.where((i) => i.isIntermediate).toList();
-  List<Item> get finalItems =>
-      _items.values.where((i) => i.isFinal).toList();
+  List<Item> get mineralOreItems =>
+      _items.values.where((i) => i.category == 'mineral_ore').toList();
+  List<Item> get plantItems =>
+      _items.values.where((i) => i.category == 'plant').toList();
+  List<Item> get usableItems =>
+      _items.values.where((i) => i.category == 'usable').toList();
+  List<Item> get productItems =>
+      _items.values.where((i) => i.category == 'product').toList();
 
   List<Recipe> getRecipesForBuilding(String buildingId) {
     return _recipes.values
