@@ -148,7 +148,7 @@
       "sub_type": "usable",
       "color": "#44AAFF",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Canned_Citrome_(C).png",
       "level": 3
     },
     "canned_citrome_b": {
@@ -158,7 +158,7 @@
       "sub_type": "usable",
       "color": "#44AAFF",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Canned_Citrome_(B).png",
       "level": 3
     },
     "canned_citrome_a": {
@@ -168,7 +168,7 @@
       "sub_type": "usable",
       "color": "#44AAFF",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Canned_Citrome_(A).png",
       "level": 4
     },
     "buck_capsule_c": {
@@ -178,7 +178,7 @@
       "sub_type": "usable",
       "color": "#44AAFF",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Buck_Capsule_(C).png",
       "level": 3
     },
     "buck_capsule_b": {
@@ -188,7 +188,7 @@
       "sub_type": "usable",
       "color": "#44AAFF",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Buck_Capsule_(B).png",
       "level": 3
     },
     "buck_capsule_a": {
@@ -198,7 +198,7 @@
       "sub_type": "usable",
       "color": "#44AAFF",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Buck_Capsule_(A).png",
       "level": 4
     },
     "yazhen_syringe_c": {
@@ -208,7 +208,7 @@
       "sub_type": "usable",
       "color": "#44AAFF",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Yazhen_Syringe_(C).png",
       "level": 3
     },
     "yazhen_syringe_a": {
@@ -218,7 +218,7 @@
       "sub_type": "usable",
       "color": "#44AAFF",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Yazhen_Syringe_(A).png",
       "level": 4
     },
     "jincao_drink": {
@@ -228,7 +228,7 @@
       "sub_type": "usable",
       "color": "#44AAFF",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Jincao_Drink.png",
       "level": 3
     },
     "jincao_tea": {
@@ -238,7 +238,7 @@
       "sub_type": "usable",
       "color": "#44AAFF",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Jincao_Tea.png",
       "level": 4
     },
     "origocrust": {
@@ -548,7 +548,7 @@
       "sub_type": "product",
       "color": "#9966CC",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Buckflower_Seed.png",
       "level": 1
     },
     "citrome_seed": {
@@ -558,7 +558,7 @@
       "sub_type": "product",
       "color": "#9966CC",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Citrome_Seed.png",
       "level": 1
     },
     "aketine_seed": {
@@ -568,7 +568,7 @@
       "sub_type": "product",
       "color": "#9966CC",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Aketine_Seed.png",
       "level": 1
     },
     "sandleaf_seed": {
@@ -578,7 +578,7 @@
       "sub_type": "product",
       "color": "#9966CC",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Sandleaf_Seed.png",
       "level": 1
     },
     "jincao_seed": {
@@ -588,7 +588,7 @@
       "sub_type": "product",
       "color": "#9966CC",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Jincao_Seed.png",
       "level": 1
     },
     "yazhen_seed": {
@@ -598,7 +598,7 @@
       "sub_type": "product",
       "color": "#9966CC",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Yazhen_Seed.png",
       "level": 1
     },
     "amethyst_component": {
@@ -728,7 +728,7 @@
       "sub_type": "product",
       "color": "#9966CC",
       "icon_svg": "",
-      "image_asset_path": "",
+      "image_asset_path": "assets/png/AIC Products/Industrial_Explosive.png",
       "level": 3
     },
     "lc_valley_battery": {

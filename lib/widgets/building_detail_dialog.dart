@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../models/project.dart';
 import '../models/recipe.dart';
+import '../models/item.dart';
 import '../data/data_loader.dart';
 
 class BuildingDetailDialog extends StatefulWidget {
@@ -65,6 +67,18 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   double _dragStartY = 0;
   double _dragStartOffset = 0;
 
+  // 仓库取货口专用状态
+  bool _isAddMode = false;
+  String? _selectedOutputItemId;
+
+  bool get _isDepotUnloader =>
+      widget.placedBuilding.building.id == 'depot_unloader_3x1';
+
+  bool get _isDepotLoader =>
+      widget.placedBuilding.building.id == 'depot_loader_3x1';
+
+  bool get _isDepotAccess => _isDepotUnloader || _isDepotLoader;
+
   @override
   void initState() {
     super.initState();
@@ -121,6 +135,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
           category: category,
           color: item.color,
           imageAssetPath: item.imageAssetPath,
+          level: item.level,
         ));
       }
     }
@@ -181,9 +196,9 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
           ],
         ),
       );
-        },
-      ),
-    );
+    },
+  ),
+);
   }
 
   Widget _buildWindowInfoBar() {
@@ -457,7 +472,19 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
               itemCount: _filteredItems.length,
               itemBuilder: (context, index) {
                 final item = _filteredItems[index];
-                return _ResourceGridTile(item: item, gridContainerKey: _gridContainerKey);
+                return _ResourceGridTile(
+                  item: item,
+                  gridContainerKey: _gridContainerKey,
+                  showAddIcon: _isDepotUnloader && _isAddMode,
+                  onAddItem: _isDepotUnloader && _isAddMode
+                      ? () {
+                          setState(() {
+                            _selectedOutputItemId = item.id;
+                            _isAddMode = false;
+                          });
+                        }
+                      : null,
+                );
               },
             ),
           ),
@@ -533,6 +560,17 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   }
 
   Widget _buildSynthesisPanel(List<Recipe> recipes) {
+    if (_isDepotUnloader) {
+      return _buildDepotUnloaderPanel();
+    }
+    if (_isDepotLoader) {
+      return _buildDepotLoaderPanel();
+    }
+    return _buildDefaultSynthesisPanel(recipes);
+  }
+
+  Widget _buildDepotLoaderPanel() {
+    // 仓库存货口：只有输入网格，无添加按钮
     return Column(
       children: [
         Row(
@@ -583,34 +621,180 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: const Color(0xFF333333)),
             ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _SynthesisSlot(
-                      label: '输入',
-                      items: _activeRecipe?.inputs ?? [],
-                      isInput: true,
-                      dataLoader: widget.dataLoader,
-                    ),
-                    const SizedBox(width: 12),
-                    const Icon(
-                      Icons.arrow_forward,
-                      size: 22,
-                      color: Color(0xFF666666),
-                    ),
-                    const SizedBox(width: 12),
-                    _SynthesisSlot(
-                      label: '输出',
-                      items: _activeRecipe?.outputs ?? [],
-                      isInput: false,
-                      dataLoader: widget.dataLoader,
-                    ),
-                  ],
-                ),
-              ],
+            child: Center(
+              child: _DepotGridTile(
+                item: null,
+                isInput: true,
+                showNoIcon: true,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+      ],
+    );
+  }
+
+  Widget _buildDepotUnloaderPanel() {
+    final selectedItem = _selectedOutputItemId != null
+        ? widget.dataLoader.getItem(_selectedOutputItemId!)
+        : null;
+
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _ActionButton(
+              icon: Icons.open_with,
+              label: '移动',
+              onTap: () {
+                Navigator.of(context).pop();
+                widget.onMove?.call();
+              },
+            ),
+            const SizedBox(width: 12),
+            _ActionButton(
+              icon: Icons.inventory_2_outlined,
+              label: '收纳',
+              onTap: () {
+                Navigator.of(context).pop();
+                widget.onDelete?.call();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text(
+          widget.placedBuilding.building.name,
+          style: const TextStyle(
+            color: Color(0xFFDDDDDD),
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '${widget.placedBuilding.building.gridWidth}x${widget.placedBuilding.building.gridHeight}',
+          style: const TextStyle(
+            color: Color(0xFF888888),
+            fontSize: 11,
+          ),
+        ),
+        const SizedBox(height: 20),
+        Expanded(
+          child: Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E1E),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF333333)),
+            ),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _DepotGridTile(
+                    item: selectedItem,
+                    isInput: false,
+                    showNoIcon: false,
+                  ),
+                  const SizedBox(height: 16),
+                  _DepotCapsuleButton(
+                    hasItem: _selectedOutputItemId != null,
+                    isAddMode: _isAddMode,
+                    onToggleAddMode: () {
+                      setState(() {
+                        if (_selectedOutputItemId != null) {
+                          // 移除物品
+                          _selectedOutputItemId = null;
+                          _isAddMode = false;
+                        } else {
+                          _isAddMode = !_isAddMode;
+                        }
+                      });
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+      ],
+    );
+  }
+
+  Widget _buildDefaultSynthesisPanel(List<Recipe> recipes) {
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _ActionButton(
+              icon: Icons.open_with,
+              label: '移动',
+              onTap: () {
+                Navigator.of(context).pop();
+                widget.onMove?.call();
+              },
+            ),
+            const SizedBox(width: 12),
+            _ActionButton(
+              icon: Icons.inventory_2_outlined,
+              label: '收纳',
+              onTap: () {
+                Navigator.of(context).pop();
+                widget.onDelete?.call();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text(
+          widget.placedBuilding.building.name,
+          style: const TextStyle(
+            color: Color(0xFFDDDDDD),
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '${widget.placedBuilding.building.gridWidth}x${widget.placedBuilding.building.gridHeight}',
+          style: const TextStyle(
+            color: Color(0xFF888888),
+            fontSize: 11,
+          ),
+        ),
+        const SizedBox(height: 20),
+        Expanded(
+          child: Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E1E),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF333333)),
+            ),
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _SynthesisGrid(
+                    items: _activeRecipe?.inputs ?? [],
+                    isInput: true,
+                    dataLoader: widget.dataLoader,
+                  ),
+                  const SizedBox(width: 11),
+                  _ProcessingIndicator(isRunning: widget.placedBuilding.productionProgress > 0),
+                  const SizedBox(width: 11),
+                  _SynthesisGrid(
+                    items: _activeRecipe?.outputs ?? [],
+                    isInput: false,
+                    dataLoader: widget.dataLoader,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -657,6 +841,7 @@ class _ResourceItem {
   final String category;
   final Color color;
   final String imageAssetPath;
+  final int level;
 
   _ResourceItem({
     required this.id,
@@ -664,17 +849,50 @@ class _ResourceItem {
     required this.category,
     required this.color,
     required this.imageAssetPath,
+    required this.level,
   });
 }
 
 class _ResourceGridTile extends StatefulWidget {
   final _ResourceItem item;
   final GlobalKey gridContainerKey;
+  final bool showAddIcon;
+  final VoidCallback? onAddItem;
 
-  const _ResourceGridTile({required this.item, required this.gridContainerKey});
+  const _ResourceGridTile({
+    required this.item,
+    required this.gridContainerKey,
+    this.showAddIcon = false,
+    this.onAddItem,
+  });
 
   @override
   State<_ResourceGridTile> createState() => _ResourceGridTileState();
+}
+
+String _gridTileSvg(int level) {
+  const gradientEndColors = {
+    2: '#93e8a4',
+    3: '#6d9bf1',
+    4: '#b73cc5',
+  };
+  const tagColors = {
+    2: '#44aa00',
+    3: '#0082ea',
+    4: '#b73cc5',
+  };
+  final endColor = gradientEndColors[level] ?? '#dddddd';
+  final tagColor = tagColors[level] ?? '#ebebeb';
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="93.44" height="93.621" viewBox="0 0 93.44 93.621">'
+      '<defs><linearGradient id="g" x1="902.412" y1="521.936" x2="902.412" y2="649.936" gradientUnits="userSpaceOnUse">'
+      '<stop offset="0" stop-color="#696969"/>'
+      '<stop offset="0.7" stop-color="#696969"/>'
+      '<stop offset="1" stop-color="$endColor"/>'
+      '</linearGradient></defs>'
+      '<g transform="matrix(0.73,0,0,0.73,-610.056,-380.923)">'
+      '<rect x="838.412" y="521.812" width="128" height="128.249" rx="15" ry="15" fill="url(#g)"/>'
+      '<path d="m 839.26,640.061 c 2.048,5.831 7.585,9.991 14.131,10 h 98.043 c 6.546,-0.009 12.083,-4.169 14.131,-10 z" fill="$tagColor"/>'
+      '</g></svg>';
 }
 
 class _ResourceGridTileState extends State<_ResourceGridTile> {
@@ -715,8 +933,8 @@ class _ResourceGridTileState extends State<_ResourceGridTile> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          SvgPicture.asset(
-            'assets/svg/objective_case.svg',
+          SvgPicture.string(
+            _gridTileSvg(widget.item.level),
             fit: BoxFit.fill,
           ),
           Center(
@@ -752,6 +970,40 @@ class _ResourceGridTileState extends State<_ResourceGridTile> {
                     ),
                   ),
           ),
+          if (widget.showAddIcon)
+            Positioned(
+              right: 4,
+              top: 4,
+              child: GestureDetector(
+                onTap: widget.onAddItem,
+                child: Container(
+                  width: 21.9,
+                  height: 21.9,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.3),
+                        blurRadius: 3,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: SvgPicture.asset(
+                      'assets/svg/add.svg',
+                      width: 12,
+                      height: 12,
+                      colorFilter: const ColorFilter.mode(
+                        Color(0xFF212121),
+                        BlendMode.srcIn,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           if (_hovering)
             Positioned(
               bottom: _tooltipBottomOffset,
@@ -784,100 +1036,222 @@ class _ResourceGridTileState extends State<_ResourceGridTile> {
   }
 }
 
-class _SynthesisSlot extends StatelessWidget {
-  final String label;
+class _SynthesisGrid extends StatefulWidget {
   final List<RecipeIO> items;
   final bool isInput;
   final DataLoader dataLoader;
 
-  const _SynthesisSlot({
-    required this.label,
+  const _SynthesisGrid({
     required this.items,
     required this.isInput,
     required this.dataLoader,
   });
 
   @override
+  State<_SynthesisGrid> createState() => _SynthesisGridState();
+}
+
+class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderStateMixin {
+  late AnimationController _animationController;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  String _getGridSvg(int? level) {
+    const gradientEndColors = {
+      2: '#93e8a4',
+      3: '#6d9bf1',
+      4: '#b73cc5',
+    };
+    const tagColors = {
+      2: '#44aa00',
+      3: '#0082ea',
+      4: '#b73cc5',
+    };
+    final endColor = gradientEndColors[level] ?? '#dddddd';
+    final tagColor = tagColors[level] ?? '#ebebeb';
+    final hasItem = level != null;
+    
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">'
+        '<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">'
+        '<stop offset="0" stop-color="#696969"/>'
+        '<stop offset="0.7" stop-color="#696969"/>'
+        '<stop offset="1" stop-color="$endColor"/>'
+        '</linearGradient></defs>'
+        '<rect x="0" y="0" width="128" height="128" rx="15" ry="15" fill="${hasItem ? "url(#g)" : "#696969"}"/>'
+        '${hasItem ? '<path d="m 1,118 c 2,5.8 7.6,10 14,10 h 98 c 6.4,0 12,-4.2 14,-10 z" fill="$tagColor"/>' : ''}'
+        '</svg>';
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final item = widget.items.isNotEmpty ? widget.items.first : null;
+    final dataItem = item != null ? widget.dataLoader.getItem(item.itemId) : null;
+    final level = dataItem?.level;
+    final totalAmount = widget.items.fold<int>(0, (sum, io) => sum + io.amount);
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          label,
-          style: const TextStyle(
-            color: Color(0xFF888888),
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
+        Container(
+          width: 128,
+          height: 128,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              SvgPicture.string(
+                _getGridSvg(level),
+                fit: BoxFit.fill,
+              ),
+              if (dataItem != null && dataItem.imageAssetPath.isNotEmpty)
+                Center(
+                  child: Image.asset(
+                    dataItem.imageAssetPath,
+                    width: 128,
+                    height: 128,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                    isAntiAlias: true,
+                    errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
+                  ),
+                )
+              else if (dataItem != null)
+                Center(child: _buildItemPlaceholder(dataItem)),
+            ],
           ),
         ),
         const SizedBox(height: 8),
-        Container(
-          width: 120,
-          height: 140,
-          decoration: BoxDecoration(
-            color: const Color(0xFF252525),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFF404040)),
+        if (totalAmount > 0)
+          Text(
+            '$totalAmount',
+            style: const TextStyle(
+              color: Color(0xFFDDDDDD),
+              fontSize: 20,
+              fontWeight: FontWeight.w500,
+            ),
           ),
-          child: items.isEmpty
-              ? Center(
-                  child: Text(
-                    '空',
-                    style: TextStyle(
-                      color: const Color(0xFF555555).withValues(alpha: 0.5),
-                      fontSize: 11,
-                    ),
-                  ),
-                )
-              : Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: ListView.builder(
-                    itemCount: items.length,
-                    itemBuilder: (context, index) {
-                      final io = items[index];
-                      final item = dataLoader.getItem(io.itemId);
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 20,
-                              height: 20,
-                              decoration: BoxDecoration(
-                                color: item?.color.withValues(alpha: 0.2) ??
-                                    const Color(0xFF333333),
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(
-                                  color: item?.color.withValues(alpha: 0.4) ??
-                                      const Color(0xFF555555),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                item?.name ?? io.itemId,
-                                style: const TextStyle(
-                                  color: Color(0xFFBBBBBB),
-                                  fontSize: 10,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            Text(
-                              'x${io.amount}',
-                              style: const TextStyle(
-                                color: Color(0xFF888888),
-                                fontSize: 10,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
+      ],
+    );
+  }
+
+  Widget _buildItemPlaceholder(Item dataItem) {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: dataItem.color.withValues(alpha: 0.2),
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: dataItem.color.withValues(alpha: 0.5),
         ),
+      ),
+    );
+  }
+}
+
+class _ProcessingIndicator extends StatefulWidget {
+  final bool isRunning;
+
+  const _ProcessingIndicator({required this.isRunning});
+
+  @override
+  State<_ProcessingIndicator> createState() => _ProcessingIndicatorState();
+}
+
+class _ProcessingIndicatorState extends State<_ProcessingIndicator> with TickerProviderStateMixin {
+  late List<AnimationController> _controllers;
+
+  @override
+  void initState() {
+    super.initState();
+    _controllers = List.generate(3, (index) {
+      return AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 1200),
+      );
+    });
+    
+    // 启动动画
+    if (widget.isRunning) {
+      _startAnimations();
+    }
+  }
+
+  void _startAnimations() {
+    for (int i = 0; i < 3; i++) {
+      Future.delayed(Duration(milliseconds: i * 400), () {
+        if (mounted && widget.isRunning) {
+          _controllers[i].repeat();
+        }
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(_ProcessingIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isRunning != oldWidget.isRunning) {
+      if (widget.isRunning) {
+        _startAnimations();
+      } else {
+        for (final controller in _controllers) {
+          controller.stop();
+        }
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _controllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ...List.generate(3, (index) {
+          return AnimatedBuilder(
+            animation: _controllers[index],
+            builder: (context, child) {
+              final value = _controllers[index].value;
+              // 使用正弦波实现闪烁效果：20% → 100% → 20% 循环
+              final opacity = 0.2 + 0.8 * (0.5 + 0.5 * math.sin(value * 2 * math.pi));
+              return Opacity(
+                opacity: widget.isRunning ? opacity : 0.2,
+                child: child,
+              );
+            },
+            child: SizedBox(
+              width: 16,
+              height: 36,
+              child: SvgPicture.asset(
+                'assets/svg/Directional.svg',
+                fit: BoxFit.contain,
+                colorFilter: ColorFilter.mode(
+                  Colors.white,
+                  BlendMode.srcIn,
+                ),
+              ),
+            ),
+          );
+        }).expand((widget) => [widget, const SizedBox(width: 4)]).toList()..removeLast(),
       ],
     );
   }
@@ -916,6 +1290,377 @@ class _ActionButton extends StatelessWidget {
                 color: Color(0xFFCCCCCC),
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 仓库存取口 - 网格+轨道+箭头动画
+/// [isInput] true=输入网格(存货口)，false=输出网格(取货口)
+/// [showNoIcon] true=空网格显示No.svg
+class _DepotGridTile extends StatefulWidget {
+  final Item? item;
+  final bool isInput;
+  final bool showNoIcon;
+
+  const _DepotGridTile({
+    required this.item,
+    required this.isInput,
+    this.showNoIcon = false,
+  });
+
+  @override
+  State<_DepotGridTile> createState() => _DepotGridTileState();
+}
+
+class _DepotGridTileState extends State<_DepotGridTile>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _arrowController;
+
+  @override
+  void initState() {
+    super.initState();
+    _arrowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _arrowController.dispose();
+    super.dispose();
+  }
+
+  String _getGridSvg(int? level) {
+    const gradientEndColors = {
+      2: '#93e8a4',
+      3: '#6d9bf1',
+      4: '#b73cc5',
+    };
+    const tagColors = {
+      2: '#44aa00',
+      3: '#0082ea',
+      4: '#b73cc5',
+    };
+    final endColor = gradientEndColors[level] ?? '#dddddd';
+    final tagColor = tagColors[level] ?? '#ebebeb';
+    final hasItem = level != null;
+
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">'
+        '<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">'
+        '<stop offset="0" stop-color="#696969"/>'
+        '<stop offset="0.7" stop-color="#696969"/>'
+        '<stop offset="1" stop-color="$endColor"/>'
+        '</linearGradient></defs>'
+        '<rect x="0" y="0" width="128" height="128" rx="15" ry="15" fill="${hasItem ? "url(#g)" : "#696969"}"/>'
+        '${hasItem ? '<path d="m 1,118 c 2,5.8 7.6,10 14,10 h 98 c 6.4,0 12,-4.2 14,-10 z" fill="$tagColor"/>' : ''}'
+        '</svg>';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final level = widget.item?.level;
+    final hasItem = widget.item != null;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 网格 + 5px边框（圆角与SVG rx=15 完全对齐）
+        Container(
+          width: 128,
+          height: 128,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: const Color(0xFF7F7F7F),
+              width: 5,
+            ),
+            borderRadius: BorderRadius.circular(15),
+            color: const Color(0xFF696969),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              SvgPicture.string(
+                _getGridSvg(level),
+                fit: BoxFit.fill,
+              ),
+              if (hasItem && widget.item!.imageAssetPath.isNotEmpty)
+                Center(
+                  child: Image.asset(
+                    widget.item!.imageAssetPath,
+                    width: 128,
+                    height: 128,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                    isAntiAlias: true,
+                    errorBuilder: (_, __, ___) => _buildItemPlaceholder(),
+                  ),
+                )
+              else if (hasItem)
+                Center(child: _buildItemPlaceholder())
+              else if (widget.showNoIcon)
+                Center(
+                  child: SvgPicture.asset(
+                    'assets/svg/No.svg',
+                    width: 60,
+                    height: 60,
+                    colorFilter: const ColorFilter.mode(
+                      Color(0xFF808080),
+                      BlendMode.srcIn,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        // 轨道 + 箭头动画 + 遮罩
+        _DepotTrackWithArrows(
+          controller: _arrowController,
+          isInput: widget.isInput,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildItemPlaceholder() {
+    if (widget.item == null) return const SizedBox.shrink();
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: widget.item!.color.withValues(alpha: 0.2),
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: widget.item!.color.withValues(alpha: 0.5),
+        ),
+      ),
+    );
+  }
+}
+
+/// 仓库存取口 - 轨道 + 箭头动画 + 遮罩蒙版
+/// 轨道使用 dialog_track.svg，箭头从轨道外部开始循环移动
+/// 存货口(isInput=true)：箭头指向左，从右向左移动
+/// 取货口(isInput=false)：箭头指向右，从左向右移动
+/// 遮罩：左边不透明，右边完全透明，覆盖整个轨道包括箭头
+class _DepotTrackWithArrows extends StatelessWidget {
+  final AnimationController controller;
+  final bool isInput;
+
+  const _DepotTrackWithArrows({
+    required this.controller,
+    required this.isInput,
+  });
+
+  /// 覆盖层渐变背景色，与弹窗内 Grid Tile 容器背景一致
+  static const _overlayBgColor = Color(0xFF1E1E1E);
+
+  @override
+  Widget build(BuildContext context) {
+    const trackWidth = 168.0;
+    const trackHeight = 55.0;
+    const arrowSize = 20.0;
+    const arrowCount = 3;
+    // 箭头从 -arrowSize 移动到 trackWidth+arrowSize，全程都在轨道外循环
+    final totalTravel = trackWidth + arrowSize * 2;
+
+    return SizedBox(
+      width: trackWidth,
+      height: trackHeight,
+      child: AnimatedBuilder(
+        animation: controller,
+        builder: (context, child) {
+          return Stack(
+            clipBehavior: Clip.hardEdge,
+            children: [
+              // 轨道背景（上下边缘向内收缩 1.0 像素，确保被渐变遮罩完全覆盖）
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 1.0,
+                bottom: 1.0,
+                child: SvgPicture.asset(
+                  'assets/svg/dialog_track.svg',
+                  fit: BoxFit.fill,
+                ),
+              ),
+              // 箭头
+              ...List.generate(arrowCount, (index) {
+                // 让 3 个箭头在时间上均匀错开，形成连续流
+                final progress = (controller.value + index / arrowCount) % 1.0;
+                // 存货口：从右向左；取货口：从左向右
+                // 起点都是 -arrowSize（轨道外左侧），终点是 trackWidth+arrowSize（轨道外右侧）
+                final x = isInput
+                    ? -arrowSize + (1.0 - progress) * totalTravel
+                    : -arrowSize + progress * totalTravel;
+                // 箭头指向移动方向
+                final pointRight = !isInput;
+
+                return Positioned(
+                  left: x,
+                  top: (trackHeight - arrowSize) / 2,
+                  child: CustomPaint(
+                    size: const Size(arrowSize, arrowSize),
+                    painter: _TriangleArrowPainter(
+                      color: Colors.white,
+                      pointRight: pointRight,
+                    ),
+                  ),
+                );
+              }),
+              // 渐变覆盖层：左边透明(轨道完全可见) → 右边为容器背景色(视觉淡出)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [
+                          Color(0x00000000),
+                          _overlayBgColor,
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// 白色三角箭头画笔
+class _TriangleArrowPainter extends CustomPainter {
+  final Color color;
+  final bool pointRight;
+
+  const _TriangleArrowPainter({
+    required this.color,
+    required this.pointRight,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    final path = Path();
+    if (pointRight) {
+      path.moveTo(0, 0);
+      path.lineTo(size.width, size.height / 2);
+      path.lineTo(0, size.height);
+    } else {
+      path.moveTo(size.width, 0);
+      path.lineTo(0, size.height / 2);
+      path.lineTo(size.width, size.height);
+    }
+    path.close();
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _TriangleArrowPainter oldDelegate) =>
+      color != oldDelegate.color || pointRight != oldDelegate.pointRight;
+}
+
+/// 仓库取货口 - 白色胶囊按钮（添加物品 / 移除物品）
+class _DepotCapsuleButton extends StatefulWidget {
+  final bool hasItem;
+  final bool isAddMode;
+  final VoidCallback onToggleAddMode;
+
+  const _DepotCapsuleButton({
+    required this.hasItem,
+    required this.isAddMode,
+    required this.onToggleAddMode,
+  });
+
+  @override
+  State<_DepotCapsuleButton> createState() => _DepotCapsuleButtonState();
+}
+
+class _DepotCapsuleButtonState extends State<_DepotCapsuleButton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _iconRotationController;
+
+  @override
+  void initState() {
+    super.initState();
+    _iconRotationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    );
+    if (widget.hasItem) {
+      _iconRotationController.value = 1.0;
+    }
+  }
+
+  @override
+  void didUpdateWidget(_DepotCapsuleButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.hasItem != oldWidget.hasItem) {
+      if (widget.hasItem) {
+        _iconRotationController.forward();
+      } else {
+        _iconRotationController.reverse();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _iconRotationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = widget.hasItem ? '移除物品' : '添加物品';
+
+    return GestureDetector(
+      onTap: widget.onToggleAddMode,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF212121),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(width: 6),
+            RotationTransition(
+              turns: Tween<double>(begin: 0.0, end: 0.125).animate(
+                _iconRotationController,
+              ),
+              child: SvgPicture.asset(
+                'assets/svg/add.svg',
+                width: 16,
+                height: 16,
+                colorFilter: const ColorFilter.mode(
+                  Color(0xFF212121),
+                  BlendMode.srcIn,
+                ),
               ),
             ),
           ],
