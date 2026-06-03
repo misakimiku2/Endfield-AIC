@@ -88,6 +88,7 @@ class _EditorPageState extends State<EditorPage> {
         context,
         placedBuilding: pb,
         dataLoader: widget.dataLoader,
+        conveyors: _project.conveyors,
         onMove: () {
           _canvasKey.currentState?.startMoveFromDialog(pb);
         },

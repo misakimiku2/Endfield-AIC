@@ -607,21 +607,21 @@ class CanvasEditorState extends State<CanvasEditor>
     widget.onProjectChanged(_project);
   }
 
-  void _placeBuilding(Building building, Offset gridPos, {int rotation = 0}) {
-    final cx = gridPos.dx - (building.gridWidth ~/ 2).toDouble();
-    final cy = gridPos.dy - (building.gridHeight ~/ 2).toDouble();
-    final newBuilding = PlacedBuilding(
-      id: 'building_${DateTime.now().millisecondsSinceEpoch}',
+  /// 检查建筑在指定位置是否会发生碰撞（建筑重叠或传送带重叠）
+  bool _checkBuildingCollision(Building building, double cx, double cy, int rotation) {
+    final tempBuilding = PlacedBuilding(
+      id: 'temp',
       building: building,
       gridX: cx,
       gridY: cy,
       rotation: rotation,
     );
-
-    final bounds = newBuilding.getBounds(_cellSize);
+    final bounds = tempBuilding.getBounds(_cellSize);
     final buildingOverlaps = _project.buildings.any(
       (b) => b.overlaps(bounds, _cellSize),
     );
+    if (buildingOverlaps) return true;
+
     // 检测传送带碰撞（使用旋转后的有效占地）
     int effW, effH;
     double effX, effY;
@@ -640,18 +640,31 @@ class CanvasEditorState extends State<CanvasEditor>
         cells.add('${(effX + dx).toInt()}_${(effY + dy).toInt()}');
       }
     }
-    final beltOverlap = _project.conveyors.any((b) =>
+    return _project.conveyors.any((b) =>
         b.path.any((c) => cells.contains('${c.dx.toInt()}_${c.dy.toInt()}')));
+  }
 
-    if (!buildingOverlaps && !beltOverlap) {
-      _project.buildings.add(newBuilding);
-      _project.offsetX = _targetOffsetX;
-      _project.offsetY = _targetOffsetY;
-      _project.scale = _targetScale;
-      _rebuildPortConnectionsCache();
-      widget.onProjectChanged(_project);
-      widget.onBuildingPlaced?.call();
-    }
+  void _placeBuilding(Building building, Offset gridPos, {int rotation = 0}) {
+    final cx = gridPos.dx - (building.gridWidth ~/ 2).toDouble();
+    final cy = gridPos.dy - (building.gridHeight ~/ 2).toDouble();
+
+    if (_checkBuildingCollision(building, cx, cy, rotation)) return;
+
+    final newBuilding = PlacedBuilding(
+      id: 'building_${DateTime.now().millisecondsSinceEpoch}',
+      building: building,
+      gridX: cx,
+      gridY: cy,
+      rotation: rotation,
+    );
+
+    _project.buildings.add(newBuilding);
+    _project.offsetX = _targetOffsetX;
+    _project.offsetY = _targetOffsetY;
+    _project.scale = _targetScale;
+    _rebuildPortConnectionsCache();
+    widget.onProjectChanged(_project);
+    widget.onBuildingPlaced?.call();
   }
 
   // ─── 长按与移动模式 ────────────────────────────────────────────
@@ -847,44 +860,18 @@ class CanvasEditorState extends State<CanvasEditor>
     _movingBuilding!.gridY = cy;
     _movingBuilding!.rotation = _movingRotation;
 
-    final bounds = _movingBuilding!.getBounds(_cellSize);
-    final buildingOverlaps = _project.buildings.any(
-      (b) => b.overlaps(bounds, _cellSize),
-    );
-    // 检测传送带碰撞（使用旋转后的有效占地）
-    final mb = _movingBuilding!;
-    int effW2, effH2;
-    double effX2, effY2;
-    if (_movingRotation % 2 == 1) {
-      effW2 = mb.building.gridHeight;
-      effH2 = mb.building.gridWidth;
-    } else {
-      effW2 = mb.building.gridWidth;
-      effH2 = mb.building.gridHeight;
-    }
-    effX2 = cx + (mb.building.gridWidth - effW2) / 2.0;
-    effY2 = cy + (mb.building.gridHeight - effH2) / 2.0;
-    final cells2 = <String>{};
-    for (int dx = 0; dx < effW2; dx++) {
-      for (int dy = 0; dy < effH2; dy++) {
-        cells2.add('${(effX2 + dx).toInt()}_${(effY2 + dy).toInt()}');
-      }
-    }
-    final beltOverlap = _project.conveyors.any((b) =>
-        b.path.any((c) => cells2.contains('${c.dx.toInt()}_${c.dy.toInt()}')));
+    if (_checkBuildingCollision(_movingBuilding!.building, cx, cy, _movingRotation)) return;
 
-    if (!buildingOverlaps && !beltOverlap) {
-      _project.buildings.add(_movingBuilding!);
-      _movingBuilding = null;
-      _movingRotation = 0;
-      // 放置成功：丢弃快照，端口格子保持移除状态
-      _portBeltsSnapshot = null;
-      _project.offsetX = _targetOffsetX;
-      _project.offsetY = _targetOffsetY;
-      _project.scale = _targetScale;
-      _rebuildPortConnectionsCache();
-      widget.onProjectChanged(_project);
-    }
+    _project.buildings.add(_movingBuilding!);
+    _movingBuilding = null;
+    _movingRotation = 0;
+    // 放置成功：丢弃快照，端口格子保持移除状态
+    _portBeltsSnapshot = null;
+    _project.offsetX = _targetOffsetX;
+    _project.offsetY = _targetOffsetY;
+    _project.scale = _targetScale;
+    _rebuildPortConnectionsCache();
+    widget.onProjectChanged(_project);
   }
 
   void _handleSingleClick(Offset screenPos, Size size) {

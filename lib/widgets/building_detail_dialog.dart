@@ -13,6 +13,7 @@ import '../data/data_loader.dart';
 class BuildingDetailDialog extends StatefulWidget {
   final PlacedBuilding placedBuilding;
   final DataLoader dataLoader;
+  final List<ConveyorBelt>? conveyors;
   final VoidCallback? onMove;
   final VoidCallback? onDelete;
 
@@ -20,6 +21,7 @@ class BuildingDetailDialog extends StatefulWidget {
     super.key,
     required this.placedBuilding,
     required this.dataLoader,
+    this.conveyors,
     this.onMove,
     this.onDelete,
   });
@@ -28,6 +30,7 @@ class BuildingDetailDialog extends StatefulWidget {
     BuildContext context, {
     required PlacedBuilding placedBuilding,
     required DataLoader dataLoader,
+    List<ConveyorBelt>? conveyors,
     VoidCallback? onMove,
     VoidCallback? onDelete,
   }) {
@@ -37,6 +40,7 @@ class BuildingDetailDialog extends StatefulWidget {
       builder: (_) => BuildingDetailDialog(
         placedBuilding: placedBuilding,
         dataLoader: dataLoader,
+        conveyors: conveyors,
         onMove: onMove,
         onDelete: onDelete,
       ),
@@ -784,6 +788,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                     items: _activeRecipe?.inputs ?? [],
                     isInput: true,
                     dataLoader: widget.dataLoader,
+                    placedBuilding: widget.placedBuilding,
+                    conveyors: widget.conveyors ?? [],
                   ),
                   const SizedBox(width: 11),
                   _ProcessingIndicator(isRunning: widget.placedBuilding.productionProgress > 0),
@@ -792,6 +798,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                     items: _activeRecipe?.outputs ?? [],
                     isInput: false,
                     dataLoader: widget.dataLoader,
+                    placedBuilding: widget.placedBuilding,
+                    conveyors: widget.conveyors ?? [],
                   ),
                 ],
               ),
@@ -1040,11 +1048,15 @@ class _SynthesisGrid extends StatefulWidget {
   final List<RecipeIO> items;
   final bool isInput;
   final DataLoader dataLoader;
+  final PlacedBuilding placedBuilding;
+  final List<ConveyorBelt> conveyors;
 
   const _SynthesisGrid({
     required this.items,
     required this.isInput,
     required this.dataLoader,
+    required this.placedBuilding,
+    required this.conveyors,
   });
 
   @override
@@ -1102,35 +1114,81 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
     final level = dataItem?.level;
     final totalAmount = widget.items.fold<int>(0, (sum, io) => sum + io.amount);
 
+    final solidPorts = (widget.isInput 
+            ? widget.placedBuilding.inputPorts 
+            : widget.placedBuilding.outputPorts)
+        .where((p) => p.definition.portType == 'solid')
+        .toList();
+
+    final gridBox = Container(
+      width: 128,
+      height: 128,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          SvgPicture.string(
+            _getGridSvg(level),
+            fit: BoxFit.fill,
+          ),
+          if (dataItem != null && dataItem.imageAssetPath.isNotEmpty)
+            Center(
+              child: Image.asset(
+                dataItem.imageAssetPath,
+                width: 128,
+                height: 128,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.high,
+                isAntiAlias: true,
+                errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
+              ),
+            )
+          else if (dataItem != null)
+            Center(child: _buildItemPlaceholder(dataItem)),
+        ],
+      ),
+    );
+
+    final double connectorHeight = solidPorts.isNotEmpty ? (solidPorts.length * 62.0) : 0.0;
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 128,
-          height: 128,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              SvgPicture.string(
-                _getGridSvg(level),
-                fit: BoxFit.fill,
+        Stack(
+          alignment: Alignment.center,
+          clipBehavior: Clip.none,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (widget.isInput && solidPorts.isNotEmpty)
+                  SizedBox(width: 288, height: connectorHeight),
+                gridBox,
+                if (!widget.isInput && solidPorts.isNotEmpty)
+                  SizedBox(width: 288, height: connectorHeight),
+              ],
+            ),
+            if (widget.isInput && solidPorts.isNotEmpty)
+              Positioned(
+                left: 0,
+                child: _TrackJointsConnector(
+                  ports: solidPorts,
+                  conveyors: widget.conveyors,
+                  isInput: true,
+                  placedBuilding: widget.placedBuilding,
+                ),
               ),
-              if (dataItem != null && dataItem.imageAssetPath.isNotEmpty)
-                Center(
-                  child: Image.asset(
-                    dataItem.imageAssetPath,
-                    width: 128,
-                    height: 128,
-                    fit: BoxFit.contain,
-                    filterQuality: FilterQuality.high,
-                    isAntiAlias: true,
-                    errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
-                  ),
-                )
-              else if (dataItem != null)
-                Center(child: _buildItemPlaceholder(dataItem)),
-            ],
-          ),
+            if (!widget.isInput && solidPorts.isNotEmpty)
+              Positioned(
+                right: 0,
+                child: _TrackJointsConnector(
+                  ports: solidPorts,
+                  conveyors: widget.conveyors,
+                  isInput: false,
+                  placedBuilding: widget.placedBuilding,
+                ),
+              ),
+          ],
         ),
         const SizedBox(height: 8),
         if (totalAmount > 0)
@@ -1159,6 +1217,333 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
       ),
     );
   }
+}
+
+class _TrackJointsConnector extends StatefulWidget {
+  final List<PortState> ports;
+  final List<ConveyorBelt> conveyors;
+  final bool isInput;
+  final PlacedBuilding placedBuilding;
+
+  const _TrackJointsConnector({
+    required this.ports,
+    required this.conveyors,
+    required this.isInput,
+    required this.placedBuilding,
+  });
+
+  @override
+  State<_TrackJointsConnector> createState() => _TrackJointsConnectorState();
+}
+
+class _TrackJointsConnectorState extends State<_TrackJointsConnector>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _animationController;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  bool _isPortConnected(PortState port) {
+    final portWorldPos = port.gridPosition(
+      widget.placedBuilding.gridX,
+      widget.placedBuilding.gridY,
+      widget.placedBuilding.building.gridWidth,
+      widget.placedBuilding.building.gridHeight,
+      rotation: widget.placedBuilding.rotation,
+    );
+    for (final conveyor in widget.conveyors) {
+      if (conveyor.path.isEmpty) continue;
+      if (widget.isInput) {
+        final last = conveyor.path.last;
+        if (last.dx.round() == portWorldPos.dx.round() &&
+            last.dy.round() == portWorldPos.dy.round()) {
+          return true;
+        }
+      } else {
+        final first = conveyor.path.first;
+        if (first.dx.round() == portWorldPos.dx.round() &&
+            first.dy.round() == portWorldPos.dy.round()) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final connections = widget.ports.map((p) => _isPortConnected(p)).toList();
+    final int N = connections.length;
+    final double height = N > 0 ? (N * 62.0) : 0;
+
+    return AnimatedBuilder(
+      animation: _animationController,
+      builder: (context, child) {
+        return CustomPaint(
+          size: Size(288, height),
+          painter: _TrackJointsPainter(
+            connections: connections,
+            isInput: widget.isInput,
+            animationValue: _animationController.value,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _TrackJointsPainter extends CustomPainter {
+  final List<bool> connections;
+  final bool isInput;
+  final double animationValue;
+
+  const _TrackJointsPainter({
+    required this.connections,
+    required this.isInput,
+    required this.animationValue,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final int N = connections.length;
+    if (N == 0) return;
+
+    // Define core styling paint objects according to interface.svg colors
+    final Paint interfacePaint = Paint()..style = PaintingStyle.fill;
+    final Paint linkPaint = Paint()..style = PaintingStyle.fill;
+    final Paint inputCirclePaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    final Paint outputCirclePaint = Paint()
+      ..color = const Color(0xFFEBAD26)
+      ..style = PaintingStyle.fill;
+
+    if (isInput) {
+      interfacePaint.color = const Color(0xFF8D8C8C);
+      linkPaint.color = const Color(0xFF6E6E6E);
+    } else {
+      interfacePaint.color = const Color(0xFFB38626);
+      linkPaint.color = const Color(0xFF8D6E32);
+    }
+
+    final double blockHeight = 62.0;
+
+    // ────────────────────────────────────────────────────────
+    // 1. Draw static skeleton pieces according to interface.svg specs
+    // ────────────────────────────────────────────────────────
+    if (isInput) {
+      // Draw concatenated 'interface_link_separate' (vertical backbone)
+      canvas.drawRect(Rect.fromLTRB(207.5, 0, 212.5, N * blockHeight), linkPaint);
+
+      // Draw consolidated 'window_link' running from backbone to grid-box
+      final double devCenterY = N * blockHeight / 2.0;
+      canvas.drawRect(Rect.fromLTRB(211.5, devCenterY - 3.3, size.width, devCenterY + 3.3), linkPaint);
+
+      // Draw junction circle near grid-box
+      canvas.drawCircle(Offset(size.width, devCenterY), 6.0, inputCirclePaint);
+
+      for (int i = 0; i < N; i++) {
+        final double centerY = i * blockHeight + blockHeight / 2.0;
+        
+        // Draw 'interface_link' block (overlaps to 174 and 209 to prevent anti-alias black line)
+        canvas.drawRect(Rect.fromLTWH(174, centerY - 3.3, 35, 6.6), linkPaint);
+
+        // Draw 'interface' block on top
+        canvas.drawRect(Rect.fromLTWH(168, centerY - 27, 7, 54), interfacePaint);
+
+        // Draw junction circle at interface link
+        canvas.drawCircle(Offset(175, centerY), 6.0, inputCirclePaint);
+      }
+    } else {
+      // Draw concatenated 'interface_link_separate' (vertical backbone)
+      canvas.drawRect(Rect.fromLTRB(size.width - 212.5, 0, size.width - 207.5, N * blockHeight), linkPaint);
+
+      // Draw consolidated 'window_link' running from grid-box to backbone
+      final double devCenterY = N * blockHeight / 2.0;
+      canvas.drawRect(Rect.fromLTRB(0, devCenterY - 3.3, size.width - 211.5, devCenterY + 3.3), linkPaint);
+
+      // Draw junction circle near grid-box
+      canvas.drawCircle(Offset(0, devCenterY), 6.0, outputCirclePaint);
+
+      for (int i = 0; i < N; i++) {
+        final double centerY = i * blockHeight + blockHeight / 2.0;
+
+        // Draw 'interface_link' block
+        canvas.drawRect(Rect.fromLTWH(size.width - 209, centerY - 3.3, 35, 6.6), linkPaint);
+
+        // Draw 'interface' block
+        canvas.drawRect(Rect.fromLTWH(size.width - 175, centerY - 27, 7, 54), interfacePaint);
+
+        // Draw junction circle at interface link
+        canvas.drawCircle(Offset(size.width - 175, centerY), 6.0, outputCirclePaint);
+      }
+    }
+
+    // ────────────────────────────────────────────────────────
+    // 2. Draw active flow belts with glowing borders & flow arrows on connected ports
+    // ────────────────────────────────────────────────────────
+    final Paint activeTrackPaint = Paint()..style = PaintingStyle.fill;
+    final Paint borderPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6;
+
+    final Paint activeLinePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round;
+
+    if (isInput) {
+      activeLinePaint.color = Colors.white;
+    } else {
+      activeLinePaint.color = const Color(0xFFEBAD26);
+    }
+
+    final double activeDevCenterY = N * blockHeight / 2.0;
+
+    for (int i = 0; i < N; i++) {
+      if (!connections[i]) continue;
+
+      final double centerY = i * blockHeight + blockHeight / 2.0;
+
+      if (isInput) {
+        // Draw the active glowing connection line
+        final path = Path()
+          ..moveTo(175.0, centerY)
+          ..lineTo(210.0, centerY)
+          ..lineTo(210.0, activeDevCenterY)
+          ..lineTo(size.width, activeDevCenterY);
+        canvas.drawPath(path, activeLinePaint);
+
+        // Active incoming conveyor belt track overlay
+        final double strokeHalf = 1.6 / 2;
+        // height = 54, so +/- 27. Draw rect inside.
+        final rect = Rect.fromLTRB(0, centerY - 27, 168, centerY + 27);
+        
+        final gradient = const LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [
+            Color(0x00E88A11),
+            Color(0xAAFFB82B),
+          ],
+        );
+        activeTrackPaint.shader = gradient.createShader(rect);
+        canvas.drawRect(rect, activeTrackPaint);
+
+        final borderGradient = const LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [
+            Color(0x00FFBB33),
+            Color(0xDDFFD266),
+          ],
+        );
+        borderPaint.shader = borderGradient.createShader(rect);
+        // Offset lines inwards by half a stroke width to avoid protruding above/below 54 block height
+        canvas.drawLine(Offset(0, centerY - 27 + strokeHalf), Offset(168, centerY - 27 + strokeHalf), borderPaint);
+        canvas.drawLine(Offset(0, centerY + 27 - strokeHalf), Offset(168, centerY + 27 - strokeHalf), borderPaint);
+
+        canvas.save();
+        canvas.clipRect(rect);
+        for (int anim = 0; anim < 2; anim++) {
+          final double t = (animationValue + anim / 2.0) % 1.0;
+          final double arrowX = t * 168.0;
+          // Opacity goes fully translucent to solid as it moves right
+          final double opacity = (arrowX / 168.0) * 0.9;
+
+          final arrowPaint = Paint()
+            ..color = Colors.white.withValues(alpha: opacity)
+            ..style = PaintingStyle.fill;
+
+          final path = Path()
+            ..moveTo(arrowX - 4, centerY - 6)
+            ..lineTo(arrowX + 6, centerY)
+            ..lineTo(arrowX - 4, centerY + 6)
+            ..close();
+
+          canvas.drawPath(path, arrowPaint);
+        }
+        canvas.restore();
+      } else {
+        // Draw the active glowing connection line
+        final path = Path()
+          ..moveTo(size.width - 175.0, centerY)
+          ..lineTo(size.width - 210.0, centerY)
+          ..lineTo(size.width - 210.0, activeDevCenterY)
+          ..lineTo(0.0, activeDevCenterY);
+        canvas.drawPath(path, activeLinePaint);
+
+        // Active outgoing conveyor belt track overlay
+        final double startX = size.width - 168;
+        final double strokeHalf = 1.6 / 2;
+        final rect = Rect.fromLTRB(startX, centerY - 27, size.width, centerY + 27);
+
+        final gradient = const LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [
+            Color(0xAAFFB82B),
+            Color(0x00E88A11),
+          ],
+        );
+        activeTrackPaint.shader = gradient.createShader(rect);
+        canvas.drawRect(rect, activeTrackPaint);
+
+        final borderGradient = const LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [
+            Color(0xDDFFD266),
+            Color(0x00FFBB33),
+          ],
+        );
+        borderPaint.shader = borderGradient.createShader(rect);
+        // Offset lines inwards by half a stroke width
+        canvas.drawLine(Offset(startX, centerY - 27 + strokeHalf), Offset(size.width, centerY - 27 + strokeHalf), borderPaint);
+        canvas.drawLine(Offset(startX, centerY + 27 - strokeHalf), Offset(size.width, centerY + 27 - strokeHalf), borderPaint);
+
+        canvas.save();
+        canvas.clipRect(rect);
+        for (int anim = 0; anim < 2; anim++) {
+          final double t = (animationValue + anim / 2.0) % 1.0;
+          final double arrowX = startX + t * 168.0;
+          final double opacity = (1.0 - (arrowX - startX) / 168.0) * 0.9;
+
+          final arrowPaint = Paint()
+            ..color = Colors.white.withValues(alpha: opacity)
+            ..style = PaintingStyle.fill;
+
+          final path = Path()
+            ..moveTo(arrowX - 4, centerY - 6)
+            ..lineTo(arrowX + 6, centerY)
+            ..lineTo(arrowX - 4, centerY + 6)
+            ..close();
+
+          canvas.drawPath(path, arrowPaint);
+        }
+        canvas.restore();
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _TrackJointsPainter oldDelegate) =>
+      oldDelegate.connections != connections ||
+      oldDelegate.isInput != isInput ||
+      oldDelegate.animationValue != animationValue;
 }
 
 class _ProcessingIndicator extends StatefulWidget {
@@ -1458,17 +1843,10 @@ class _DepotTrackWithArrows extends StatelessWidget {
     required this.isInput,
   });
 
-  /// 覆盖层渐变背景色，与弹窗内 Grid Tile 容器背景一致
-  static const _overlayBgColor = Color(0xFF1E1E1E);
-
   @override
   Widget build(BuildContext context) {
     const trackWidth = 168.0;
-    const trackHeight = 55.0;
-    const arrowSize = 20.0;
-    const arrowCount = 3;
-    // 箭头从 -arrowSize 移动到 trackWidth+arrowSize，全程都在轨道外循环
-    final totalTravel = trackWidth + arrowSize * 2;
+    const trackHeight = 54.0;
 
     return SizedBox(
       width: trackWidth,
@@ -1476,62 +1854,12 @@ class _DepotTrackWithArrows extends StatelessWidget {
       child: AnimatedBuilder(
         animation: controller,
         builder: (context, child) {
-          return Stack(
-            clipBehavior: Clip.hardEdge,
-            children: [
-              // 轨道背景（上下边缘向内收缩 1.0 像素，确保被渐变遮罩完全覆盖）
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 1.0,
-                bottom: 1.0,
-                child: SvgPicture.asset(
-                  'assets/svg/dialog_track.svg',
-                  fit: BoxFit.fill,
-                ),
-              ),
-              // 箭头
-              ...List.generate(arrowCount, (index) {
-                // 让 3 个箭头在时间上均匀错开，形成连续流
-                final progress = (controller.value + index / arrowCount) % 1.0;
-                // 存货口：从右向左；取货口：从左向右
-                // 起点都是 -arrowSize（轨道外左侧），终点是 trackWidth+arrowSize（轨道外右侧）
-                final x = isInput
-                    ? -arrowSize + (1.0 - progress) * totalTravel
-                    : -arrowSize + progress * totalTravel;
-                // 箭头指向移动方向
-                final pointRight = !isInput;
-
-                return Positioned(
-                  left: x,
-                  top: (trackHeight - arrowSize) / 2,
-                  child: CustomPaint(
-                    size: const Size(arrowSize, arrowSize),
-                    painter: _TriangleArrowPainter(
-                      color: Colors.white,
-                      pointRight: pointRight,
-                    ),
-                  ),
-                );
-              }),
-              // 渐变覆盖层：左边透明(轨道完全可见) → 右边为容器背景色(视觉淡出)
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.centerLeft,
-                        end: Alignment.centerRight,
-                        colors: [
-                          Color(0x00000000),
-                          _overlayBgColor,
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+          return CustomPaint(
+            size: const Size(trackWidth, trackHeight),
+            painter: _DepotTrackPainter(
+              animationValue: controller.value,
+              isInput: isInput,
+            ),
           );
         },
       ),
@@ -1539,40 +1867,87 @@ class _DepotTrackWithArrows extends StatelessWidget {
   }
 }
 
-/// 白色三角箭头画笔
-class _TriangleArrowPainter extends CustomPainter {
-  final Color color;
-  final bool pointRight;
+class _DepotTrackPainter extends CustomPainter {
+  final double animationValue;
+  final bool isInput;
 
-  const _TriangleArrowPainter({
-    required this.color,
-    required this.pointRight,
+  _DepotTrackPainter({
+    required this.animationValue,
+    required this.isInput,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
+    final Rect rect = Offset.zero & size;
+    
+    final Paint activeTrackPaint = Paint()..style = PaintingStyle.fill;
+    final Paint borderPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6;
 
-    final path = Path();
-    if (pointRight) {
-      path.moveTo(0, 0);
-      path.lineTo(size.width, size.height / 2);
-      path.lineTo(0, size.height);
-    } else {
-      path.moveTo(size.width, 0);
-      path.lineTo(0, size.height / 2);
-      path.lineTo(size.width, size.height);
+    final gradient = const LinearGradient(
+      begin: Alignment.centerLeft,
+      end: Alignment.centerRight,
+      colors: [
+        Color(0xAAFFB82B),
+        Color(0x00E88A11),
+      ],
+    );
+    activeTrackPaint.shader = gradient.createShader(rect);
+    canvas.drawRect(rect, activeTrackPaint);
+
+    final borderGradient = const LinearGradient(
+      begin: Alignment.centerLeft,
+      end: Alignment.centerRight,
+      colors: [
+        Color(0xDDFFD266),
+        Color(0x00FFBB33),
+      ],
+    );
+    borderPaint.shader = borderGradient.createShader(rect);
+    
+    final double strokeHalf = 1.6 / 2;
+    canvas.drawLine(Offset(0, strokeHalf), Offset(size.width, strokeHalf), borderPaint);
+    canvas.drawLine(Offset(0, size.height - strokeHalf), Offset(size.width, size.height - strokeHalf), borderPaint);
+
+    canvas.save();
+    canvas.clipRect(rect);
+    final double centerY = size.height / 2;
+    
+    for (int anim = 0; anim < 2; anim++) {
+      final double t = (animationValue + anim / 2.0) % 1.0;
+      final double arrowX = isInput 
+          ? size.width - (t * size.width) 
+          : t * size.width;
+      
+      final double opacity = (1.0 - (arrowX / size.width)).clamp(0.0, 1.0) * 0.9;
+      
+      final Paint arrowPaint = Paint()
+        ..color = Colors.white.withValues(alpha: opacity)
+        ..style = PaintingStyle.fill;
+      
+      final path = Path();
+      if (isInput) {
+        path.moveTo(arrowX + 4, centerY - 6);
+        path.lineTo(arrowX - 6, centerY);
+        path.lineTo(arrowX + 4, centerY + 6);
+      } else {
+        path.moveTo(arrowX - 4, centerY - 6);
+        path.lineTo(arrowX + 6, centerY);
+        path.lineTo(arrowX - 4, centerY + 6);
+      }
+      path.close();
+      
+      canvas.drawPath(path, arrowPaint);
     }
-    path.close();
-
-    canvas.drawPath(path, paint);
+    
+    canvas.restore();
   }
 
   @override
-  bool shouldRepaint(covariant _TriangleArrowPainter oldDelegate) =>
-      color != oldDelegate.color || pointRight != oldDelegate.pointRight;
+  bool shouldRepaint(covariant _DepotTrackPainter oldDelegate) {
+    return oldDelegate.animationValue != animationValue || oldDelegate.isInput != isInput;
+  }
 }
 
 /// 仓库取货口 - 白色胶囊按钮（添加物品 / 移除物品）
