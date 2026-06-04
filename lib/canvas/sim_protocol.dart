@@ -51,6 +51,9 @@ class SimBuildingData {
   final int gridHeight;
   final List<SimPortData> inputPorts;
   final List<SimPortData> outputPorts;
+  final Map<String, int> inputInventory;
+  final Map<String, int> outputInventory;
+  final String? outputItemId;
 
   const SimBuildingData({
     required this.id,
@@ -63,6 +66,9 @@ class SimBuildingData {
     required this.gridHeight,
     required this.inputPorts,
     required this.outputPorts,
+    this.inputInventory = const {},
+    this.outputInventory = const {},
+    this.outputItemId,
   });
 
   Map<String, dynamic> toJson() => {
@@ -76,6 +82,9 @@ class SimBuildingData {
         'gridHeight': gridHeight,
         'inputPorts': inputPorts.map((e) => e.toJson()).toList(),
         'outputPorts': outputPorts.map((e) => e.toJson()).toList(),
+        'inputInventory': inputInventory,
+        'outputInventory': outputInventory,
+        'outputItemId': outputItemId,
       };
 
   factory SimBuildingData.fromJson(Map<String, dynamic> json) => SimBuildingData(
@@ -93,6 +102,13 @@ class SimBuildingData {
         outputPorts: (json['outputPorts'] as List)
             .map((e) => SimPortData.fromJson(e as Map<String, dynamic>))
             .toList(),
+        inputInventory: (json['inputInventory'] as Map<String, dynamic>?)
+                ?.map((k, v) => MapEntry(k, v as int)) ??
+            {},
+        outputInventory: (json['outputInventory'] as Map<String, dynamic>?)
+                ?.map((k, v) => MapEntry(k, v as int)) ??
+            {},
+        outputItemId: json['outputItemId'] as String?,
       );
 }
 
@@ -133,11 +149,27 @@ class SimPortData {
       );
 }
 
+/// 传送带上单个物品的可序列化数据
+class SimConveyorItemData {
+  final String itemId;
+  final double position;
+
+  const SimConveyorItemData({required this.itemId, required this.position});
+
+  Map<String, dynamic> toJson() => {'itemId': itemId, 'position': position};
+
+  factory SimConveyorItemData.fromJson(Map<String, dynamic> json) =>
+      SimConveyorItemData(
+        itemId: json['itemId'] as String,
+        position: (json['position'] as num).toDouble(),
+      );
+}
+
 /// 传送带的可序列化数据
 class SimConveyorData {
   final String id;
   final List<Offset> path;
-  final String itemId;
+  final List<SimConveyorItemData> items;
   final double flowProgress;
   final bool isBlocked;
   final String? forcedDirection;
@@ -146,7 +178,7 @@ class SimConveyorData {
   const SimConveyorData({
     required this.id,
     required this.path,
-    required this.itemId,
+    this.items = const [],
     this.flowProgress = 0.0,
     this.isBlocked = false,
     this.forcedDirection,
@@ -156,7 +188,7 @@ class SimConveyorData {
   Map<String, dynamic> toJson() => {
         'id': id,
         'path': path.map((p) => {'x': p.dx, 'y': p.dy}).toList(),
-        'itemId': itemId,
+        'items': items.map((e) => e.toJson()).toList(),
         'flowProgress': flowProgress,
         'isBlocked': isBlocked,
         'forcedDirection': forcedDirection,
@@ -168,7 +200,10 @@ class SimConveyorData {
         path: (json['path'] as List)
             .map((p) => Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble()))
             .toList(),
-        itemId: json['itemId'] as String? ?? '',
+        items: (json['items'] as List?)
+                ?.map((e) => SimConveyorItemData.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            [],
         flowProgress: (json['flowProgress'] as num?)?.toDouble() ?? 0.0,
         isBlocked: json['isBlocked'] as bool? ?? false,
         forcedDirection: json['forcedDirection'] as String?,
@@ -255,50 +290,68 @@ class SimBuildingResult {
   final String id;
   final bool isBlocked;
   final double productionProgress;
+  final Map<String, int> inputInventory;
+  final Map<String, int> outputInventory;
 
   const SimBuildingResult({
     required this.id,
     required this.isBlocked,
     required this.productionProgress,
+    this.inputInventory = const {},
+    this.outputInventory = const {},
   });
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'isBlocked': isBlocked,
         'productionProgress': productionProgress,
+        'inputInventory': inputInventory,
+        'outputInventory': outputInventory,
       };
 
-  factory SimBuildingResult.fromJson(Map<String, dynamic> json) => SimBuildingResult(
+  factory SimBuildingResult.fromJson(Map<String, dynamic> json) =>
+      SimBuildingResult(
         id: json['id'] as String,
         isBlocked: json['isBlocked'] as bool,
         productionProgress: (json['productionProgress'] as num).toDouble(),
+        inputInventory: (json['inputInventory'] as Map<String, dynamic>?)
+                ?.map((k, v) => MapEntry(k, v as int)) ??
+            {},
+        outputInventory: (json['outputInventory'] as Map<String, dynamic>?)
+                ?.map((k, v) => MapEntry(k, v as int)) ??
+            {},
       );
 }
 
 /// 传送带 tick 结果
 class SimConveyorResult {
   final String id;
-  final String itemId;
+  final List<SimConveyorItemData> items;
   final double flowProgress;
   final bool isBlocked;
 
   const SimConveyorResult({
     required this.id,
-    required this.itemId,
+    required this.items,
     required this.flowProgress,
     required this.isBlocked,
   });
 
   Map<String, dynamic> toJson() => {
         'id': id,
-        'itemId': itemId,
+        'items': items.map((e) => e.toJson()).toList(),
         'flowProgress': flowProgress,
         'isBlocked': isBlocked,
       };
 
-  factory SimConveyorResult.fromJson(Map<String, dynamic> json) => SimConveyorResult(
+  factory SimConveyorResult.fromJson(Map<String, dynamic> json) =>
+      SimConveyorResult(
         id: json['id'] as String,
-        itemId: json['itemId'] as String? ?? '',
+        items: (json['items'] as List?)
+                ?.map((e) =>
+                    SimConveyorItemData.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            [],
         flowProgress: (json['flowProgress'] as num?)?.toDouble() ?? 0.0,
         isBlocked: json['isBlocked'] as bool? ?? false,
       );
@@ -317,7 +370,8 @@ class SimControlMessage {
 
   Map<String, dynamic> toJson() => {'type': type, 'data': data};
 
-  factory SimControlMessage.fromJson(Map<String, dynamic> json) => SimControlMessage(
+  factory SimControlMessage.fromJson(Map<String, dynamic> json) =>
+      SimControlMessage(
         type: json['type'] as String,
         data: json['data'] as Map<String, dynamic>?,
       );

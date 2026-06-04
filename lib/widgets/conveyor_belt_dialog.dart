@@ -75,13 +75,13 @@ class _ConveyorBeltDialogState extends State<ConveyorBeltDialog>
   }
 
   Item? get _currentItem {
-    if (widget.belt.itemId.isEmpty) return null;
-    return widget.dataLoader.getItem(widget.belt.itemId);
+    if (widget.belt.items.isEmpty) return null;
+    return widget.dataLoader.getItem(widget.belt.items.first.itemId);
   }
 
   String? get _lineItemId {
     for (final b in widget.allBelts) {
-      if (b.itemId.isNotEmpty) return b.itemId;
+      if (b.items.isNotEmpty) return b.items.first.itemId;
     }
     return null;
   }

@@ -101,6 +101,14 @@ class CanvasEditorState extends State<CanvasEditor>
   // 重绘触发计数器，确保图片缓存清理后，即使其他属性不变，也能正常强制触发 CustomPainter 完成重绘
   int _repaintTrigger = 0;
 
+  /// 请求画布重绘（不重建整个页面，仅递增 repaintTrigger）
+  void requestRepaint() {
+    _repaintTrigger++;
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   void _forceRepaint() {
     _EditorPainter.clearPictureCache();
     _repaintTrigger++;
@@ -149,6 +157,7 @@ class CanvasEditorState extends State<CanvasEditor>
     );
     _rebuildPortConnectionsCache();
     TransportBeltRenderer.init();
+    TransportBeltRenderer.preloadAllItemImages(widget.dataLoader);
     RefiningUnitRenderer.init(onReady: () {
       _forceRepaint();
     });
@@ -276,7 +285,7 @@ class CanvasEditorState extends State<CanvasEditor>
     _portBeltsSnapshot = _project.conveyors.map((b) => ConveyorBelt(
       id: b.id,
       path: List<Offset>.from(b.path),
-      itemId: b.itemId,
+      items: b.items.map((i) => ConveyorItem(itemId: i.itemId, position: i.position)).toList(),
       isBlocked: b.isBlocked,
       forcedDirection: b.forcedDirection,
       incomingDirection: b.incomingDirection,
@@ -547,7 +556,7 @@ class CanvasEditorState extends State<CanvasEditor>
         _project.conveyors.add(ConveyorBelt(
           id: 'belt_${DateTime.now().millisecondsSinceEpoch}_a',
           path: beforePath,
-          itemId: belt.itemId,
+          items: [],
           isBlocked: belt.isBlocked,
           incomingDirection: belt.incomingDirection,
         ));
@@ -576,7 +585,7 @@ class CanvasEditorState extends State<CanvasEditor>
         _project.conveyors.add(ConveyorBelt(
           id: 'belt_${DateTime.now().millisecondsSinceEpoch}_b',
           path: afterPath,
-          itemId: belt.itemId,
+          items: [],
           isBlocked: belt.isBlocked,
           forcedDirection: forcedDir,
           incomingDirection: incomingDir,
@@ -598,9 +607,9 @@ class CanvasEditorState extends State<CanvasEditor>
 
   void _collectAllFromLine(List<ConveyorBelt> belts) {
     for (final belt in belts) {
-      if (belt.itemId.isNotEmpty) {
+      if (belt.items.isNotEmpty) {
         setState(() {
-          belt.itemId = '';
+          belt.items.clear();
         });
       }
     }
@@ -700,7 +709,7 @@ class CanvasEditorState extends State<CanvasEditor>
     _portBeltsSnapshot = _project.conveyors.map((b) => ConveyorBelt(
       id: b.id,
       path: List<Offset>.from(b.path),
-      itemId: b.itemId,
+      items: b.items.map((i) => ConveyorItem(itemId: i.itemId, position: i.position)).toList(),
       isBlocked: b.isBlocked,
       forcedDirection: b.forcedDirection,
       incomingDirection: b.incomingDirection,
@@ -774,7 +783,7 @@ class CanvasEditorState extends State<CanvasEditor>
           toAdd.add(ConveyorBelt(
             id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
             path: segment,
-            itemId: belt.itemId,
+            items: [],
             isBlocked: belt.isBlocked,
             forcedDirection: forcedDir,
             incomingDirection: incomingDir,
@@ -804,7 +813,7 @@ class CanvasEditorState extends State<CanvasEditor>
         toAdd.add(ConveyorBelt(
           id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
           path: segment,
-          itemId: belt.itemId,
+          items: [],
           isBlocked: belt.isBlocked,
           forcedDirection: forcedDir,
           incomingDirection: incomingDir,
@@ -1266,7 +1275,7 @@ class _EditorPainter extends CustomPainter {
       if (!visible) {
         continue;
       }
-      final item = dataLoader.getItem(belt.itemId);
+      final item = belt.items.isNotEmpty ? dataLoader.getItem(belt.items.first.itemId) : null;
       // 如果路径被裁剪，创建临时 ConveyorBelt 用于渲染
       if (!identical(renderPath, belt.path)) {
         // 单格下游：从旧传送带推断原始方向
@@ -1282,17 +1291,23 @@ class _EditorPainter extends CustomPainter {
           else if (dy < 0) { incomingDir = 'up'; }
           if (renderPath.length == 1) { forcedDir = incomingDir; }
         }
+        final clipOffset = forkIdx + 1;
+        final clippedItems = belt.items
+            .where((ci) => ci.position >= clipOffset)
+            .map((ci) => ConveyorItem(itemId: ci.itemId, position: ci.position - clipOffset))
+            .toList();
         final clippedBelt = ConveyorBelt(
           id: belt.id,
           path: renderPath,
-          itemId: belt.itemId,
+          items: clippedItems,
+          flowProgress: belt.flowProgress,
           isBlocked: belt.isBlocked,
           forcedDirection: forcedDir,
           incomingDirection: incomingDir,
         );
-        TransportBeltRenderer.renderConveyorPath(canvas, clippedBelt, item, cellSize, project.buildings, detailLevel: detailLevel);
+        TransportBeltRenderer.renderConveyorPath(canvas, clippedBelt, item, cellSize, project.buildings, detailLevel: detailLevel, dataLoader: dataLoader);
       } else {
-        TransportBeltRenderer.renderConveyorPath(canvas, belt, item, cellSize, project.buildings, detailLevel: detailLevel);
+        TransportBeltRenderer.renderConveyorPath(canvas, belt, item, cellSize, project.buildings, detailLevel: detailLevel, dataLoader: dataLoader);
       }
     }
 

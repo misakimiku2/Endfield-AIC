@@ -58,7 +58,11 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   void _onSimTick() {
-    setState(() {});
+    // 只触发画布重绘，不重建整个页面
+    final canvasState = _canvasKey.currentState;
+    if (canvasState != null && canvasState.mounted) {
+      canvasState.requestRepaint();
+    }
   }
 
   void _onDockBuildingSelected(Building? building) {
@@ -99,6 +103,9 @@ class _EditorPageState extends State<EditorPage> {
           });
           widget.simulationEngine.attach(_project);
         },
+        onConfigChanged: () {
+          widget.simulationEngine.requestSync();
+        },
       );
     }
     setState(() {
@@ -133,7 +140,7 @@ class _EditorPageState extends State<EditorPage> {
             'path': c.path
                 .map((p) => {'x': p.dx.toInt(), 'y': p.dy.toInt()})
                 .toList(),
-            'item_id': c.itemId,
+            'item_id': c.items.isNotEmpty ? c.items.first.itemId : '',
           }).toList(),
     };
     final jsonStr = const JsonEncoder.withIndent('  ').convert(data);
@@ -264,7 +271,6 @@ class _EditorPageState extends State<EditorPage> {
           newConveyors.add(ConveyorBelt(
             id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${newConveyors.length}',
             path: path,
-            itemId: cd['item_id'] as String? ?? '',
           ));
         }
       }

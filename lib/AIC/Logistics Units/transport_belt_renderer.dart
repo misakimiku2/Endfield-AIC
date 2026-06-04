@@ -1,10 +1,11 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../models/project.dart';
 import '../../models/item.dart';
-import '../../models/building.dart';
+import '../../data/data_loader.dart';
 
 class TransportBeltRenderer {
   static const double _cellMargin = 3.0;
@@ -12,7 +13,6 @@ class TransportBeltRenderer {
   static const Color _beltHighlight = Color(0xFF777777);
   static const Color _arrowColor = Color(0xFF999999);
   static const double _particleSize = 3.0;
-  static const double _particleSpacing = 16.0;
   static const Color _previewFillColor = Color(0x6044AAFF);
   static const Color _previewBorderColor = Color(0xAA44AAFF);
   static const Color _previewArrowColor = Color(0xDD44AAFF);
@@ -32,6 +32,60 @@ class TransportBeltRenderer {
   static PictureInfo? _rotateRedPicture;
   static bool _initialized = false;
   static bool _initializing = false;
+
+  // 物品 PNG 图片缓存（原始尺寸）
+  static final Map<String, ui.Image> _itemImageCache = {};
+  static final Map<String, bool> _itemImageLoading = {};
+
+  // 物品 PNG 图片缓存（预缩放到目标渲染尺寸，key = "assetPath_targetSize"）
+  static final Map<String, ui.Image> _scaledImageCache = {};
+
+  /// 预加载指定物品的 PNG 图片
+  static Future<void> preloadItemImage(String assetPath) async {
+    if (_itemImageCache.containsKey(assetPath) || _itemImageLoading[assetPath] == true) return;
+    _itemImageLoading[assetPath] = true;
+    try {
+      final data = await rootBundle.load(assetPath);
+      final bytes = data.buffer.asUint8List();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      _itemImageCache[assetPath] = frame.image;
+    } catch (_) {} finally {
+      _itemImageLoading[assetPath] = false;
+    }
+  }
+
+  /// 批量预加载所有物品图片，并生成预缩放缓存
+  static Future<void> preloadAllItemImages(DataLoader dataLoader) async {
+    final futures = <Future<void>>[];
+    for (final item in dataLoader.items.values) {
+      if (item.imageAssetPath.isNotEmpty) {
+        futures.add(preloadItemImage(item.imageAssetPath));
+      }
+    }
+    await Future.wait(futures);
+    // 生成预缩放缓存（cellSize = 48.0，itemSize = 24.0）
+    _generateScaledCache(48.0);
+  }
+
+  /// 生成预缩放图片缓存
+  static void _generateScaledCache(double cellSize) {
+    final targetSize = (cellSize * 0.5).toInt();
+    for (final entry in _itemImageCache.entries) {
+      final cacheKey = '${entry.key}_$targetSize';
+      if (_scaledImageCache.containsKey(cacheKey)) continue;
+      final srcImage = entry.value;
+      // 使用 PictureRecorder 预渲染缩放后的图片
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      final scale = targetSize / srcImage.width;
+      canvas.scale(scale, scale);
+      canvas.drawImage(srcImage, Offset.zero, Paint());
+      final picture = recorder.endRecording();
+      // 将 Picture 转换为 Image（异步但在此处用同步方式）
+      _scaledImageCache[cacheKey] = picture.toImageSync(targetSize, targetSize);
+    }
+  }
 
   /// 检测是否是输出端口 (output)
   static bool isOutputPort(Offset gridPos, List<PlacedBuilding> buildings) {
@@ -342,6 +396,7 @@ class TransportBeltRenderer {
     double cellSize,
     List<PlacedBuilding> buildings, {
     int detailLevel = 2,
+    DataLoader? dataLoader,
   }) {
     if (belt.path.isEmpty) return;
 
@@ -375,9 +430,9 @@ class TransportBeltRenderer {
       }
     }
 
-    // LOD 2: 粒子动画
-    if (detailLevel >= 2 && item != null && !belt.isBlocked) {
-      _renderParticles(canvas, belt, item, cellSize, buildings);
+    // 渲染传送带上的物品
+    if (belt.items.isNotEmpty) {
+      _renderItems(canvas, belt, cellSize, buildings, dataLoader);
     }
 
     if (belt.isBlocked && belt.path.isNotEmpty) {
@@ -566,39 +621,68 @@ class TransportBeltRenderer {
     return 'right';
   }
 
-  static void _renderParticles(
+  /// 渲染传送带上的物品图标
+  static void _renderItems(
     Canvas canvas,
     ConveyorBelt belt,
-    Item item,
     double cellSize,
     List<PlacedBuilding> buildings,
+    DataLoader? dataLoader,
   ) {
-    final totalLength = belt.length;
-    if (totalLength <= 0) return;
+    final itemSize = (cellSize * 0.5).toInt();
+    final halfSize = itemSize / 2.0;
 
-    final particlePaint = Paint()..color = item.color;
-    final particleCount = (totalLength / _particleSpacing).floor().clamp(1, 200);
-    final flowOffset = belt.flowProgress * _particleSpacing;
+    for (final conveyorItem in belt.items) {
+      final pos = _getPositionFromGridUnits(belt.path, conveyorItem.position, cellSize);
 
-    for (int i = 0; i < particleCount; i++) {
-      final distance = (i * _particleSpacing + flowOffset) % totalLength;
-      final pos = _getPositionAlongPath(belt.path, distance, cellSize);
-      if (_shouldDiscardParticle(pos, belt.path, cellSize, buildings)) {
-        continue;
+      final item = dataLoader?.getItem(conveyorItem.itemId);
+
+      // 优先使用预缩放图片缓存
+      if (item != null && item.imageAssetPath.isNotEmpty) {
+        final cacheKey = '${item.imageAssetPath}_$itemSize';
+        final scaledImage = _scaledImageCache[cacheKey];
+        if (scaledImage != null) {
+          canvas.drawImage(scaledImage, Offset(pos.dx - halfSize, pos.dy - halfSize), Paint());
+          continue;
+        }
+
+        // 回退到原始缓存（需要 scale 变换）
+        final cachedImage = _itemImageCache[item.imageAssetPath];
+        if (cachedImage != null) {
+          final srcSize = cachedImage.width.toDouble();
+          final scale = itemSize / srcSize;
+          canvas.save();
+          canvas.translate(pos.dx, pos.dy);
+          canvas.scale(scale, scale);
+          canvas.drawImage(cachedImage, Offset(-srcSize / 2, -srcSize / 2), Paint());
+          canvas.restore();
+          continue;
+        }
       }
-      canvas.drawCircle(pos, _particleSize, particlePaint);
+
+      // 最终回退：使用颜色圆形
+      final color = item?.color ?? const Color(0xFFAAAAAA);
+      canvas.drawCircle(pos, halfSize, Paint()..color = color);
     }
   }
 
-  static Offset _getPositionAlongPath(
-      List<Offset> path, double distance, double cellSize) {
-    if (path.length < 2) return Offset.zero;
+  /// 根据网格单位位置计算世界坐标
+  /// position 为格数单位，0=路径起点，path.length-1=路径终点
+  static Offset _getPositionFromGridUnits(
+      List<Offset> path, double gridPosition, double cellSize) {
+    if (path.isEmpty) return Offset.zero;
+    if (path.length == 1) {
+      return Offset(
+        path[0].dx * cellSize + cellSize / 2,
+        path[0].dy * cellSize + cellSize / 2,
+      );
+    }
 
-    int segmentIndex = (distance / cellSize).floor();
+    int segmentIndex = gridPosition.floor();
     if (segmentIndex >= path.length - 1) segmentIndex = path.length - 2;
     if (segmentIndex < 0) segmentIndex = 0;
 
-    final t = (distance - segmentIndex * cellSize) / cellSize;
+    final t = gridPosition - segmentIndex;
     final from = path[segmentIndex];
     final to = path[segmentIndex + 1];
 

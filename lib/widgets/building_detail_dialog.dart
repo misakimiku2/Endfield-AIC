@@ -16,6 +16,7 @@ class BuildingDetailDialog extends StatefulWidget {
   final List<ConveyorBelt>? conveyors;
   final VoidCallback? onMove;
   final VoidCallback? onDelete;
+  final VoidCallback? onConfigChanged;
 
   const BuildingDetailDialog({
     super.key,
@@ -24,6 +25,7 @@ class BuildingDetailDialog extends StatefulWidget {
     this.conveyors,
     this.onMove,
     this.onDelete,
+    this.onConfigChanged,
   });
 
   static Future<void> show(
@@ -33,6 +35,7 @@ class BuildingDetailDialog extends StatefulWidget {
     List<ConveyorBelt>? conveyors,
     VoidCallback? onMove,
     VoidCallback? onDelete,
+    VoidCallback? onConfigChanged,
   }) {
     return showDialog<void>(
       context: context,
@@ -43,6 +46,7 @@ class BuildingDetailDialog extends StatefulWidget {
         conveyors: conveyors,
         onMove: onMove,
         onDelete: onDelete,
+        onConfigChanged: onConfigChanged,
       ),
     );
   }
@@ -95,6 +99,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
     _allItems = _buildResourceList();
     _loadLogo();
     _loadLiquidSwitch();
+    _selectedOutputItemId = widget.placedBuilding.outputItemId;
     _simTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
       if (mounted) setState(() {});
     });
@@ -510,8 +515,10 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                       ? () {
                           setState(() {
                             _selectedOutputItemId = item.id;
+                            widget.placedBuilding.outputItemId = item.id;
                             _isAddMode = false;
                           });
+                          widget.onConfigChanged?.call();
                         }
                       : null,
                 );
@@ -770,11 +777,13 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                         if (_selectedOutputItemId != null) {
                           // 移除物品
                           _selectedOutputItemId = null;
+                          widget.placedBuilding.outputItemId = null;
                           _isAddMode = false;
                         } else {
                           _isAddMode = !_isAddMode;
                         }
                       });
+                      widget.onConfigChanged?.call();
                     },
                   ),
                 ],
@@ -855,12 +864,33 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                             placedBuilding: widget.placedBuilding,
                             conveyors: widget.conveyors ?? [],
                             isLiquidMode: _isLiquidMode,
+                            activeRecipe: _activeRecipe,
                           ),
                           const SizedBox(width: 11),
                           Container(
                             height: defaultRowH,
                             alignment: Alignment.center,
-                            child: _ProcessingIndicator(isRunning: widget.placedBuilding.productionProgress > 0),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _ProcessingIndicator(isRunning: widget.placedBuilding.productionProgress > 0),
+                                if (widget.placedBuilding.productionProgress > 0) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    '${_activeRecipe?.processTimeSeconds.toStringAsFixed(1) ?? "0.0"}s',
+                                    style: const TextStyle(
+                                      color: Color(0xFFAAAAAA),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  _ProductionProgressBar(
+                                    progress: widget.placedBuilding.productionProgress,
+                                  ),
+                                ],
+                              ],
+                            ),
                           ),
                           const SizedBox(width: 11),
                           _SynthesisGrid(
@@ -870,6 +900,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                             placedBuilding: widget.placedBuilding,
                             conveyors: widget.conveyors ?? [],
                             isLiquidMode: _isLiquidMode,
+                            activeRecipe: _activeRecipe,
                           ),
                         ],
                       ),
@@ -1037,6 +1068,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
           onStateChanged: () {
             setState(() {});
           },
+          onConfigChanged: widget.onConfigChanged,
         );
       },
     );
@@ -1048,12 +1080,14 @@ class _RecipeListDialog extends StatefulWidget {
   final PlacedBuilding placedBuilding;
   final DataLoader dataLoader;
   final VoidCallback onStateChanged;
+  final VoidCallback? onConfigChanged;
 
   const _RecipeListDialog({
     required this.recipes,
     required this.placedBuilding,
     required this.dataLoader,
     required this.onStateChanged,
+    this.onConfigChanged,
   });
 
   @override
@@ -1161,6 +1195,7 @@ class _RecipeListDialogState extends State<_RecipeListDialog> {
                             }
                           });
                           widget.onStateChanged();
+                          widget.onConfigChanged?.call();
                         },
                       );
                     },
@@ -1393,6 +1428,7 @@ class _SynthesisGrid extends StatefulWidget {
   final PlacedBuilding placedBuilding;
   final List<ConveyorBelt> conveyors;
   final bool isLiquidMode;
+  final Recipe? activeRecipe;
 
   const _SynthesisGrid({
     required this.items,
@@ -1401,6 +1437,7 @@ class _SynthesisGrid extends StatefulWidget {
     required this.placedBuilding,
     required this.conveyors,
     this.isLiquidMode = false,
+    this.activeRecipe,
   });
 
   @override
@@ -1502,16 +1539,81 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
 
   @override
   Widget build(BuildContext context) {
+    // 获取实际库存数据
+    final inventory = widget.isInput
+        ? widget.placedBuilding.inputInventory
+        : widget.placedBuilding.outputInventory;
+
+    // 构建配方需求映射（用于输入网格显示 "库存/需求" 格式）
+    final Map<String, int> recipeRequirements = {};
+    if (widget.isInput && widget.activeRecipe != null) {
+      for (final input in widget.activeRecipe!.inputs) {
+        recipeRequirements[input.itemId] = input.amount;
+      }
+    }
+
+    // 合并库存中的物品和配方需求中的物品（确保配方需求但库存为0的物品也显示）
+    final Set<String> allItemIds = {...inventory.keys};
+    if (widget.isInput) {
+      allItemIds.addAll(recipeRequirements.keys);
+    }
+
+    // 如果没有任何物品，显示配方原始内容（兼容无库存时的情况）
+    final bool hasInventory = allItemIds.isNotEmpty;
+    final List<String> displayItemIds;
+    if (hasInventory) {
+      displayItemIds = allItemIds.toList();
+    } else {
+      // 无库存时回退到配方数据
+      displayItemIds = widget.items.map((io) => io.itemId).toList();
+    }
+
+    // 获取第一个物品用于网格显示（保持与原逻辑兼容）
     final item = widget.items.isNotEmpty ? widget.items.first : null;
     final dataItem = item != null ? widget.dataLoader.getItem(item.itemId) : null;
-    final level = dataItem?.level;
-    final totalAmount = widget.items.fold<int>(0, (sum, io) => sum + io.amount);
 
-    final solidPorts = (widget.isInput 
-            ? widget.placedBuilding.inputPorts 
+    // 计算显示的数量文本
+    String countText;
+    if (hasInventory && displayItemIds.isNotEmpty) {
+      if (widget.isInput && widget.activeRecipe != null) {
+        // 输入网格：显示 "库存/需求" 格式
+        final firstId = displayItemIds.first;
+        final invCount = inventory[firstId] ?? 0;
+        final reqCount = recipeRequirements[firstId] ?? 0;
+        if (displayItemIds.length == 1) {
+          countText = reqCount > 0 ? '$invCount/$reqCount' : '$invCount';
+        } else {
+          // 多种物品时显示总数
+          final totalInv = inventory.values.fold<int>(0, (sum, v) => sum + v);
+          countText = '$totalInv';
+        }
+      } else {
+        // 输出网格：显示库存数量
+        final totalInv = inventory.values.fold<int>(0, (sum, v) => sum + v);
+        countText = '$totalInv';
+      }
+    } else {
+      final totalAmount = widget.items.fold<int>(0, (sum, io) => sum + io.amount);
+      countText = '$totalAmount';
+    }
+
+    final solidPorts = (widget.isInput
+            ? widget.placedBuilding.inputPorts
             : widget.placedBuilding.outputPorts)
         .where((p) => p.definition.portType == 'solid')
         .toList();
+
+    // 如果有库存数据，使用库存中第一个有物品的条目来显示图标
+    Item? displayItem = dataItem;
+    if (hasInventory) {
+      for (final id in displayItemIds) {
+        final loaded = widget.dataLoader.getItem(id);
+        if (loaded != null) {
+          displayItem = loaded;
+          break;
+        }
+      }
+    }
 
     final gridBox = Container(
       width: 128,
@@ -1520,13 +1622,13 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
         fit: StackFit.expand,
         children: [
           SvgPicture.string(
-            _getGridSvg(level),
+            _getGridSvg(displayItem?.level),
             fit: BoxFit.fill,
           ),
-          if (dataItem != null && dataItem.imageAssetPath.isNotEmpty)
+          if (displayItem != null && displayItem.imageAssetPath.isNotEmpty)
             Center(
               child: Image.asset(
-                dataItem.imageAssetPath,
+                displayItem.imageAssetPath,
                 width: 128,
                 height: 128,
                 cacheWidth: 384,
@@ -1534,17 +1636,17 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
                 fit: BoxFit.contain,
                 filterQuality: FilterQuality.medium,
                 isAntiAlias: true,
-                errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
+                errorBuilder: (_, __, ___) => _buildItemPlaceholder(displayItem!),
               ),
             )
-          else if (dataItem != null)
-            Center(child: _buildItemPlaceholder(dataItem)),
+          else if (displayItem != null)
+            Center(child: _buildItemPlaceholder(displayItem)),
         ],
       ),
     );
 
     final double connectorHeight = solidPorts.isNotEmpty ? (solidPorts.length * 62.0) : 0.0;
-    
+
     final double defaultGridBoxH = 128.0;
     final double defaultRowH = connectorHeight > defaultGridBoxH ? connectorHeight : defaultGridBoxH;
     final double originalGridBoxY = (defaultRowH - defaultGridBoxH) / 2.0;
@@ -1558,7 +1660,7 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
     final double finalLiquidY = originalGridBoxY - upwardOffset;
     final double finalGridBoxY = originalGridBoxY + downShift - upwardOffset;
     final double finalOffsetY = downShift - upwardOffset;
-    
+
     final double newRowH = finalGridBoxY + defaultGridBoxH;
     final double finalHeight = newRowH > defaultRowH ? newRowH : defaultRowH;
 
@@ -1585,7 +1687,7 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
             Positioned(
               left: liquidBoxX,
               top: finalLiquidY,
-              child: _buildLiquidUnit(dataItem, liquidScale),
+              child: _buildLiquidUnit(displayItem, liquidScale),
             ),
           Positioned(
             left: gridBoxX,
@@ -1625,15 +1727,14 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
       children: [
         mainGridContent,
         const SizedBox(height: 8),
-        if (totalAmount > 0)
-          Text(
-            '$totalAmount',
-            style: const TextStyle(
-              color: Color(0xFFDDDDDD),
-              fontSize: 20,
-              fontWeight: FontWeight.w500,
-            ),
+        Text(
+          countText,
+          style: const TextStyle(
+            color: Color(0xFFDDDDDD),
+            fontSize: 20,
+            fontWeight: FontWeight.w500,
           ),
+        ),
       ],
     );
   }
@@ -2087,6 +2188,76 @@ class _ProcessingIndicatorState extends State<_ProcessingIndicator> with TickerP
       ],
     );
   }
+}
+
+/// 生产进度条 - 胶囊形状，绿色渐变填充
+class _ProductionProgressBar extends StatelessWidget {
+  final double progress; // 0.0 ~ 1.0
+
+  const _ProductionProgressBar({required this.progress});
+
+  @override
+  Widget build(BuildContext context) {
+    final clampedProgress = progress.clamp(0.0, 1.0);
+
+    return SizedBox(
+      width: 168,
+      height: 12,
+      child: CustomPaint(
+        painter: _ProgressBarPainter(progress: clampedProgress),
+      ),
+    );
+  }
+}
+
+class _ProgressBarPainter extends CustomPainter {
+  final double progress;
+
+  _ProgressBarPainter({required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final radius = size.height / 2.0;
+    final rect = Offset.zero & size;
+
+    // 背景 - 深灰色胶囊
+    final bgPaint = Paint()
+      ..color = const Color(0xFF333333)
+      ..style = PaintingStyle.fill;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, Radius.circular(radius)),
+      bgPaint,
+    );
+
+    // 填充 - 绿色渐变
+    if (progress > 0) {
+      final fillWidth = size.width * progress;
+      final fillRect = Rect.fromLTWH(0, 0, fillWidth, size.height);
+
+      final gradient = const LinearGradient(
+        begin: Alignment.centerLeft,
+        end: Alignment.centerRight,
+        colors: [
+          Color(0xFF44AA00),
+          Color(0xFF88DD44),
+        ],
+      );
+
+      final fillPaint = Paint()
+        ..shader = gradient.createShader(fillRect)
+        ..style = PaintingStyle.fill;
+
+      // 使用 clipRRect 来确保填充也是胶囊形
+      canvas.save();
+      canvas.clipRRect(RRect.fromRectAndRadius(rect, Radius.circular(radius)));
+      canvas.drawRect(fillRect, fillPaint);
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ProgressBarPainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }
 
 class _ActionButton extends StatefulWidget {

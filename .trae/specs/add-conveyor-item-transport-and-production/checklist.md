@@ -1,0 +1,18 @@
+- [x] ConveyorBelt 模型包含 items 列表（ConveyorItem: itemId + position），不再使用单一 itemId
+- [x] PlacedBuilding 模型包含 inputInventory、outputInventory、outputItemId 字段
+- [x] 传送带物品以 0.5 格/秒速度从起点向终点移动
+- [x] 物品到达传送带终点且连接设备输入端口时，转入设备 inputInventory
+- [x] 物品到达传送带终点且未连接设备时，在尽头堆积
+- [x] 物品间距至少 1 格，前方阻塞时后方等待
+- [x] 仓库取货口选择物品后持续向输出传送带输出物品
+- [x] 仓库存货口持续接收传送带输送的物品
+- [x] 设备 inputInventory 满足 activeRecipe 时自动消耗输入开始生产
+- [x] 生产完成后产出进入 outputInventory，自动上载到输出传送带
+- [x] 设备弹窗输入/输出网格显示实际库存物品及数量
+- [x] 设备弹窗输入输出网格中间下方有 168px×12px 胶囊进度条，仅生产时显示
+- [x] 进度条上方显示当前生产所需总时间
+- [x] 进度条按 productionProgress 填充，每轮生产完成重置
+- [x] 传送带渲染器在物品对应位置渲染物品小图标
+- [x] 仿真通信协议（sim_protocol.dart）同步更新新字段
+- [x] Isolate 模式（sim_worker.dart）和 Web 回退模式逻辑一致
+- [x] SimulationEngine._syncState() 和 _applyTickResult() 适配新字段

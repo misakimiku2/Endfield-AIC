@@ -243,7 +243,7 @@ class TransportBeltController {
       final belt = ConveyorBelt(
         id: 'belt_${DateTime.now().millisecondsSinceEpoch}',
         path: List<Offset>.from(fullPath),
-        itemId: '',
+        items: [],
         isBlocked: false,
         incomingDirection: newBeltIncomingDir,
       );
@@ -295,7 +295,7 @@ class TransportBeltController {
               toAdd.add(ConveyorBelt(
                 id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${oldBelt.id}',
                 path: downstream,
-                itemId: oldBelt.itemId,
+                items: [],
                 isBlocked: oldBelt.isBlocked,
                 forcedDirection: forcedDir,
                 incomingDirection: incomingDir,

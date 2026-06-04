@@ -110,6 +110,9 @@ class PlacedBuilding {
   List<PortState> outputPorts;
   bool isBlocked;
   double productionProgress;
+  Map<String, int> inputInventory;
+  Map<String, int> outputInventory;
+  String? outputItemId; // 仓库取货口专用：选择的输出物品ID
 
   PlacedBuilding({
     required this.id,
@@ -120,6 +123,9 @@ class PlacedBuilding {
     this.activeRecipeId,
     this.isBlocked = false,
     this.productionProgress = 0.0,
+    Map<String, int>? inputInventory,
+    Map<String, int>? outputInventory,
+    this.outputItemId,
   })  : inputPorts = List.generate(
           building.ports.inputs.length,
           (i) => PortState(
@@ -135,7 +141,9 @@ class PlacedBuilding {
             type: 'output',
             definition: building.ports.outputs[i],
           ),
-        );
+        ),
+        inputInventory = inputInventory ?? {},
+        outputInventory = outputInventory ?? {};
 
   /// 旋转后的有效宽度（90°/270° 时宽高互换）
   int get effectiveWidth => (rotation % 2 == 1) ? building.gridHeight : building.gridWidth;
@@ -163,11 +171,25 @@ class PlacedBuilding {
   }
 }
 
+class ConveyorItem {
+  final String itemId;
+  double position; // 在传送带路径上的位置，单位为格，0=起点
+
+  ConveyorItem({
+    required this.itemId,
+    required this.position,
+  });
+
+  ConveyorItem copyWith({String? itemId, double? position}) => ConveyorItem(
+        itemId: itemId ?? this.itemId,
+        position: position ?? this.position,
+      );
+}
+
 class ConveyorBelt {
   final String id;
   final List<Offset> path;
-  String itemId;
-  List<Offset> particles;
+  List<ConveyorItem> items;
   double flowProgress;
   bool isBlocked;
   final String? forcedDirection;
@@ -176,13 +198,12 @@ class ConveyorBelt {
   ConveyorBelt({
     required this.id,
     required this.path,
-    required this.itemId,
-    List<Offset>? particles,
+    List<ConveyorItem>? items,
     this.flowProgress = 0.0,
     this.isBlocked = false,
     this.forcedDirection,
     this.incomingDirection,
-  }) : particles = particles ?? [];
+  }) : items = items ?? [];
 
   static const double _cellSize = 48.0;
 
@@ -197,6 +218,9 @@ class ConveyorBelt {
       : Offset.zero;
 
   double get length => path.length > 1 ? (path.length - 1) * _cellSize : 0.0;
+
+  /// 传送带路径的最大位置值（格数）
+  double get maxPosition => path.length > 1 ? (path.length - 1).toDouble() : 0.0;
 }
 
 class ProjectState {
