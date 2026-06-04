@@ -34,7 +34,7 @@ class Recipe {
   factory Recipe.fromJson(Map<String, dynamic> json) {
     return Recipe(
       id: json['id'] as String,
-      name: json['name'] as String,
+      name: (json['name'] as String).replaceAll('精炼', ''),
       allowedBuildings: List<String>.from(json['allowed_buildings'] as List),
       processTimeSeconds: (json['process_time_seconds'] as num).toDouble(),
       inputs: (json['inputs'] as List)

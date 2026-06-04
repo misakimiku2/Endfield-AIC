@@ -63,6 +63,11 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
 
   late final List<_ResourceItem> _allItems;
   String? _logoSvgString;
+  String? _liquidSwitchSvgString;
+  String? _liquidSwitchOffSvgString;
+  bool _isLiquidMode = false;
+  bool _isLiquidHover = false;
+
   final ScrollController _gridScrollController = ScrollController();
   final GlobalKey _gridContainerKey = GlobalKey();
   bool _scrollbarVisible = false;
@@ -74,6 +79,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   // 仓库取货口专用状态
   bool _isAddMode = false;
   String? _selectedOutputItemId;
+  Timer? _simTimer;
 
   bool get _isDepotUnloader =>
       widget.placedBuilding.building.id == 'depot_unloader_3x1';
@@ -88,10 +94,28 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
     super.initState();
     _allItems = _buildResourceList();
     _loadLogo();
+    _loadLiquidSwitch();
+    _simTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  Future<void> _loadLiquidSwitch() async {
+    try {
+      final raw = await rootBundle.loadString('assets/svg/liquid_icon_switch.svg');
+      final off = raw.replaceAll('#03a9ff', '#b2b2b2');
+      if (mounted) {
+        setState(() {
+          _liquidSwitchSvgString = raw;
+          _liquidSwitchOffSvgString = off;
+        });
+      }
+    } catch (_) {}
   }
 
   @override
   void dispose() {
+    _simTimer?.cancel();
     _scrollbarFadeTimer?.cancel();
     _gridScrollController.dispose();
     super.dispose();
@@ -291,18 +315,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   }
 
   Widget _buildCloseButton() {
-    return GestureDetector(
+    return HoverCloseButton(
       onTap: () => Navigator.of(context).pop(),
-      child: SizedBox(
-        width: 26,
-        height: 26,
-        child: SvgPicture.asset(
-          'assets/png/window/Close_button.svg',
-          width: 26,
-          height: 26,
-          fit: BoxFit.contain,
-        ),
-      ),
     );
   }
 
@@ -416,14 +430,26 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                               ),
                             ],
                           )
-                        : Center(
-                            child: SvgPicture.asset(
-                              tabIcons[index],
-                              width: 20,
-                              height: 20,
-                              colorFilter: const ColorFilter.mode(
-                                Color(0xFF929292),
-                                BlendMode.srcIn,
+                        : Tooltip(
+                            message: _tabLabels[index],
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1E1E1E),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: const Color(0xFF444444), width: 1),
+                            ),
+                            textStyle: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                            ),
+                            child: Center(
+                              child: SvgPicture.asset(
+                                tabIcons[index],
+                                width: 20,
+                                height: 20,
+                                colorFilter: const ColorFilter.mode(
+                                  Color(0xFF929292),
+                                  BlendMode.srcIn,
+                                ),
                               ),
                             ),
                           ),
@@ -573,6 +599,72 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
     return _buildDefaultSynthesisPanel(recipes);
   }
 
+  Widget _buildLiquidModeSwitch() {
+    if (_liquidSwitchSvgString == null) {
+      return const SizedBox.shrink();
+    }
+
+    String currentSvg;
+    if (_isLiquidMode) {
+      if (_isLiquidHover) {
+        currentSvg = _liquidSwitchSvgString!.replaceAll('#03a9ff', '#227aa8');
+      } else {
+        currentSvg = _liquidSwitchSvgString!;
+      }
+    } else {
+      if (_isLiquidHover) {
+        currentSvg = _liquidSwitchSvgString!.replaceAll('#03a9ff', '#636363');
+      } else {
+        currentSvg = _liquidSwitchSvgString!.replaceAll('#03a9ff', '#b2b2b2');
+      }
+    }
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isLiquidHover = true),
+      onExit: (_) => setState(() => _isLiquidHover = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            _isLiquidMode = !_isLiquidMode;
+          });
+        },
+        behavior: HitTestBehavior.opaque,
+        child: SizedBox(
+          width: 150,
+          height: 43,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              SvgPicture.string(
+                currentSvg,
+                width: 150,
+                height: 43,
+                fit: BoxFit.contain,
+              ),
+              Positioned.fill(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 30),
+                    child: Text(
+                      _isLiquidMode ? '液体模式' : '关闭模式',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildDepotLoaderPanel() {
     // 仓库存货口：只有输入网格，无添加按钮
     return Column(
@@ -581,16 +673,16 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _ActionButton(
-              icon: Icons.open_with,
+              svgPath: 'assets/svg/Move.svg',
               label: '移动',
               onTap: () {
                 Navigator.of(context).pop();
                 widget.onMove?.call();
               },
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 30),
             _ActionButton(
-              icon: Icons.inventory_2_outlined,
+              svgPath: 'assets/svg/recycle.svg',
               label: '收纳',
               onTap: () {
                 Navigator.of(context).pop();
@@ -598,23 +690,6 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
               },
             ),
           ],
-        ),
-        const SizedBox(height: 10),
-        Text(
-          widget.placedBuilding.building.name,
-          style: const TextStyle(
-            color: Color(0xFFDDDDDD),
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          '${widget.placedBuilding.building.gridWidth}x${widget.placedBuilding.building.gridHeight}',
-          style: const TextStyle(
-            color: Color(0xFF888888),
-            fontSize: 11,
-          ),
         ),
         const SizedBox(height: 20),
         Expanded(
@@ -650,16 +725,16 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _ActionButton(
-              icon: Icons.open_with,
+              svgPath: 'assets/svg/Move.svg',
               label: '移动',
               onTap: () {
                 Navigator.of(context).pop();
                 widget.onMove?.call();
               },
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 30),
             _ActionButton(
-              icon: Icons.inventory_2_outlined,
+              svgPath: 'assets/svg/recycle.svg',
               label: '收纳',
               onTap: () {
                 Navigator.of(context).pop();
@@ -667,23 +742,6 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
               },
             ),
           ],
-        ),
-        const SizedBox(height: 10),
-        Text(
-          widget.placedBuilding.building.name,
-          style: const TextStyle(
-            color: Color(0xFFDDDDDD),
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          '${widget.placedBuilding.building.gridWidth}x${widget.placedBuilding.building.gridHeight}',
-          style: const TextStyle(
-            color: Color(0xFF888888),
-            fontSize: 11,
-          ),
         ),
         const SizedBox(height: 20),
         Expanded(
@@ -730,115 +788,389 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   }
 
   Widget _buildDefaultSynthesisPanel(List<Recipe> recipes) {
+    final solidInputPorts = widget.placedBuilding.inputPorts.where((p) => p.definition.portType == 'solid').toList();
+    final solidOutputPorts = widget.placedBuilding.outputPorts.where((p) => p.definition.portType == 'solid').toList();
+    final int maxPorts = math.max(solidInputPorts.length, solidOutputPorts.length);
+    final double connectorHeight = maxPorts > 0 ? (maxPorts * 62.0) : 0.0;
+    final double defaultGridBoxH = 128.0;
+    final double defaultRowH = connectorHeight > defaultGridBoxH ? connectorHeight : defaultGridBoxH;
+
     return Column(
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        Stack(
+          alignment: Alignment.center,
           children: [
-            _ActionButton(
-              icon: Icons.open_with,
-              label: '移动',
-              onTap: () {
-                Navigator.of(context).pop();
-                widget.onMove?.call();
-              },
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _ActionButton(
+                  svgPath: 'assets/svg/Move.svg',
+                  label: '移动',
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    widget.onMove?.call();
+                  },
+                ),
+                const SizedBox(width: 30),
+                _ActionButton(
+                  svgPath: 'assets/svg/recycle.svg',
+                  label: '收纳',
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    widget.onDelete?.call();
+                  },
+                ),
+              ],
             ),
-            const SizedBox(width: 12),
-            _ActionButton(
-              icon: Icons.inventory_2_outlined,
-              label: '收纳',
-              onTap: () {
-                Navigator.of(context).pop();
-                widget.onDelete?.call();
-              },
+            Positioned(
+              right: 0,
+              child: _buildLiquidModeSwitch(),
             ),
           ],
-        ),
-        const SizedBox(height: 10),
-        Text(
-          widget.placedBuilding.building.name,
-          style: const TextStyle(
-            color: Color(0xFFDDDDDD),
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          '${widget.placedBuilding.building.gridWidth}x${widget.placedBuilding.building.gridHeight}',
-          style: const TextStyle(
-            color: Color(0xFF888888),
-            fontSize: 11,
-          ),
         ),
         const SizedBox(height: 20),
         Expanded(
           child: Container(
             width: double.infinity,
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E1E1E),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF333333)),
-            ),
-            child: Center(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _SynthesisGrid(
-                    items: _activeRecipe?.inputs ?? [],
-                    isInput: true,
-                    dataLoader: widget.dataLoader,
-                    placedBuilding: widget.placedBuilding,
-                    conveyors: widget.conveyors ?? [],
-                  ),
-                  const SizedBox(width: 11),
-                  _ProcessingIndicator(isRunning: widget.placedBuilding.productionProgress > 0),
-                  const SizedBox(width: 11),
-                  _SynthesisGrid(
-                    items: _activeRecipe?.outputs ?? [],
-                    isInput: false,
-                    dataLoader: widget.dataLoader,
-                    placedBuilding: widget.placedBuilding,
-                    conveyors: widget.conveyors ?? [],
-                  ),
-                ],
-              ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final double containerH = constraints.maxHeight;
+                final double rowTop = (containerH / 2.0) - (defaultRowH / 2.0);
+
+                return Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned(
+                      top: rowTop,
+                      left: 0,
+                      right: 0,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _SynthesisGrid(
+                            items: _activeRecipe?.inputs ?? [],
+                            isInput: true,
+                            dataLoader: widget.dataLoader,
+                            placedBuilding: widget.placedBuilding,
+                            conveyors: widget.conveyors ?? [],
+                            isLiquidMode: _isLiquidMode,
+                          ),
+                          const SizedBox(width: 11),
+                          Container(
+                            height: defaultRowH,
+                            alignment: Alignment.center,
+                            child: _ProcessingIndicator(isRunning: widget.placedBuilding.productionProgress > 0),
+                          ),
+                          const SizedBox(width: 11),
+                          _SynthesisGrid(
+                            items: _activeRecipe?.outputs ?? [],
+                            isInput: false,
+                            dataLoader: widget.dataLoader,
+                            placedBuilding: widget.placedBuilding,
+                            conveyors: widget.conveyors ?? [],
+                            isLiquidMode: _isLiquidMode,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ),
         const SizedBox(height: 14),
-        GestureDetector(
-          onTap: () {},
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF2A2A2A),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF444444)),
-            ),
-            child: const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+        Builder(
+          builder: (context) {
+            final isProducing = _activeRecipe != null && widget.placedBuilding.productionProgress > 0;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  Icons.list_alt_outlined,
-                  size: 16,
-                  color: Color(0xFF888888),
-                ),
-                SizedBox(width: 8),
-                Text(
-                  '本设备可自动生产的配方一览',
-                  style: TextStyle(
-                    color: Color(0xFFAAAAAA),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+                if (isProducing)
+                  const Padding(
+                    padding: EdgeInsets.only(left: 30, bottom: 6),
+                    child: Text(
+                      '当前自动生产中的配方',
+                      style: TextStyle(
+                        color: Color(0xFF6E6E6E),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 30),
+                    child: SizedBox(
+                      width: 369.92001,
+                      height: 76.8,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            width: 348.16,
+                            height: 76.8,
+                            child: GestureDetector(
+                              onTap: () => _showRecipeListDialog(context, recipes),
+                              child: SvgPicture.asset(
+                                'assets/svg/information_BG.svg',
+                                width: 348.16,
+                                height: 76.8,
+                                fit: BoxFit.fill,
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            width: 348.16,
+                            height: 76.8,
+                            child: IgnorePointer(
+                              child: Center(
+                                child: isProducing
+                                    ? Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Row(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              ...(_activeRecipe?.inputs.map((inp) {
+                                                final item = widget.dataLoader.getItem(inp.itemId);
+                                                if (item == null) return const SizedBox.shrink();
+                                                return Padding(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                                                  child: Image.asset(
+                                                    item.imageAssetPath,
+                                                    width: 24,
+                                                    height: 24,
+                                                    cacheWidth: 72,
+                                                    cacheHeight: 72,
+                                                    fit: BoxFit.contain,
+                                                    filterQuality: FilterQuality.medium,
+                                                    isAntiAlias: true,
+                                                  ),
+                                                );
+                                              }) ?? []),
+                                              const SizedBox(width: 48),
+                                              ...(_activeRecipe?.outputs.map((out) {
+                                                final item = widget.dataLoader.getItem(out.itemId);
+                                                if (item == null) return const SizedBox.shrink();
+                                                return Padding(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                                                  child: Image.asset(
+                                                    item.imageAssetPath,
+                                                    width: 24,
+                                                    height: 24,
+                                                    cacheWidth: 72,
+                                                    cacheHeight: 72,
+                                                    fit: BoxFit.contain,
+                                                    filterQuality: FilterQuality.medium,
+                                                    isAntiAlias: true,
+                                                  ),
+                                                );
+                                              }) ?? []),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 6),
+                                          const _RecipeRunIndicator(),
+                                        ],
+                                      )
+                                    : Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          const Icon(
+                                            Icons.list_alt_outlined,
+                                            size: 16,
+                                            color: Color(0xFF888888),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          const Text(
+                                            '本设备可自动生产的配方一览',
+                                            style: TextStyle(
+                                              color: Color(0xFFAAAAAA),
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            right: 0,
+                            top: (76.8 - 43.52002) / 2,
+                            child: HoverSvgButton(
+                              svgPath: 'assets/svg/Recipe_button.svg',
+                              width: 43.52002,
+                              height: 43.52002,
+                              onTap: () => _showRecipeListDialog(context, recipes),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ],
-            ),
-          ),
+            );
+          },
         ),
       ],
+    );
+  }
+
+  void _showRecipeListDialog(BuildContext context, List<Recipe> recipes) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.6),
+      builder: (BuildContext dialogContext) {
+        return _RecipeListDialog(
+          recipes: recipes,
+          placedBuilding: widget.placedBuilding,
+          dataLoader: widget.dataLoader,
+          onStateChanged: () {
+            setState(() {});
+          },
+        );
+      },
+    );
+  }
+}
+
+class _RecipeListDialog extends StatefulWidget {
+  final List<Recipe> recipes;
+  final PlacedBuilding placedBuilding;
+  final DataLoader dataLoader;
+  final VoidCallback onStateChanged;
+
+  const _RecipeListDialog({
+    required this.recipes,
+    required this.placedBuilding,
+    required this.dataLoader,
+    required this.onStateChanged,
+  });
+
+  @override
+  State<_RecipeListDialog> createState() => _RecipeListDialogState();
+}
+
+class _RecipeListDialogState extends State<_RecipeListDialog> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        width: 960,
+        height: 560,
+        decoration: BoxDecoration(
+          color: const Color(0xFF161616),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF444444)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(width: 26),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        '可自动生产的配方一览',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        widget.placedBuilding.building.name,
+                        style: const TextStyle(
+                          color: Color(0xFFA6A6A6),
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                HoverCloseButton(
+                  onTap: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            Expanded(
+              child: Listener(
+                onPointerSignal: (event) {
+                  if (event is PointerScrollEvent && _scrollController.hasClients) {
+                    final maxExtent = _scrollController.position.maxScrollExtent;
+                    final target = (_scrollController.offset + event.scrollDelta.dy * 1.5)
+                        .clamp(0.0, maxExtent);
+                    _scrollController.animateTo(
+                      target,
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeOutCubic,
+                    );
+                  }
+                },
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                  child: GridView.builder(
+                    controller: _scrollController,
+                    physics: const NeverScrollableScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      mainAxisSpacing: 16,
+                      crossAxisSpacing: 16,
+                      childAspectRatio: 3.5,
+                    ),
+                    itemCount: widget.recipes.length,
+                    itemBuilder: (context, index) {
+                      final recipe = widget.recipes[index];
+                      final isPinned = widget.placedBuilding.activeRecipeId == recipe.id;
+                      return _RecipeListItem(
+                        recipe: recipe,
+                        dataLoader: widget.dataLoader,
+                        isPinned: isPinned,
+                        onPin: () {
+                          setState(() {
+                            if (isPinned) {
+                              widget.placedBuilding.activeRecipeId = null;
+                            } else {
+                              widget.placedBuilding.activeRecipeId = recipe.id;
+                            }
+                          });
+                          widget.onStateChanged();
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -878,7 +1210,7 @@ class _ResourceGridTile extends StatefulWidget {
   State<_ResourceGridTile> createState() => _ResourceGridTileState();
 }
 
-String _gridTileSvg(int level) {
+String _gridTileSvg(int level, {bool isHovered = false}) {
   const gradientEndColors = {
     2: '#93e8a4',
     3: '#6d9bf1',
@@ -891,10 +1223,13 @@ String _gridTileSvg(int level) {
   };
   final endColor = gradientEndColors[level] ?? '#dddddd';
   final tagColor = tagColors[level] ?? '#ebebeb';
+
+  final stopColor = isHovered ? '#252525' : '#696969';
+
   return '<svg xmlns="http://www.w3.org/2000/svg" width="93.44" height="93.621" viewBox="0 0 93.44 93.621">'
       '<defs><linearGradient id="g" x1="902.412" y1="521.936" x2="902.412" y2="649.936" gradientUnits="userSpaceOnUse">'
-      '<stop offset="0" stop-color="#696969"/>'
-      '<stop offset="0.7" stop-color="#696969"/>'
+      '<stop offset="0" stop-color="$stopColor"/>'
+      '<stop offset="0.7" stop-color="$stopColor"/>'
       '<stop offset="1" stop-color="$endColor"/>'
       '</linearGradient></defs>'
       '<g transform="matrix(0.73,0,0,0.73,-610.056,-380.923)">'
@@ -938,21 +1273,27 @@ class _ResourceGridTileState extends State<_ResourceGridTile> {
     return MouseRegion(
       onEnter: _onEnter,
       onExit: (_) => setState(() => _hovering = false),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          SvgPicture.string(
-            _gridTileSvg(widget.item.level),
-            fit: BoxFit.fill,
-          ),
+      child: AnimatedScale(
+        scale: _hovering ? 1.08 : 1.0,
+        duration: const Duration(milliseconds: 150),
+        child: Stack(
+          fit: StackFit.expand,
+          clipBehavior: Clip.none,
+          children: [
+            SvgPicture.string(
+              _gridTileSvg(widget.item.level, isHovered: _hovering),
+              fit: BoxFit.fill,
+            ),
           Center(
             child: widget.item.imageAssetPath.isNotEmpty
                 ? Image.asset(
                     widget.item.imageAssetPath,
                     width: 93,
                     height: 93,
+                    cacheWidth: 279,
+                    cacheHeight: 279,
                     fit: BoxFit.contain,
-                    filterQuality: FilterQuality.high,
+                    filterQuality: FilterQuality.medium,
                     isAntiAlias: true,
                     errorBuilder: (_, __, ___) => Container(
                       width: 40,
@@ -1040,8 +1381,9 @@ class _ResourceGridTileState extends State<_ResourceGridTile> {
             ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 class _SynthesisGrid extends StatefulWidget {
@@ -1050,6 +1392,7 @@ class _SynthesisGrid extends StatefulWidget {
   final DataLoader dataLoader;
   final PlacedBuilding placedBuilding;
   final List<ConveyorBelt> conveyors;
+  final bool isLiquidMode;
 
   const _SynthesisGrid({
     required this.items,
@@ -1057,6 +1400,7 @@ class _SynthesisGrid extends StatefulWidget {
     required this.dataLoader,
     required this.placedBuilding,
     required this.conveyors,
+    this.isLiquidMode = false,
   });
 
   @override
@@ -1107,6 +1451,55 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
         '</svg>';
   }
 
+  Widget _buildLiquidUnit(Item? dataItem, double scale) {
+    final double w = 266.7 * scale;
+    final double h = 141.7 * scale;
+    final double cx = (widget.isInput ? 221.0 : 45.7) * scale;
+    final double cy = 96.0 * scale;
+
+    final svgWidget = SvgPicture.asset(
+      'assets/svg/liquid.svg',
+      width: w,
+      height: h,
+      fit: BoxFit.contain,
+    );
+
+    return SizedBox(
+      width: w,
+      height: h,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          if (widget.isInput)
+            svgWidget
+          else
+            Transform.scale(
+              scaleX: -1,
+              child: svgWidget,
+            ),
+          if (dataItem != null)
+            Positioned(
+              left: cx - 35,
+              top: cy - 35,
+              child: dataItem.imageAssetPath.isNotEmpty
+                  ? Image.asset(
+                      dataItem.imageAssetPath,
+                      width: 70,
+                      height: 70,
+                      cacheWidth: 210,
+                      cacheHeight: 210,
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.medium,
+                      isAntiAlias: true,
+                      errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
+                    )
+                  : _buildItemPlaceholder(dataItem),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final item = widget.items.isNotEmpty ? widget.items.first : null;
@@ -1136,8 +1529,10 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
                 dataItem.imageAssetPath,
                 width: 128,
                 height: 128,
+                cacheWidth: 384,
+                cacheHeight: 384,
                 fit: BoxFit.contain,
-                filterQuality: FilterQuality.high,
+                filterQuality: FilterQuality.medium,
                 isAntiAlias: true,
                 errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
               ),
@@ -1149,47 +1544,86 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
     );
 
     final double connectorHeight = solidPorts.isNotEmpty ? (solidPorts.length * 62.0) : 0.0;
+    
+    final double defaultGridBoxH = 128.0;
+    final double defaultRowH = connectorHeight > defaultGridBoxH ? connectorHeight : defaultGridBoxH;
+    final double originalGridBoxY = (defaultRowH - defaultGridBoxH) / 2.0;
+
+    final double liquidScale = 1.10;
+    final double liquidH = 141.7 * liquidScale;
+    final double liquidGap = 10.0;
+    final double downShift = widget.isLiquidMode ? (liquidH + liquidGap) : 0.0;
+    final double upwardOffset = widget.isLiquidMode ? 75.0 : 0.0;
+
+    final double finalLiquidY = originalGridBoxY - upwardOffset;
+    final double finalGridBoxY = originalGridBoxY + downShift - upwardOffset;
+    final double finalOffsetY = downShift - upwardOffset;
+    
+    final double newRowH = finalGridBoxY + defaultGridBoxH;
+    final double finalHeight = newRowH > defaultRowH ? newRowH : defaultRowH;
+
+    final double leftSizedBoxWidth = (widget.isInput && solidPorts.isNotEmpty) ? 288.0 : 0.0;
+    final double rightSizedBoxWidth = (!widget.isInput && solidPorts.isNotEmpty) ? 288.0 : 0.0;
+    final double gridBoxWidth = 128.0;
+    final double totalWidth = leftSizedBoxWidth + gridBoxWidth + rightSizedBoxWidth;
+
+    // Center of the gridBox horizontally
+    final double gridBoxX = leftSizedBoxWidth;
+    final double gridBoxCenterX = gridBoxX + gridBoxWidth / 2.0;
+
+    // Calculate liquidBox X offset so its output/input "droplet" aligns with gridBox center
+    final double liquidCx = (widget.isInput ? 221.0 : 45.7) * liquidScale;
+    final double liquidBoxX = gridBoxCenterX - liquidCx;
+
+    Widget mainGridContent = SizedBox(
+      width: totalWidth,
+      height: finalHeight,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          if (widget.isLiquidMode)
+            Positioned(
+              left: liquidBoxX,
+              top: finalLiquidY,
+              child: _buildLiquidUnit(dataItem, liquidScale),
+            ),
+          Positioned(
+            left: gridBoxX,
+            top: finalGridBoxY,
+            child: gridBox,
+          ),
+          if (widget.isInput && solidPorts.isNotEmpty)
+            Positioned(
+              left: 0,
+              top: (defaultRowH - connectorHeight) / 2.0,
+              child: _TrackJointsConnector(
+                ports: solidPorts,
+                conveyors: widget.conveyors,
+                isInput: true,
+                placedBuilding: widget.placedBuilding,
+                offsetY: finalOffsetY,
+              ),
+            ),
+          if (!widget.isInput && solidPorts.isNotEmpty)
+            Positioned(
+              right: 0,
+              top: (defaultRowH - connectorHeight) / 2.0,
+              child: _TrackJointsConnector(
+                ports: solidPorts,
+                conveyors: widget.conveyors,
+                isInput: false,
+                placedBuilding: widget.placedBuilding,
+                offsetY: finalOffsetY,
+              ),
+            ),
+        ],
+      ),
+    );
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Stack(
-          alignment: Alignment.center,
-          clipBehavior: Clip.none,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                if (widget.isInput && solidPorts.isNotEmpty)
-                  SizedBox(width: 288, height: connectorHeight),
-                gridBox,
-                if (!widget.isInput && solidPorts.isNotEmpty)
-                  SizedBox(width: 288, height: connectorHeight),
-              ],
-            ),
-            if (widget.isInput && solidPorts.isNotEmpty)
-              Positioned(
-                left: 0,
-                child: _TrackJointsConnector(
-                  ports: solidPorts,
-                  conveyors: widget.conveyors,
-                  isInput: true,
-                  placedBuilding: widget.placedBuilding,
-                ),
-              ),
-            if (!widget.isInput && solidPorts.isNotEmpty)
-              Positioned(
-                right: 0,
-                child: _TrackJointsConnector(
-                  ports: solidPorts,
-                  conveyors: widget.conveyors,
-                  isInput: false,
-                  placedBuilding: widget.placedBuilding,
-                ),
-              ),
-          ],
-        ),
+        mainGridContent,
         const SizedBox(height: 8),
         if (totalAmount > 0)
           Text(
@@ -1224,12 +1658,14 @@ class _TrackJointsConnector extends StatefulWidget {
   final List<ConveyorBelt> conveyors;
   final bool isInput;
   final PlacedBuilding placedBuilding;
+  final double offsetY;
 
   const _TrackJointsConnector({
     required this.ports,
     required this.conveyors,
     required this.isInput,
     required this.placedBuilding,
+    this.offsetY = 0.0,
   });
 
   @override
@@ -1292,11 +1728,12 @@ class _TrackJointsConnectorState extends State<_TrackJointsConnector>
       animation: _animationController,
       builder: (context, child) {
         return CustomPaint(
-          size: Size(288, height),
+          size: Size(288, height > 0 ? height + widget.offsetY : 0),
           painter: _TrackJointsPainter(
             connections: connections,
             isInput: widget.isInput,
             animationValue: _animationController.value,
+            offsetY: widget.offsetY,
           ),
         );
       },
@@ -1308,11 +1745,13 @@ class _TrackJointsPainter extends CustomPainter {
   final List<bool> connections;
   final bool isInput;
   final double animationValue;
+  final double offsetY;
 
   const _TrackJointsPainter({
     required this.connections,
     required this.isInput,
     required this.animationValue,
+    this.offsetY = 0.0,
   });
 
   @override
@@ -1344,11 +1783,15 @@ class _TrackJointsPainter extends CustomPainter {
     // 1. Draw static skeleton pieces according to interface.svg specs
     // ────────────────────────────────────────────────────────
     if (isInput) {
+      final double devCenterY = N * blockHeight / 2.0 + offsetY;
+      final double backboneBottom = N * blockHeight > (devCenterY + 3.3) 
+          ? N * blockHeight 
+          : (devCenterY + 3.3);
+
       // Draw concatenated 'interface_link_separate' (vertical backbone)
-      canvas.drawRect(Rect.fromLTRB(207.5, 0, 212.5, N * blockHeight), linkPaint);
+      canvas.drawRect(Rect.fromLTRB(207.5, 0, 212.5, backboneBottom), linkPaint);
 
       // Draw consolidated 'window_link' running from backbone to grid-box
-      final double devCenterY = N * blockHeight / 2.0;
       canvas.drawRect(Rect.fromLTRB(211.5, devCenterY - 3.3, size.width, devCenterY + 3.3), linkPaint);
 
       // Draw junction circle near grid-box
@@ -1367,11 +1810,15 @@ class _TrackJointsPainter extends CustomPainter {
         canvas.drawCircle(Offset(175, centerY), 6.0, inputCirclePaint);
       }
     } else {
+      final double devCenterY = N * blockHeight / 2.0 + offsetY;
+      final double backboneBottom = N * blockHeight > (devCenterY + 3.3) 
+          ? N * blockHeight 
+          : (devCenterY + 3.3);
+
       // Draw concatenated 'interface_link_separate' (vertical backbone)
-      canvas.drawRect(Rect.fromLTRB(size.width - 212.5, 0, size.width - 207.5, N * blockHeight), linkPaint);
+      canvas.drawRect(Rect.fromLTRB(size.width - 212.5, 0, size.width - 207.5, backboneBottom), linkPaint);
 
       // Draw consolidated 'window_link' running from grid-box to backbone
-      final double devCenterY = N * blockHeight / 2.0;
       canvas.drawRect(Rect.fromLTRB(0, devCenterY - 3.3, size.width - 211.5, devCenterY + 3.3), linkPaint);
 
       // Draw junction circle near grid-box
@@ -1411,7 +1858,7 @@ class _TrackJointsPainter extends CustomPainter {
       activeLinePaint.color = const Color(0xFFEBAD26);
     }
 
-    final double activeDevCenterY = N * blockHeight / 2.0;
+    final double activeDevCenterY = N * blockHeight / 2.0 + offsetY;
 
     for (int i = 0; i < N; i++) {
       if (!connections[i]) continue;
@@ -1642,38 +2089,91 @@ class _ProcessingIndicatorState extends State<_ProcessingIndicator> with TickerP
   }
 }
 
-class _ActionButton extends StatelessWidget {
-  final IconData icon;
+class _ActionButton extends StatefulWidget {
+  final String svgPath;
   final String label;
   final VoidCallback onTap;
 
   const _ActionButton({
-    required this.icon,
+    required this.svgPath,
     required this.label,
     required this.onTap,
   });
 
   @override
+  State<_ActionButton> createState() => _ActionButtonState();
+}
+
+class _ActionButtonState extends State<_ActionButton> {
+  bool _isHovered = false;
+  String? _svgString;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _loadSvg();
+  }
+
+  @override
+  void didUpdateWidget(_ActionButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.svgPath != widget.svgPath) {
+      _loadSvg();
+    }
+  }
+
+  Future<void> _loadSvg() async {
+    try {
+      final data = await DefaultAssetBundle.of(context).loadString(widget.svgPath);
+      if (mounted) {
+        setState(() {
+          _svgString = data;
+        });
+      }
+    } catch (_) {}
+  }
+
+  @override
   Widget build(BuildContext context) {
+    Widget iconWidget;
+    if (_svgString == null) {
+      iconWidget = const SizedBox(
+        width: 44,
+        height: 44,
+      );
+    } else {
+      String finalSvg = _svgString!;
+      if (_isHovered) {
+        finalSvg = finalSvg
+            .replaceAll('fill:#636363', 'fill:#TEMP_WHITE_SVG')
+            .replaceAll('fill:#ffffff', 'fill:#636363')
+            .replaceAll('fill:#TEMP_WHITE_SVG', 'fill:#ffffff');
+      }
+      iconWidget = SvgPicture.string(
+        finalSvg,
+        width: 44,
+        height: 44,
+        fit: BoxFit.contain,
+      );
+    }
+
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xFF2A2A2A),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFF444444)),
-        ),
+      onTap: widget.onTap,
+      behavior: HitTestBehavior.opaque,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        cursor: SystemMouseCursors.click,
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 14, color: const Color(0xFFAAAAAA)),
+            iconWidget,
             const SizedBox(width: 6),
             Text(
-              label,
+              widget.label,
               style: const TextStyle(
-                color: Color(0xFFCCCCCC),
-                fontSize: 12,
+                color: Colors.white,
+                fontSize: 14,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -1781,8 +2281,10 @@ class _DepotGridTileState extends State<_DepotGridTile>
                     widget.item!.imageAssetPath,
                     width: 128,
                     height: 128,
+                    cacheWidth: 384,
+                    cacheHeight: 384,
                     fit: BoxFit.contain,
-                    filterQuality: FilterQuality.high,
+                    filterQuality: FilterQuality.medium,
                     isAntiAlias: true,
                     errorBuilder: (_, __, ___) => _buildItemPlaceholder(),
                   ),
@@ -2039,6 +2541,489 @@ class _DepotCapsuleButtonState extends State<_DepotCapsuleButton>
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RecipeListItem extends StatelessWidget {
+  final Recipe recipe;
+  final DataLoader dataLoader;
+  final bool isPinned;
+  final VoidCallback onPin;
+
+  const _RecipeListItem({
+    required this.recipe,
+    required this.dataLoader,
+    required this.isPinned,
+    required this.onPin,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final inputs = recipe.inputs;
+    final input1 = inputs.isNotEmpty ? dataLoader.getItem(inputs[0].itemId) : null;
+    final amount1 = inputs.isNotEmpty ? inputs[0].amount : 1;
+    final input2 = inputs.length > 1 ? dataLoader.getItem(inputs[1].itemId) : null;
+    final amount2 = inputs.length > 1 ? inputs[1].amount : 1;
+
+    final outputs = recipe.outputs;
+    final output1 = outputs.isNotEmpty ? dataLoader.getItem(outputs[0].itemId) : null;
+    final outAmount1 = outputs.isNotEmpty ? outputs[0].amount : 1;
+    final output2 = outputs.length > 1 ? dataLoader.getItem(outputs[1].itemId) : null;
+    final outAmount2 = outputs.length > 1 ? outputs[1].amount : 1;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 6),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.description_outlined,
+                size: 14,
+                color: Color(0xFFCCCCCC),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                recipe.name,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          height: 80,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF0F0F0),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFDDDDDD)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              _MiniItemTile(item: input1, amount: amount1),
+              const SizedBox(width: 8),
+              _MiniItemTile(item: input2, amount: amount2),
+              const Spacer(),
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.chevron_right_rounded, size: 14, color: Color(0xFF666666)),
+                      Icon(Icons.chevron_right_rounded, size: 14, color: Color(0xFF666666)),
+                      Icon(Icons.chevron_right_rounded, size: 14, color: Color(0xFF666666)),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${recipe.processTimeSeconds.toStringAsFixed(0)}秒',
+                    style: const TextStyle(
+                      color: Color(0xFF444444),
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const Spacer(),
+              _MiniItemTile(item: output1, amount: outAmount1),
+              const SizedBox(width: 8),
+              _MiniItemTile(item: output2, amount: outAmount2),
+              const SizedBox(width: 12),
+              Container(
+                width: 1,
+                height: 54,
+                color: const Color(0xFFDCDCDC),
+              ),
+              const SizedBox(width: 12),
+              _RecipePinButton(
+                isPinned: isPinned,
+                onTap: onPin,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RecipePinButton extends StatefulWidget {
+  final bool isPinned;
+  final VoidCallback onTap;
+
+  const _RecipePinButton({
+    required this.isPinned,
+    required this.onTap,
+  });
+
+  @override
+  State<_RecipePinButton> createState() => _RecipePinButtonState();
+}
+
+class _RecipePinButtonState extends State<_RecipePinButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool applyTransform = widget.isPinned || _isHovered;
+
+    Color mainColor;
+    if (widget.isPinned) {
+      mainColor = const Color(0xFF99932A);
+    } else if (_isHovered) {
+      mainColor = const Color(0xFFCAAD2B);
+    } else {
+      mainColor = const Color(0xFF888888);
+    }
+
+    Color borderColor = widget.isPinned
+        ? const Color(0xFF99932A)
+        : (_isHovered ? const Color(0xFFCAAD2B) : const Color(0xFFCCCCCC));
+
+    double rotationAngle = applyTransform ? math.pi / 4 : 0.0;
+    double scale = applyTransform ? 1.25 : 1.0;
+
+    return GestureDetector(
+      onTap: widget.onTap,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        cursor: SystemMouseCursors.click,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: widget.isPinned ? mainColor.withValues(alpha: 0.15) : Colors.transparent,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(
+              color: borderColor,
+              width: widget.isPinned ? 1.5 : 1.0,
+            ),
+          ),
+          child: Center(
+            child: AnimatedRotation(
+              turns: rotationAngle / (2 * math.pi),
+              duration: const Duration(milliseconds: 150),
+              child: AnimatedScale(
+                scale: scale,
+                duration: const Duration(milliseconds: 150),
+                child: Icon(
+                  Icons.push_pin,
+                  size: 18,
+                  color: mainColor,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniItemTile extends StatelessWidget {
+  final Item? item;
+  final int amount;
+
+  const _MiniItemTile({required this.item, required this.amount});
+
+  @override
+  Widget build(BuildContext context) {
+    if (item == null) {
+      return Container(
+        width: 54,
+        height: 54,
+        decoration: BoxDecoration(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: const Color(0xFFCCCCCC)),
+        ),
+        child: CustomPaint(
+          painter: _DiagonalSlashPainter(),
+        ),
+      );
+    }
+
+    final colors = {
+      2: const Color(0xFF44AA00),
+      3: const Color(0xFF0082EA),
+      4: const Color(0xFFB73CC5),
+    };
+    final tagColor = colors[item!.level] ?? const Color(0xFFEBEBEB);
+
+    return Container(
+      width: 54,
+      height: 54,
+      decoration: BoxDecoration(
+        color: const Color(0xFF333333),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: const Color(0xFF666666)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (item!.imageAssetPath.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.all(2),
+              child: Image.asset(
+                item!.imageAssetPath,
+                cacheWidth: 162,
+                cacheHeight: 162,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.medium,
+                isAntiAlias: true,
+                errorBuilder: (_, __, ___) => Container(),
+              ),
+            ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 12,
+            child: Container(
+              color: tagColor,
+              alignment: Alignment.center,
+              child: Text(
+                '$amount',
+                style: TextStyle(
+                  color: item!.level >= 2 ? Colors.white : Colors.black,
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  height: 1.0,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DiagonalSlashPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFFCCCCCC)
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
+    canvas.drawLine(Offset(0, size.height), Offset(size.width, 0), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _RecipeRunIndicator extends StatefulWidget {
+  const _RecipeRunIndicator();
+
+  @override
+  State<_RecipeRunIndicator> createState() => _RecipeRunIndicatorState();
+}
+
+class _RecipeRunIndicatorState extends State<_RecipeRunIndicator> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final double t = _controller.value;
+
+        double op1, op2, op3;
+        if (t < 1.0 / 3.0) {
+          double subT = t / (1.0 / 3.0);
+          op1 = 0.2 + (1.0 - 0.2) * subT;
+          op2 = 0.6 + (0.2 - 0.6) * subT;
+          op3 = 1.0 + (0.6 - 1.0) * subT;
+        } else if (t < 2.0 / 3.0) {
+          double subT = (t - 1.0 / 3.0) / (1.0 / 3.0);
+          op1 = 1.0 + (0.6 - 1.0) * subT;
+          op2 = 0.2 + (1.0 - 0.2) * subT;
+          op3 = 0.6 + (0.2 - 0.6) * subT;
+        } else {
+          double subT = (t - 2.0 / 3.0) / (1.0 / 3.0);
+          op1 = 0.6 + (0.2 - 0.6) * subT;
+          op2 = 1.0 + (0.6 - 1.0) * subT;
+          op3 = 0.2 + (1.0 - 0.2) * subT;
+        }
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildTriangle(op1),
+            const SizedBox(width: 4),
+            _buildTriangle(op2),
+            const SizedBox(width: 4),
+            _buildTriangle(op3),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildTriangle(double opacity) {
+    return Opacity(
+      opacity: opacity.clamp(0.0, 1.0),
+      child: SizedBox(
+        width: 10,
+        height: 12,
+        child: SvgPicture.asset(
+          'assets/svg/Directional.svg',
+          fit: BoxFit.contain,
+          colorFilter: const ColorFilter.mode(
+            Colors.white,
+            BlendMode.srcIn,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class HoverCloseButton extends StatefulWidget {
+  final VoidCallback onTap;
+  const HoverCloseButton({super.key, required this.onTap});
+
+  @override
+  State<HoverCloseButton> createState() => _HoverCloseButtonState();
+}
+
+class _HoverCloseButtonState extends State<HoverCloseButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: widget.onTap,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        cursor: SystemMouseCursors.click,
+        child: SizedBox(
+          width: 26,
+          height: 26,
+          child: SvgPicture.asset(
+            'assets/png/window/Close_button.svg',
+            width: 26,
+            height: 26,
+            fit: BoxFit.contain,
+            colorFilter: _isHovered
+                ? const ColorFilter.mode(Color(0xFF636363), BlendMode.srcIn)
+                : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class HoverSvgButton extends StatefulWidget {
+  final String svgPath;
+  final double width;
+  final double height;
+  final VoidCallback onTap;
+
+  const HoverSvgButton({
+    super.key,
+    required this.svgPath,
+    required this.width,
+    required this.height,
+    required this.onTap,
+  });
+
+  @override
+  State<HoverSvgButton> createState() => _HoverSvgButtonState();
+}
+
+class _HoverSvgButtonState extends State<HoverSvgButton> {
+  bool _isHovered = false;
+  String? _svgString;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _loadSvg();
+  }
+
+  @override
+  void didUpdateWidget(HoverSvgButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.svgPath != widget.svgPath) {
+      _loadSvg();
+    }
+  }
+
+  Future<void> _loadSvg() async {
+    try {
+      final data = await DefaultAssetBundle.of(context).loadString(widget.svgPath);
+      if (mounted) {
+        setState(() {
+          _svgString = data;
+        });
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_svgString == null) {
+      return SizedBox(
+        width: widget.width,
+        height: widget.height,
+      );
+    }
+    String finalSvg = _svgString!;
+    if (_isHovered) {
+      finalSvg = finalSvg
+          .replaceAll('fill:#636363', 'fill:#TEMP_WHITE_SVG')
+          .replaceAll('fill:#ffffff', 'fill:#636363')
+          .replaceAll('fill:#TEMP_WHITE_SVG', 'fill:#ffffff');
+    }
+    return GestureDetector(
+      onTap: widget.onTap,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        cursor: SystemMouseCursors.click,
+        child: SizedBox(
+          width: widget.width,
+          height: widget.height,
+          child: SvgPicture.string(
+            finalSvg,
+            width: widget.width,
+            height: widget.height,
+            fit: BoxFit.contain,
+          ),
         ),
       ),
     );
