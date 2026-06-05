@@ -281,6 +281,9 @@ class TransportBeltController {
                 else if (dx < 0) { forcedDir = 'left'; }
                 else if (dy > 0) { forcedDir = 'down'; }
                 else if (dy < 0) { forcedDir = 'up'; }
+              } else {
+                // 多格下游继承原传送带的 forcedDirection
+                forcedDir = oldBelt.forcedDirection;
               }
               // 下游首格的入方向：从分叉点指向下游首格
               String? incomingDir;

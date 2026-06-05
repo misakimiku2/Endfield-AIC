@@ -79,6 +79,8 @@ class TransportBeltRenderer {
     required List<PlacedBuilding>? buildings,
     List<Offset>? fullPathContext,
     int contextStartIndex = 0,
+    String? forcedDirection,
+    String? incomingDirection,
   }) {
     if (buildings == null) return null;
 
@@ -100,9 +102,10 @@ class TransportBeltRenderer {
     double clipBottom = 10000;
     final half = cellSize / 2;
 
-    // 情况 1：起点
+    // 情况 1：起点 — 裁剪入方向的反侧
     if (actualIndex == 0) {
-      final dir = _getCellDirection(actualPath, actualIndex);
+      // 优先使用 incomingDirection（转角首格），否则从路径推断出方向再取反侧
+      final dir = incomingDirection ?? _getCellDirection(actualPath, actualIndex);
       final isPort = isOutputPort(cell, buildings);
       switch (dir) {
         case 'right':
@@ -120,9 +123,10 @@ class TransportBeltRenderer {
       }
     }
 
-    // 情况 2：终点
+    // 情况 2：终点 — 裁剪出方向侧
     if (actualIndex == actualPath.length - 1) {
-      final dir = _getCellDirection(actualPath, actualIndex);
+      // 优先使用 forcedDirection（转角末格的出方向），否则从路径推断
+      final dir = forcedDirection ?? _getCellDirection(actualPath, actualIndex);
       final isPort = isInputPort(cell, buildings);
       switch (dir) {
         case 'right':
@@ -460,6 +464,8 @@ class TransportBeltRenderer {
         buildings: buildings,
         fullPathContext: fullPathContext,
         contextStartIndex: contextStartIndex,
+        forcedDirection: forcedDirection,
+        incomingDirection: incomingDirection,
       );
       if (clip != null) {
         canvas.clipRect(clip);
@@ -494,6 +500,8 @@ class TransportBeltRenderer {
         buildings: buildings,
         fullPathContext: fullPathContext,
         contextStartIndex: contextStartIndex,
+        forcedDirection: forcedDirection,
+        incomingDirection: incomingDirection,
       );
       if (clip != null) {
         // 依然保留端点的裁剪，以防进入建筑的指针越界
@@ -808,6 +816,8 @@ class TransportBeltRenderer {
         buildings: buildings,
         fullPathContext: fullPathContext,
         contextStartIndex: contextStartIndex,
+        forcedDirection: forcedDirection,
+        incomingDirection: incomingDirection,
       );
       if (clip != null) {
         canvas.clipRect(clip);
@@ -921,7 +931,7 @@ class TransportBeltRenderer {
 
       void drawPointerIter(double pProgress) {
         if (isTurn) {
-          final (_, inDir, outDir, isCCW) = _getCellTurnInfo(turnPath, turnIndex, incomingDirection: incomingDirection);
+          final (_, inDir, outDir, isCCW) = _getCellTurnInfo(turnPath, turnIndex, incomingDirection: incomingDirection, forcedDirection: forcedDirection);
           double eX = 0, eY = 0;
           if (inDir == 'up') eY = 0.5;
           if (inDir == 'down') eY = -0.5;
@@ -1079,6 +1089,7 @@ class TransportBeltRenderer {
           index: i,
           cellSize: cellSize,
           buildings: buildings,
+          incomingDirection: incomingDirection,
         );
         if (clip != null) {
           canvas.clipRect(clip);
@@ -1178,6 +1189,8 @@ class TransportBeltRenderer {
           buildings: buildings,
           fullPathContext: fullPathContext,
           contextStartIndex: contextStartIndex,
+          forcedDirection: forcedDirection,
+          incomingDirection: incomingDirection,
         );
 
         if (localClip != null) {

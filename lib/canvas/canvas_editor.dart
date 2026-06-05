@@ -551,12 +551,26 @@ class CanvasEditorState extends State<CanvasEditor>
       // 移除格之前的路径段 (0 ~ cellIndex-1)
       if (cellIndex > 0) {
         final beforePath = belt.path.sublist(0, cellIndex);
+        // 计算末格的出方向（从末格指向被删格），以保留转角形状
+        String? beforeForcedDir;
+        final fdx = belt.path[cellIndex].dx - belt.path[cellIndex - 1].dx;
+        final fdy = belt.path[cellIndex].dy - belt.path[cellIndex - 1].dy;
+        if (fdx > 0) {
+          beforeForcedDir = 'right';
+        } else if (fdx < 0) {
+          beforeForcedDir = 'left';
+        } else if (fdy > 0) {
+          beforeForcedDir = 'down';
+        } else if (fdy < 0) {
+          beforeForcedDir = 'up';
+        }
         _project.conveyors.add(ConveyorBelt(
           id: 'belt_${DateTime.now().millisecondsSinceEpoch}_a',
           path: beforePath,
           itemId: belt.itemId,
           isBlocked: belt.isBlocked,
           incomingDirection: belt.incomingDirection,
+          forcedDirection: beforeForcedDir,
         ));
       }
 
@@ -776,8 +790,19 @@ class CanvasEditorState extends State<CanvasEditor>
               incomingDir = 'up';
             }
           }
+          // 计算末格的出方向（从末格指向被移除的端口格），以保留转角形状
           String? forcedDir;
-          if (segment.length == 1) forcedDir = incomingDir;
+          final fdx = belt.path[portIdx].dx - belt.path[portIdx - 1].dx;
+          final fdy = belt.path[portIdx].dy - belt.path[portIdx - 1].dy;
+          if (fdx > 0) {
+            forcedDir = 'right';
+          } else if (fdx < 0) {
+            forcedDir = 'left';
+          } else if (fdy > 0) {
+            forcedDir = 'down';
+          } else if (fdy < 0) {
+            forcedDir = 'up';
+          }
           toAdd.add(ConveyorBelt(
             id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
             path: segment,
@@ -806,8 +831,9 @@ class CanvasEditorState extends State<CanvasEditor>
             incomingDir = 'up';
           }
         }
-        String? forcedDir;
-        if (segment.length == 1) forcedDir = incomingDir;
+        // 最后一段继承原传送带的 forcedDirection
+        String? forcedDir = belt.forcedDirection;
+        if (segment.length == 1 && forcedDir == null) forcedDir = incomingDir;
         toAdd.add(ConveyorBelt(
           id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
           path: segment,
