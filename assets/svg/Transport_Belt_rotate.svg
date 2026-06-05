@@ -24,12 +24,12 @@
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="mm"
      inkscape:zoom="11.762019"
-     inkscape:cx="20.914777"
-     inkscape:cy="50.033927"
+     inkscape:cx="54.582466"
+     inkscape:cy="39.746578"
      inkscape:window-width="3440"
      inkscape:window-height="1369"
      inkscape:window-x="-8"
-     inkscape:window-y="-8"
+     inkscape:window-y="1072"
      inkscape:window-maximized="1"
      inkscape:current-layer="layer1"
      showgrid="true"><inkscape:grid
@@ -75,10 +75,4 @@
        d="M 16.933333,3.96875 A 12.964583,12.964583 0 0 0 3.96875,16.933333 H 14.2875 A 2.6458333,2.6458333 0 0 1 16.933333,14.2875 Z" /><path
        id="circle6"
        style="display:inline;fill:#cecccc;fill-opacity:1;stroke-width:0.234375;stroke-linecap:square;stroke-linejoin:bevel;paint-order:stroke fill markers"
-       d="m 16.933333,12.964583 a 3.96875,3.96875 0 0 0 -3.96875,3.96875 H 14.2875 A 2.6458333,2.6458333 0 0 1 16.933333,14.2875 Z" /><path
-       id="path7"
-       style="display:inline;fill:#8c8c8c;fill-opacity:1;stroke-width:0.580738;stroke-linecap:square;stroke-linejoin:bevel;paint-order:stroke fill markers"
-       d="m 12.939247,8.9537457 -1.882215,1.0008521 -1.8822146,1.0008512 0.8813636,0.881362 0.881363,0.881364 1.00085,-1.882214 z M 9.6626369,12.230355 a 0.50104433,0.50104433 0 0 0 -0.7088904,0 0.50104433,0.50104433 0 0 0 -6e-7,0.708892 0.50104433,0.50104433 0 0 0 0.7088911,-10e-7 0.50104433,0.50104433 0 0 0 -10e-8,-0.708891 z"
-       inkscape:label="箭头"
-       inkscape:transform-center-x="6.0602894"
-       inkscape:transform-center-y="-5.9133831" /></g></svg>
+       d="m 16.933333,12.964583 a 3.96875,3.96875 0 0 0 -3.96875,3.96875 H 14.2875 A 2.6458333,2.6458333 0 0 1 16.933333,14.2875 Z" /></g></svg>

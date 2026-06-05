@@ -30,6 +30,7 @@ class TransportBeltRenderer {
   static PictureInfo? _rotateBluePicture;
   static PictureInfo? _moveRedPicture;
   static PictureInfo? _rotateRedPicture;
+  static PictureInfo? _pointerPicture;
   static bool _initialized = false;
   static bool _initializing = false;
 
@@ -93,43 +94,62 @@ class TransportBeltRenderer {
 
     final cell = actualPath[actualIndex];
 
-    // 情况 1：起点，且是 Output 端口
+    double clipLeft = -10000;
+    double clipRight = 10000;
+    double clipTop = -10000;
+    double clipBottom = 10000;
+    final half = cellSize / 2;
+
+    // 情况 1：起点
     if (actualIndex == 0) {
-      if (isOutputPort(cell, buildings)) {
-        final dir = _getCellDirection(actualPath, actualIndex);
-        final half = cellSize / 2;
-        switch (dir) {
-          case 'right':
-            return Rect.fromLTRB(0, -half, half, half);
-          case 'left':
-            return Rect.fromLTRB(-half, -half, 0, half);
-          case 'down':
-            return Rect.fromLTRB(-half, 0, half, half);
-          case 'up':
-            return Rect.fromLTRB(-half, -half, half, 0);
-        }
+      final dir = _getCellDirection(actualPath, actualIndex);
+      final isPort = isOutputPort(cell, buildings);
+      switch (dir) {
+        case 'right':
+          clipLeft = isPort ? 0 : -half;
+          break;
+        case 'left':
+          clipRight = isPort ? 0 : half;
+          break;
+        case 'down':
+          clipTop = isPort ? 0 : -half;
+          break;
+        case 'up':
+          clipBottom = isPort ? 0 : half;
+          break;
       }
     }
 
-    // 情况 2：终点，且是 Input 端口
+    // 情况 2：终点
     if (actualIndex == actualPath.length - 1) {
-      if (isInputPort(cell, buildings)) {
-        final dir = _getCellDirection(actualPath, actualIndex);
-        final half = cellSize / 2;
-        switch (dir) {
-          case 'right':
-            return Rect.fromLTRB(-half, -half, 0, half);
-          case 'left':
-            return Rect.fromLTRB(0, -half, half, half);
-          case 'down':
-            return Rect.fromLTRB(-half, -half, half, 0);
-          case 'up':
-            return Rect.fromLTRB(-half, 0, half, half);
-        }
+      final dir = _getCellDirection(actualPath, actualIndex);
+      final isPort = isInputPort(cell, buildings);
+      switch (dir) {
+        case 'right':
+          clipRight = isPort ? 0 : half;
+          break;
+        case 'left':
+          clipLeft = isPort ? 0 : -half;
+          break;
+        case 'down':
+          clipBottom = isPort ? 0 : half;
+          break;
+        case 'up':
+          clipTop = isPort ? 0 : -half;
+          break;
       }
     }
 
-    return null;
+    if (clipLeft == -10000 && clipRight == 10000 && clipTop == -10000 && clipBottom == 10000) {
+      return null;
+    }
+
+    return Rect.fromLTRB(
+      clipLeft == -10000 ? -cellSize * 2 : clipLeft,
+      clipTop == -10000 ? -cellSize * 2 : clipTop,
+      clipRight == 10000 ? cellSize * 2 : clipRight,
+      clipBottom == 10000 ? cellSize * 2 : clipBottom,
+    );
   }
 
   /// 判断粒子是否需要过滤（在缩小的两个首位单元格里排除掉朝内部流动的半段）
@@ -211,6 +231,7 @@ class TransportBeltRenderer {
         vg.loadPicture(SvgStringLoader(rotateBlueStr), null),
         vg.loadPicture(SvgStringLoader(moveRedStr), null),
         vg.loadPicture(SvgStringLoader(rotateRedStr), null),
+        vg.loadPicture(const SvgAssetLoader('assets/svg/pointer.svg'), null),
       ]);
 
       _movePicture = results[0];
@@ -219,6 +240,7 @@ class TransportBeltRenderer {
       _rotateBluePicture = results[3];
       _moveRedPicture = results[4];
       _rotateRedPicture = results[5];
+      _pointerPicture = results[6];
       _initialized = true;
     } catch (e) {
       debugPrint('Failed to load conveyor belt SVGs: $e');
@@ -241,7 +263,8 @@ class TransportBeltRenderer {
       _moveBluePicture != null &&
       _rotateBluePicture != null &&
       _moveRedPicture != null &&
-      _rotateRedPicture != null;
+      _rotateRedPicture != null &&
+      _pointerPicture != null;
 
   // 方向索引：up=0, right=1, down=2, left=3
   static const int _dirUp = 0;
@@ -290,12 +313,24 @@ class TransportBeltRenderer {
   /// 判断格子是直线段还是转弯点
   /// 返回 (isTurn, incomingDir, outgoingDir, isCounterClockwise)
   static (bool, String, String, bool) _getCellTurnInfo(
-      List<Offset> path, int index, {String? incomingDirection}) {
+      List<Offset> path, int index, {String? incomingDirection, String? forcedDirection}) {
+    if (path.length == 1) {
+      if (incomingDirection != null && forcedDirection != null && incomingDirection != forcedDirection) {
+        final inIdx = _directionToIndex(incomingDirection);
+        final outIdx = _directionToIndex(forcedDirection);
+        final diff = (outIdx - inIdx + 4) % 4;
+        final isCCW = diff == 3;
+        return (true, incomingDirection, forcedDirection, isCCW);
+      }
+      final dir = _getCellDirection(path, index, forcedDirection: forcedDirection);
+      return (false, dir, dir, false);
+    }
+
     if (index == 0) {
       // 首格：如果有 incomingDirection，用它作为入方向
-      if (incomingDirection != null && index < path.length - 1) {
-        final nextDx = path[index + 1].dx - path[index].dx;
-        final nextDy = path[index + 1].dy - path[index].dy;
+      if (incomingDirection != null) {
+        final nextDx = path[1].dx - path[0].dx;
+        final nextDy = path[1].dy - path[0].dy;
         final outgoingDir = _offsetToDirection(nextDx, nextDy);
         if (incomingDirection == outgoingDir) {
           return (false, incomingDirection, outgoingDir, false);
@@ -306,11 +341,22 @@ class TransportBeltRenderer {
         final isCCW = diff == 3;
         return (true, incomingDirection, outgoingDir, isCCW);
       }
-      final dir = _getCellDirection(path, index);
+      final dir = _getCellDirection(path, index, forcedDirection: forcedDirection);
       return (false, dir, dir, false);
     }
+
     if (index == path.length - 1) {
-      final dir = _getCellDirection(path, index);
+      final prevDx = path[index].dx - path[index - 1].dx;
+      final prevDy = path[index].dy - path[index - 1].dy;
+      final incomingDir = _offsetToDirection(prevDx, prevDy);
+      if (forcedDirection != null && incomingDir != forcedDirection) {
+        final inIdx = _directionToIndex(incomingDir);
+        final outIdx = _directionToIndex(forcedDirection);
+        final diff = (outIdx - inIdx + 4) % 4;
+        final isCCW = diff == 3;
+        return (true, incomingDir, forcedDirection, isCCW);
+      }
+      final dir = _getCellDirection(path, index, forcedDirection: forcedDirection);
       return (false, dir, dir, false);
     }
 
@@ -342,11 +388,12 @@ class TransportBeltRenderer {
     double cellSize,
     List<PlacedBuilding> buildings, {
     int detailLevel = 2,
+    double arrowProgress = 0.0,
   }) {
     if (belt.path.isEmpty) return;
 
     if (isReady) {
-      _renderWithSvg(canvas, belt.path, cellSize, buildings, forcedDirection: belt.forcedDirection, incomingDirection: belt.incomingDirection);
+      _renderWithSvg(canvas, belt.path, cellSize, buildings, forcedDirection: belt.forcedDirection, incomingDirection: belt.incomingDirection, arrowProgress: arrowProgress);
     } else {
       for (int i = 0; i < belt.path.length; i++) {
         final cell = belt.path[i];
@@ -395,7 +442,9 @@ class TransportBeltRenderer {
     int contextStartIndex = 0,
     String? forcedDirection,
     String? incomingDirection,
+    double arrowProgress = 0.0,
   }) {
+    // 第一次绘制：只绘制背景（传送带）
     for (int i = 0; i < path.length; i++) {
       final cell = path[i];
       final cx = cell.dx * cellSize + cellSize / 2;
@@ -422,6 +471,44 @@ class TransportBeltRenderer {
         contextStartIndex: contextStartIndex,
         forcedDirection: forcedDirection,
         incomingDirection: incomingDirection,
+        arrowProgress: arrowProgress,
+        drawBackground: true,
+        drawPointer: false,
+      );
+      canvas.restore();
+    }
+
+    // 第二次绘制：只绘制前景（指针），避免指针被相邻背景覆盖
+    for (int i = 0; i < path.length; i++) {
+      final cell = path[i];
+      final cx = cell.dx * cellSize + cellSize / 2;
+      final cy = cell.dy * cellSize + cellSize / 2;
+
+      canvas.save();
+      canvas.translate(cx, cy);
+
+      final clip = getLocalClipRect(
+        path: path,
+        index: i,
+        cellSize: cellSize,
+        buildings: buildings,
+        fullPathContext: fullPathContext,
+        contextStartIndex: contextStartIndex,
+      );
+      if (clip != null) {
+        // 依然保留端点的裁剪，以防进入建筑的指针越界
+        canvas.clipRect(clip);
+      }
+
+      _drawSvgCellAtOrigin(
+        canvas, path, i, cellSize,
+        fullPathContext: fullPathContext,
+        contextStartIndex: contextStartIndex,
+        forcedDirection: forcedDirection,
+        incomingDirection: incomingDirection,
+        arrowProgress: arrowProgress,
+        drawBackground: false,
+        drawPointer: true,
       );
       canvas.restore();
     }
@@ -640,11 +727,13 @@ class TransportBeltRenderer {
     bool isInvalid = false,
     List<Offset>? fullPathContext,
     int contextStartIndex = 0,
+    String? forcedDirection,
+    String? incomingDirection,
   }) {
     if (path.isEmpty) return;
 
     if (isReady) {
-      _renderPreviewWithSvg(canvas, path, cellSize, occupiedKeys, buildings, isInvalid: isInvalid, fullPathContext: fullPathContext, contextStartIndex: contextStartIndex);
+      _renderPreviewWithSvg(canvas, path, cellSize, occupiedKeys, buildings, isInvalid: isInvalid, fullPathContext: fullPathContext, contextStartIndex: contextStartIndex, forcedDirection: forcedDirection, incomingDirection: incomingDirection);
     } else {
       _renderPreviewLegacy(canvas, path, cellSize, occupiedKeys, buildings, isInvalid: isInvalid);
     }
@@ -695,6 +784,8 @@ class TransportBeltRenderer {
     bool isInvalid = false,
     List<Offset>? fullPathContext,
     int contextStartIndex = 0,
+    String? forcedDirection,
+    String? incomingDirection,
   }) {
     for (int i = 0; i < path.length; i++) {
       final cell = path[i];
@@ -731,6 +822,10 @@ class TransportBeltRenderer {
         isOccupied: isOccupied,
         fullPathContext: fullPathContext,
         contextStartIndex: contextStartIndex,
+        forcedDirection: forcedDirection,
+        incomingDirection: incomingDirection,
+        drawBackground: true,
+        drawPointer: true,
       );
       canvas.restore();
 
@@ -750,6 +845,9 @@ class TransportBeltRenderer {
     int contextStartIndex = 0,
     String? forcedDirection,
     String? incomingDirection,
+    double arrowProgress = 0.0,
+    bool drawBackground = true,
+    bool drawPointer = true,
   }) {
     // 确定用于转弯检测的路径 and 索引
     List<Offset> turnPath = path;
@@ -760,55 +858,127 @@ class TransportBeltRenderer {
       turnIndex = contextStartIndex + index;
     }
 
-    final turn = _isTurn(turnPath, turnIndex, incomingDirection: incomingDirection);
+    final (isTurn, _, outgoingDir, isCCW) =
+        _getCellTurnInfo(turnPath, turnIndex, incomingDirection: incomingDirection, forcedDirection: forcedDirection);
+
     final PictureInfo picture;
     if (isPreview) {
       if (isOccupied) {
-        picture = _getPicture(isTurn: turn, isRed: true);
+        picture = _getPicture(isTurn: isTurn, isRed: true);
       } else {
-        picture = _getPicture(isTurn: turn, isBlue: true);
+        picture = _getPicture(isTurn: isTurn, isBlue: true);
       }
     } else {
-      picture = _getPicture(isTurn: turn);
+      picture = _getPicture(isTurn: isTurn);
     }
 
     final svgSize = picture.size;
     final scaleX = cellSize / svgSize.width;
     final scaleY = cellSize / svgSize.height;
 
-    final (isTurn, _, outgoingDir, isCCW) =
-        _getCellTurnInfo(turnPath, turnIndex, incomingDirection: incomingDirection);
+    if (drawBackground) {
+      if (isTurn) {
+        double rotation;
+        bool mirrorH;
 
-    if (isTurn) {
-      double rotation;
-      bool mirrorH;
+        if (isCCW) {
+          final outAngle = _directionAngle(outgoingDir);
+          rotation = (outAngle - math.pi + 2 * math.pi) % (2 * math.pi);
+          mirrorH = true;
+        } else {
+          rotation = _directionAngle(outgoingDir);
+          mirrorH = false;
+        }
 
-      if (isCCW) {
-        final outAngle = _directionAngle(outgoingDir);
-        rotation = (outAngle - math.pi + 2 * math.pi) % (2 * math.pi);
-        mirrorH = true;
+        // 关键修复：先进行旋转，再进行水平镜像
+        canvas.save();
+        canvas.rotate(rotation);
+        if (mirrorH) {
+          canvas.scale(-1, 1);
+        }
+        canvas.scale(scaleX, scaleY);
+        canvas.translate(-svgSize.width / 2, -svgSize.height / 2);
+        canvas.drawPicture(picture.picture);
+        canvas.restore();
       } else {
-        rotation = _directionAngle(outgoingDir);
-        mirrorH = false;
+        final direction = _getCellDirection(turnPath, turnIndex, forcedDirection: forcedDirection);
+        final dirIdx = _directionToIndex(direction);
+        final rotation = dirIdx * math.pi / 2;
+
+        canvas.save();
+        canvas.rotate(rotation);
+        canvas.scale(scaleX, scaleY);
+        canvas.translate(-svgSize.width / 2, -svgSize.height / 2);
+        canvas.drawPicture(picture.picture);
+        canvas.restore();
+      }
+    }
+
+    if (!isPreview && _pointerPicture != null && drawPointer) {
+      canvas.save();
+      final pSize = _pointerPicture!.size;
+      final double uniformScale = (cellSize * 0.25) / pSize.height;
+
+      void drawPointerIter(double pProgress) {
+        if (isTurn) {
+          final (_, inDir, outDir, isCCW) = _getCellTurnInfo(turnPath, turnIndex, incomingDirection: incomingDirection);
+          double eX = 0, eY = 0;
+          if (inDir == 'up') eY = 0.5;
+          if (inDir == 'down') eY = -0.5;
+          if (inDir == 'left') eX = 0.5;
+          if (inDir == 'right') eX = -0.5;
+
+          double xX = 0, xY = 0;
+          if (outDir == 'up') xY = -0.5;
+          if (outDir == 'down') xY = 0.5;
+          if (outDir == 'left') xX = -0.5;
+          if (outDir == 'right') xX = 0.5;
+
+          final pivotX = eX + xX;
+          final pivotY = eY + xY;
+
+          final startVecX = -xX;
+          final startVecY = -xY;
+
+          final startAngle = math.atan2(startVecY, startVecX);
+          final deltaAngle = isCCW ? -math.pi / 2 : math.pi / 2;
+          final currentAngle = startAngle + pProgress * deltaAngle;
+
+          final px = pivotX + 0.5 * math.cos(currentAngle);
+          final py = pivotY + 0.5 * math.sin(currentAngle);
+
+          final tangentAngle = currentAngle + deltaAngle;
+
+          canvas.save();
+          canvas.translate(px * cellSize, py * cellSize);
+          canvas.rotate(tangentAngle + math.pi / 2);
+
+          canvas.scale(uniformScale, uniformScale);
+          canvas.translate(-pSize.width / 2, -pSize.height / 2);
+          canvas.drawPicture(_pointerPicture!.picture);
+          canvas.restore();
+        } else {
+          // straight movement
+          final direction = _getCellDirection(turnPath, turnIndex, forcedDirection: forcedDirection);
+          final dirIdx = _directionToIndex(direction);
+          final rotation = dirIdx * math.pi / 2;
+          
+          final double moveDist = (0.5 - pProgress) * cellSize;
+          
+          canvas.save();
+          canvas.rotate(rotation);
+          canvas.translate(0, moveDist);
+          
+          canvas.scale(uniformScale, uniformScale);
+          canvas.translate(-pSize.width / 2, -pSize.height / 2);
+          canvas.drawPicture(_pointerPicture!.picture);
+          canvas.restore();
+        }
       }
 
-      // 关键修复：先进行旋转，再进行水平镜像
-      canvas.rotate(rotation);
-      if (mirrorH) {
-        canvas.scale(-1, 1);
-      }
-      canvas.scale(scaleX, scaleY);
-      canvas.translate(-svgSize.width / 2, -svgSize.height / 2);
-      canvas.drawPicture(picture.picture);
-    } else {
-      final direction = _getCellDirection(turnPath, turnIndex, forcedDirection: forcedDirection);
-      final dirIdx = _directionToIndex(direction);
-      final rotation = dirIdx * math.pi / 2;
+      drawPointerIter(arrowProgress);
 
-      canvas.rotate(rotation);
-      canvas.scale(scaleX, scaleY);
-      canvas.translate(-svgSize.width / 2, -svgSize.height / 2);
-      canvas.drawPicture(picture.picture);
+      canvas.restore();
     }
   }
 

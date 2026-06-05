@@ -53,6 +53,8 @@ class CanvasEditorState extends State<CanvasEditor>
   bool _isMiddleDragging = false;
 
   late Ticker _ticker;
+  late AnimationController _beltArrowController;
+
   double _displayScale = 1.0;
   double _displayOffsetX = 0;
   double _displayOffsetY = 0;
@@ -147,6 +149,10 @@ class CanvasEditorState extends State<CanvasEditor>
       onRebuildCache: _rebuildPortConnectionsCache,
       notifyListeners: () => setState(() {}),
     );
+    _beltArrowController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat();
     _rebuildPortConnectionsCache();
     TransportBeltRenderer.init();
     RefiningUnitRenderer.init(onReady: () {
@@ -193,6 +199,7 @@ class CanvasEditorState extends State<CanvasEditor>
   @override
   void dispose() {
     _ticker.dispose();
+    _beltArrowController.dispose();
     super.dispose();
   }
 
@@ -1105,6 +1112,7 @@ class CanvasEditorState extends State<CanvasEditor>
               longPressProgress: _longPressProgress,
               movingBuilding: _movingBuilding,
               movingRotation: _movingRotation,
+              beltArrowController: _beltArrowController,
             ),
             size: Size.infinite,
           ),
@@ -1142,6 +1150,7 @@ class _EditorPainter extends CustomPainter {
   final double longPressProgress;
   final PlacedBuilding? movingBuilding;
   final int movingRotation;
+  final AnimationController beltArrowController;
 
   // 预渲染缓存: key = "buildingId_rotation_detailLevel_portsHash" -> Picture
   static final Map<String, ui.Picture> _pictureCache = {};
@@ -1179,7 +1188,8 @@ class _EditorPainter extends CustomPainter {
     this.longPressProgress = 0.0,
     this.movingBuilding,
     this.movingRotation = 0,
-  });
+    required this.beltArrowController,
+  }) : super(repaint: Listenable.merge([beltArrowController]));
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1280,7 +1290,10 @@ class _EditorPainter extends CustomPainter {
           else if (dx < 0) { incomingDir = 'left'; }
           else if (dy > 0) { incomingDir = 'down'; }
           else if (dy < 0) { incomingDir = 'up'; }
-          if (renderPath.length == 1) { forcedDir = incomingDir; }
+          if (renderPath.length == 1) { 
+            // 如果仅剩最后一格，且原传送带定义了 forcedDirection，则保留原转向
+            forcedDir = belt.forcedDirection ?? incomingDir; 
+          }
         }
         final clippedBelt = ConveyorBelt(
           id: belt.id,
@@ -1290,9 +1303,9 @@ class _EditorPainter extends CustomPainter {
           forcedDirection: forcedDir,
           incomingDirection: incomingDir,
         );
-        TransportBeltRenderer.renderConveyorPath(canvas, clippedBelt, item, cellSize, project.buildings, detailLevel: detailLevel);
+        TransportBeltRenderer.renderConveyorPath(canvas, clippedBelt, item, cellSize, project.buildings, detailLevel: detailLevel, arrowProgress: beltArrowController.value);
       } else {
-        TransportBeltRenderer.renderConveyorPath(canvas, belt, item, cellSize, project.buildings, detailLevel: detailLevel);
+        TransportBeltRenderer.renderConveyorPath(canvas, belt, item, cellSize, project.buildings, detailLevel: detailLevel, arrowProgress: beltArrowController.value);
       }
     }
 
@@ -1331,6 +1344,7 @@ class _EditorPainter extends CustomPainter {
           isInvalid: true,
           fullPathContext: fullPathContext,
           contextStartIndex: previewStartIndex,
+          incomingDirection: conveyorIncomingDirection,
         );
       }
     } else {
@@ -1344,6 +1358,7 @@ class _EditorPainter extends CustomPainter {
           project.buildings,
           fullPathContext: fullPathContext,
           contextStartIndex: previewStartIndex,
+          incomingDirection: conveyorIncomingDirection,
         );
       } else if (conveyorMode && mouseGridPos != null && conveyorConfirmedPath.isEmpty) {
         // 传送带处于尚未锚定的预备状态且当前空节点鼠标浮动时，高亮选中指示格
