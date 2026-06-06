@@ -94,6 +94,10 @@ class SimulationEngine extends ChangeNotifier {
     for (final cr in result.conveyors) {
       final belt = _project!.conveyors.where((c) => c.id == cr.id).firstOrNull;
       if (belt != null) {
+        // 只有当没有残留物品时才更新 lastItemId，避免覆盖残留物品的 ID
+        if (cr.itemId.isNotEmpty && belt.lastItemFillProgress <= 0) {
+          belt.lastItemId = cr.itemId;
+        }
         belt.itemId = cr.itemId;
         belt.flowProgress = cr.flowProgress;
         belt.isBlocked = cr.isBlocked;
@@ -120,6 +124,7 @@ class SimulationEngine extends ChangeNotifier {
         gridY: pb.gridY,
         rotation: pb.rotation,
         activeRecipeId: pb.activeRecipeId,
+        depotOutputItemId: pb.depotOutputItemId ?? '',
         gridWidth: pb.building.gridWidth,
         gridHeight: pb.building.gridHeight,
         inputPorts: pb.inputPorts.map((p) => SimPortData(
@@ -144,9 +149,12 @@ class SimulationEngine extends ChangeNotifier {
         path: c.path,
         itemId: c.itemId,
         flowProgress: c.flowProgress,
+        itemFillProgress: c.itemFillProgress,
         isBlocked: c.isBlocked,
         forcedDirection: c.forcedDirection,
         incomingDirection: c.incomingDirection,
+        lastItemFillProgress: c.lastItemFillProgress,
+        lastItemDrainProgress: c.lastItemDrainProgress,
       )).toList(),
       recipes: _dataLoader.recipes.values.map((r) => SimRecipeData(
         id: r.id,
@@ -249,6 +257,12 @@ class SimulationEngine extends ChangeNotifier {
   void _fallbackUpdateBuildings(double dt) {
     if (_project == null) return;
     for (final pb in _project!.buildings) {
+      // 仓库取货口：不需要配方，直接将 depotOutputItemId 推送到连接的传送带
+      if (pb.building.id == 'depot_unloader_3x1') {
+        _fallbackProduceDepotOutput(pb);
+        continue;
+      }
+
       if (pb.activeRecipeId == null) continue;
       final recipe = _dataLoader.getRecipe(pb.activeRecipeId!);
       if (recipe == null) continue;
@@ -269,6 +283,25 @@ class SimulationEngine extends ChangeNotifier {
         pb.productionProgress = 0.0;
         _fallbackConsumeInputs(pb, recipe);
         _fallbackProduceOutputs(pb, recipe);
+      }
+    }
+  }
+
+  /// 仓库取货口：将 depotOutputItemId 推送到连接的空传送带
+  void _fallbackProduceDepotOutput(PlacedBuilding pb) {
+    final outputItemId = pb.depotOutputItemId;
+    if (outputItemId == null || outputItemId.isEmpty) return;
+    for (final port in pb.outputPorts) {
+      final portWorld = port.worldPosition(
+          pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
+      for (final belt in _project!.conveyors) {
+        if ((belt.start - portWorld).distance < _portConnectionThreshold) {
+          if (belt.itemId.isEmpty) {
+            belt.itemId = outputItemId;
+            port.connected = true;
+            port.linkedItemId = outputItemId;
+          }
+        }
       }
     }
   }

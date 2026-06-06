@@ -222,6 +222,8 @@ class TransportBeltController {
   void _finish() {
     if (anchors.length >= 2 && fullPath.length >= 2) {
       // 合并：将合并目标的路径追加到 fullPath（跳过首格，因为已包含）
+      // 记录新段长度，用于偏移合并目标的物品进度
+      final newSegmentLength = fullPath.length;
       if (_mergeTarget != null && _mergeTarget!.path.length > 1) {
         fullPath.addAll(_mergeTarget!.path.sublist(1));
       }
@@ -240,12 +242,46 @@ class TransportBeltController {
         }
       }
 
+      // 合并时保留目标传送带的物品状态
+      String newItemId = '';
+      String newLastItemId = '';
+      double newLastItemFillProgress = 0.0;
+      double newLastItemDrainProgress = 0.0;
+      DateTime? newLastItemDrainStartTime;
+      double? newLastItemDrainStartProgress;
+
+      if (_mergeTarget != null) {
+        final mergeBelt = _mergeTarget!;
+        final offset = (newSegmentLength - 1).toDouble(); // 合并目标首格已包含在 fullPath 中
+
+        if (mergeBelt.itemId.isNotEmpty) {
+          // 合并目标有当前物品 → 转为残留物品
+          newLastItemId = mergeBelt.itemId;
+          newLastItemFillProgress = mergeBelt.itemFillProgress + offset;
+          newLastItemDrainProgress = mergeBelt.itemDrainProgress + offset;
+          newLastItemDrainStartTime = mergeBelt.itemDrainStartTime;
+          newLastItemDrainStartProgress = mergeBelt.itemDrainStartProgress;
+        } else if (mergeBelt.lastItemFillProgress > 0) {
+          // 合并目标已有残留物品 → 继承
+          newLastItemId = mergeBelt.lastItemId;
+          newLastItemFillProgress = mergeBelt.lastItemFillProgress + offset;
+          newLastItemDrainProgress = mergeBelt.lastItemDrainProgress + offset;
+          newLastItemDrainStartTime = mergeBelt.lastItemDrainStartTime;
+          newLastItemDrainStartProgress = mergeBelt.lastItemDrainStartProgress;
+        }
+      }
+
       final belt = ConveyorBelt(
         id: 'belt_${DateTime.now().millisecondsSinceEpoch}',
         path: List<Offset>.from(fullPath),
-        itemId: '',
+        itemId: newItemId,
+        lastItemId: newLastItemId.isNotEmpty ? newLastItemId : null,
         isBlocked: false,
         incomingDirection: newBeltIncomingDir,
+        lastItemFillProgress: newLastItemFillProgress,
+        lastItemDrainProgress: newLastItemDrainProgress,
+        lastItemDrainStartTime: newLastItemDrainStartTime,
+        lastItemDrainStartProgress: newLastItemDrainStartProgress,
       );
 
       // 检查新传送带的起点是否在某条旧传送带的节点上，进行截断与拆分
@@ -281,9 +317,6 @@ class TransportBeltController {
                 else if (dx < 0) { forcedDir = 'left'; }
                 else if (dy > 0) { forcedDir = 'down'; }
                 else if (dy < 0) { forcedDir = 'up'; }
-              } else {
-                // 多格下游继承原传送带的 forcedDirection
-                forcedDir = oldBelt.forcedDirection;
               }
               // 下游首格的入方向：从分叉点指向下游首格
               String? incomingDir;

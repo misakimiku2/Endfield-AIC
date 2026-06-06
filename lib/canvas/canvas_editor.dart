@@ -92,7 +92,6 @@ class CanvasEditorState extends State<CanvasEditor>
   double _movingOriginalGridY = 0;
 
   // 移动模式下：端口传送带快照（用于取消移动时恢复）
-  List<ConveyorBelt>? _portBeltsSnapshot;
 
   // 端口连接缓存：building id -> port key -> 是否连接
   Map<String, Map<String, bool>> _portConnectionsCache = {};
@@ -155,6 +154,7 @@ class CanvasEditorState extends State<CanvasEditor>
     )..repeat();
     _rebuildPortConnectionsCache();
     TransportBeltRenderer.init();
+    TransportBeltRenderer.onItemImageReady = _forceRepaint;
     RefiningUnitRenderer.init(onReady: () {
       _forceRepaint();
     });
@@ -200,6 +200,7 @@ class CanvasEditorState extends State<CanvasEditor>
   void dispose() {
     _ticker.dispose();
     _beltArrowController.dispose();
+    TransportBeltRenderer.onItemImageReady = null;
     super.dispose();
   }
 
@@ -279,23 +280,6 @@ class CanvasEditorState extends State<CanvasEditor>
     _movingOriginalGridX = pb.gridX;
     _movingOriginalGridY = pb.gridY;
 
-    // 保存所有传送带的完整快照（用于取消移动时恢复）
-    _portBeltsSnapshot = _project.conveyors.map((b) => ConveyorBelt(
-      id: b.id,
-      path: List<Offset>.from(b.path),
-      itemId: b.itemId,
-      isBlocked: b.isBlocked,
-      forcedDirection: b.forcedDirection,
-      incomingDirection: b.incomingDirection,
-    )).toList();
-
-    // 从工程中移除建筑
-    _project.buildings.remove(pb);
-
-    // 移除设备端口上的传送带格子（视觉隐藏）
-    _removePortBeltCells(pb);
-
-    _rebuildPortConnectionsCache();
     widget.onProjectChanged(_project);
     setState(() {});
   }
@@ -568,9 +552,20 @@ class CanvasEditorState extends State<CanvasEditor>
           id: 'belt_${DateTime.now().millisecondsSinceEpoch}_a',
           path: beforePath,
           itemId: belt.itemId,
+          lastItemId: belt.lastItemId,
+          itemFillProgress: belt.itemFillProgress,
+          itemDrainProgress: belt.itemDrainProgress,
+          itemFillStartTime: belt.itemFillStartTime,
+          itemFillStartProgress: belt.itemFillStartProgress,
+          itemDrainStartTime: belt.itemDrainStartTime,
+          itemDrainStartProgress: belt.itemDrainStartProgress,
           isBlocked: belt.isBlocked,
           incomingDirection: belt.incomingDirection,
           forcedDirection: beforeForcedDir,
+          lastItemFillProgress: belt.lastItemFillProgress,
+          lastItemDrainProgress: belt.lastItemDrainProgress,
+          lastItemDrainStartTime: belt.lastItemDrainStartTime,
+          lastItemDrainStartProgress: belt.lastItemDrainStartProgress,
         ));
       }
 
@@ -598,9 +593,24 @@ class CanvasEditorState extends State<CanvasEditor>
           id: 'belt_${DateTime.now().millisecondsSinceEpoch}_b',
           path: afterPath,
           itemId: belt.itemId,
+          lastItemId: belt.lastItemId,
+          itemFillProgress: math.max(0.0, belt.itemFillProgress - (cellIndex + 1)),
+          itemDrainProgress: math.max(0.0, belt.itemDrainProgress - (cellIndex + 1)),
+          itemFillStartTime: belt.itemFillStartTime,
+          itemFillStartProgress: belt.itemFillStartProgress,
+          itemDrainStartTime: belt.itemDrainStartTime,
+          itemDrainStartProgress: belt.itemDrainStartProgress,
           isBlocked: belt.isBlocked,
           forcedDirection: forcedDir,
           incomingDirection: incomingDir,
+          lastItemFillProgress: belt.lastItemFillProgress > 0
+              ? math.max(0.0, belt.lastItemFillProgress - (cellIndex + 1))
+              : 0.0,
+          lastItemDrainProgress: belt.lastItemFillProgress > 0
+              ? math.max(0.0, belt.lastItemDrainProgress - (cellIndex + 1))
+              : 0.0,
+          lastItemDrainStartTime: belt.lastItemDrainStartTime,
+          lastItemDrainStartProgress: belt.lastItemDrainStartProgress,
         ));
       }
 
@@ -639,7 +649,7 @@ class CanvasEditorState extends State<CanvasEditor>
     );
     final bounds = tempBuilding.getBounds(_cellSize);
     final buildingOverlaps = _project.buildings.any(
-      (b) => b.overlaps(bounds, _cellSize),
+      (b) => b != _movingBuilding && b.overlaps(bounds, _cellSize),
     );
     if (buildingOverlaps) return true;
 
@@ -717,36 +727,27 @@ class CanvasEditorState extends State<CanvasEditor>
     _movingOriginalGridX = _longPressTargetBuilding!.gridX;
     _movingOriginalGridY = _longPressTargetBuilding!.gridY;
 
-    // 保存所有传送带的完整快照（用于取消移动时恢复）
-    _portBeltsSnapshot = _project.conveyors.map((b) => ConveyorBelt(
-      id: b.id,
-      path: List<Offset>.from(b.path),
-      itemId: b.itemId,
-      isBlocked: b.isBlocked,
-      forcedDirection: b.forcedDirection,
-      incomingDirection: b.incomingDirection,
-    )).toList();
-
-    // 从工程中移除建筑
-    _project.buildings.remove(_longPressTargetBuilding);
     _longPressTargetBuilding = null;
     _longPressStartTime = null;
     _longPressScreenPos = null;
 
-    // 移除设备端口上的传送带格子（视觉隐藏）
-    _removePortBeltCells(_movingBuilding!);
-
-    _rebuildPortConnectionsCache();
     widget.onProjectChanged(_project);
   }
 
   /// 移除设备输入/输出端口上的传送带格子
   void _removePortBeltCells(PlacedBuilding pb) {
     final portCells = <Offset>[];
+    // 记录哪些端口格子是输出端口（物品来源）
+    final outputPortCells = <String>{};
     final rot = pb.rotation;
     final gw = pb.building.gridWidth;
     final gh = pb.building.gridHeight;
-    for (final port in [...pb.inputPorts, ...pb.outputPorts]) {
+    for (final port in pb.outputPorts) {
+      final cell = port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
+      portCells.add(cell);
+      outputPortCells.add('${cell.dx.toInt()}_${cell.dy.toInt()}');
+    }
+    for (final port in pb.inputPorts) {
       portCells.add(port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot));
     }
 
@@ -803,14 +804,70 @@ class CanvasEditorState extends State<CanvasEditor>
           } else if (fdy < 0) {
             forcedDir = 'up';
           }
-          toAdd.add(ConveyorBelt(
-            id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
-            path: segment,
-            itemId: belt.itemId,
-            isBlocked: belt.isBlocked,
-            forcedDirection: forcedDir,
-            incomingDirection: incomingDir,
-          ));
+
+          // 判断该段是否因输出端口断开而失去源
+          // 如果该段前面紧挨着一个输出端口格子（被移除的），则该段失去了源
+          final lostSource = start > 0 &&
+              outputPortCells.contains('${belt.path[start - 1].dx.toInt()}_${belt.path[start - 1].dy.toInt()}');
+
+          // 计算该段内的 itemFillProgress（相对于段起始位置）
+          final segFillProgress = start == 0
+              ? belt.itemFillProgress
+              : math.max(0.0, belt.itemFillProgress - start);
+          final segDrainProgress = start == 0
+              ? belt.itemDrainProgress
+              : math.max(0.0, belt.itemDrainProgress - start);
+          final segLastFillProgress = start == 0
+              ? belt.lastItemFillProgress
+              : math.max(0.0, belt.lastItemFillProgress - start);
+          final segLastDrainProgress = start == 0
+              ? belt.lastItemFillProgress > 0
+                  ? math.max(0.0, belt.lastItemDrainProgress - start)
+                  : 0.0
+              : 0.0;
+
+          if (lostSource && belt.itemId.isNotEmpty) {
+            // 源断开：将当前物品状态转移到残留物品，清空当前物品
+            toAdd.add(ConveyorBelt(
+              id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
+              path: segment,
+              itemId: '',
+              lastItemId: belt.itemId,
+              itemFillProgress: 0.0,
+              itemDrainProgress: 0.0,
+              itemFillStartTime: null,
+              itemFillStartProgress: null,
+              itemDrainStartTime: null,
+              itemDrainStartProgress: null,
+              isBlocked: belt.isBlocked,
+              forcedDirection: forcedDir,
+              incomingDirection: incomingDir,
+              lastItemFillProgress: segFillProgress,
+              lastItemDrainProgress: segDrainProgress,
+              lastItemDrainStartTime: belt.itemDrainStartTime,
+              lastItemDrainStartProgress: belt.itemDrainStartProgress,
+            ));
+          } else {
+            toAdd.add(ConveyorBelt(
+              id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
+              path: segment,
+              itemId: belt.itemId,
+              lastItemId: belt.lastItemId,
+              itemFillProgress: segFillProgress,
+              itemDrainProgress: segDrainProgress,
+              itemFillStartTime: belt.itemFillStartTime,
+              itemFillStartProgress: belt.itemFillStartProgress,
+              itemDrainStartTime: belt.itemDrainStartTime,
+              itemDrainStartProgress: belt.itemDrainStartProgress,
+              isBlocked: belt.isBlocked,
+              forcedDirection: forcedDir,
+              incomingDirection: incomingDir,
+              lastItemFillProgress: segLastFillProgress,
+              lastItemDrainProgress: segLastDrainProgress,
+              lastItemDrainStartTime: belt.lastItemDrainStartTime,
+              lastItemDrainStartProgress: belt.lastItemDrainStartProgress,
+            ));
+          }
         }
         start = portIdx + 1;
       }
@@ -834,14 +891,62 @@ class CanvasEditorState extends State<CanvasEditor>
         // 最后一段继承原传送带的 forcedDirection
         String? forcedDir = belt.forcedDirection;
         if (segment.length == 1 && forcedDir == null) forcedDir = incomingDir;
-        toAdd.add(ConveyorBelt(
-          id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
-          path: segment,
-          itemId: belt.itemId,
-          isBlocked: belt.isBlocked,
-          forcedDirection: forcedDir,
-          incomingDirection: incomingDir,
-        ));
+
+        // 判断最后一段是否因输出端口断开而失去源
+        final lostSource = start > 0 &&
+            outputPortCells.contains('${belt.path[start - 1].dx.toInt()}_${belt.path[start - 1].dy.toInt()}');
+
+        final segFillProgress = math.max(0.0, belt.itemFillProgress - start);
+        final segDrainProgress = math.max(0.0, belt.itemDrainProgress - start);
+        final segLastFillProgress = belt.lastItemFillProgress > 0
+            ? math.max(0.0, belt.lastItemFillProgress - start)
+            : 0.0;
+        final segLastDrainProgress = belt.lastItemFillProgress > 0
+            ? math.max(0.0, belt.lastItemDrainProgress - start)
+            : 0.0;
+
+        if (lostSource && belt.itemId.isNotEmpty) {
+          // 源断开：将当前物品状态转移到残留物品，清空当前物品
+          toAdd.add(ConveyorBelt(
+            id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
+            path: segment,
+            itemId: '',
+            lastItemId: belt.itemId,
+            itemFillProgress: 0.0,
+            itemDrainProgress: 0.0,
+            itemFillStartTime: null,
+            itemFillStartProgress: null,
+            itemDrainStartTime: null,
+            itemDrainStartProgress: null,
+            isBlocked: belt.isBlocked,
+            forcedDirection: forcedDir,
+            incomingDirection: incomingDir,
+            lastItemFillProgress: segFillProgress,
+            lastItemDrainProgress: segDrainProgress,
+            lastItemDrainStartTime: belt.itemDrainStartTime,
+            lastItemDrainStartProgress: belt.itemDrainStartProgress,
+          ));
+        } else {
+          toAdd.add(ConveyorBelt(
+            id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
+            path: segment,
+            itemId: belt.itemId,
+            lastItemId: belt.lastItemId,
+            itemFillProgress: segFillProgress,
+            itemDrainProgress: segDrainProgress,
+            itemFillStartTime: belt.itemFillStartTime,
+            itemFillStartProgress: belt.itemFillStartProgress,
+            itemDrainStartTime: belt.itemDrainStartTime,
+            itemDrainStartProgress: belt.itemDrainStartProgress,
+            isBlocked: belt.isBlocked,
+            forcedDirection: forcedDir,
+            incomingDirection: incomingDir,
+            lastItemFillProgress: segLastFillProgress,
+            lastItemDrainProgress: segLastDrainProgress,
+            lastItemDrainStartTime: belt.lastItemDrainStartTime,
+            lastItemDrainStartProgress: belt.lastItemDrainStartProgress,
+          ));
+        }
       }
     }
 
@@ -863,23 +968,9 @@ class CanvasEditorState extends State<CanvasEditor>
 
   bool cancelMoveMode() {
     if (_movingBuilding == null) return false;
-    // 恢复到原始位置
-    _movingBuilding!.gridX = _movingOriginalGridX;
-    _movingBuilding!.gridY = _movingOriginalGridY;
-    _project.buildings.add(_movingBuilding!);
     _movingBuilding = null;
     _movingRotation = 0;
 
-    // 恢复传送带快照（撤销端口格子的移除）
-    if (_portBeltsSnapshot != null) {
-      _project.conveyors
-        ..clear()
-        ..addAll(_portBeltsSnapshot!);
-      _portBeltsSnapshot = null;
-    }
-
-    _rebuildPortConnectionsCache();
-    widget.onProjectChanged(_project);
     setState(() {});
     return true;
   }
@@ -889,17 +980,28 @@ class CanvasEditorState extends State<CanvasEditor>
     final cx = gridPos.dx - (_movingBuilding!.building.gridWidth ~/ 2).toDouble();
     final cy = gridPos.dy - (_movingBuilding!.building.gridHeight ~/ 2).toDouble();
 
+    // It was never removed from _project.buildings, but we temporarily updated it for collision checking.
+    // Let's create a temporary clone for collision checking.
+    final tempBuilding = PlacedBuilding(
+      id: _movingBuilding!.id,
+      building: _movingBuilding!.building,
+      gridX: cx,
+      gridY: cy,
+      rotation: _movingRotation,
+    );
+
+    if (_checkBuildingCollision(tempBuilding.building, cx, cy, _movingRotation)) return;
+
+    // Since we are confirming the move, NOW we execute port removal from the OLD location before updating coordinates
+    _removePortBeltCells(_movingBuilding!);
+
     _movingBuilding!.gridX = cx;
     _movingBuilding!.gridY = cy;
     _movingBuilding!.rotation = _movingRotation;
 
-    if (_checkBuildingCollision(_movingBuilding!.building, cx, cy, _movingRotation)) return;
-
-    _project.buildings.add(_movingBuilding!);
     _movingBuilding = null;
     _movingRotation = 0;
-    // 放置成功：丢弃快照，端口格子保持移除状态
-    _portBeltsSnapshot = null;
+
     _project.offsetX = _targetOffsetX;
     _project.offsetY = _targetOffsetY;
     _project.scale = _targetScale;
@@ -1302,7 +1404,12 @@ class _EditorPainter extends CustomPainter {
       if (!visible) {
         continue;
       }
-      final item = dataLoader.getItem(belt.itemId);
+      final effectiveItemId = belt.itemId.isNotEmpty ? belt.itemId : belt.lastItemId;
+      final item = dataLoader.getItem(effectiveItemId);
+      // 残留物品：当 lastItemFillProgress > 0 且 lastItemId 与当前 itemId 不同时
+      final lastItem = belt.lastItemFillProgress > 0 && belt.lastItemId.isNotEmpty && belt.lastItemId != belt.itemId
+          ? dataLoader.getItem(belt.lastItemId)
+          : null;
       // 如果路径被裁剪，创建临时 ConveyorBelt 用于渲染
       if (!identical(renderPath, belt.path)) {
         // 单格下游：从旧传送带推断原始方向
@@ -1316,22 +1423,37 @@ class _EditorPainter extends CustomPainter {
           else if (dx < 0) { incomingDir = 'left'; }
           else if (dy > 0) { incomingDir = 'down'; }
           else if (dy < 0) { incomingDir = 'up'; }
-          if (renderPath.length == 1) { 
+          if (renderPath.length == 1) {
             // 如果仅剩最后一格，且原传送带定义了 forcedDirection，则保留原转向
-            forcedDir = belt.forcedDirection ?? incomingDir; 
+            forcedDir = belt.forcedDirection ?? incomingDir;
           }
         }
         final clippedBelt = ConveyorBelt(
           id: belt.id,
           path: renderPath,
           itemId: belt.itemId,
+          lastItemId: belt.lastItemId,
+          itemFillProgress: belt.itemFillProgress,
+          itemFillStartTime: belt.itemFillStartTime,
+          itemFillStartProgress: belt.itemFillStartProgress,
+          itemDrainProgress: belt.itemDrainProgress,
+          itemDrainStartTime: belt.itemDrainStartTime,
+          itemDrainStartProgress: belt.itemDrainStartProgress,
           isBlocked: belt.isBlocked,
           forcedDirection: forcedDir,
           incomingDirection: incomingDir,
+          lastItemFillProgress: belt.lastItemFillProgress > 0 && forkIdx >= 0
+              ? math.max(0.0, belt.lastItemFillProgress - (forkIdx + 1))
+              : belt.lastItemFillProgress,
+          lastItemDrainProgress: belt.lastItemFillProgress > 0 && forkIdx >= 0
+              ? math.max(0.0, belt.lastItemDrainProgress - (forkIdx + 1))
+              : belt.lastItemDrainProgress,
+          lastItemDrainStartTime: belt.lastItemDrainStartTime,
+          lastItemDrainStartProgress: belt.lastItemDrainStartProgress,
         );
-        TransportBeltRenderer.renderConveyorPath(canvas, clippedBelt, item, cellSize, project.buildings, detailLevel: detailLevel, arrowProgress: beltArrowController.value);
+        TransportBeltRenderer.renderConveyorPath(canvas, clippedBelt, item, cellSize, project.buildings, detailLevel: detailLevel, arrowProgress: beltArrowController.value, lastItem: lastItem);
       } else {
-        TransportBeltRenderer.renderConveyorPath(canvas, belt, item, cellSize, project.buildings, detailLevel: detailLevel, arrowProgress: beltArrowController.value);
+        TransportBeltRenderer.renderConveyorPath(canvas, belt, item, cellSize, project.buildings, detailLevel: detailLevel, arrowProgress: beltArrowController.value, lastItem: lastItem);
       }
     }
 
@@ -1393,6 +1515,7 @@ class _EditorPainter extends CustomPainter {
     }
 
     for (final pb in project.buildings) {
+      if (pb == movingBuilding) continue;
       if (!_isBuildingVisible(pb, viewport)) continue;
 
       // Compute combined port states (actual + preview connections)

@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -33,6 +34,11 @@ class TransportBeltRenderer {
   static PictureInfo? _pointerPicture;
   static bool _initialized = false;
   static bool _initializing = false;
+
+  // 物品 PNG 图片缓存
+  static final Map<String, ui.Image> _itemImageCache = {};
+  static final Set<String> _itemImageLoading = {};
+  static VoidCallback? onItemImageReady;
 
   /// 检测是否是输出端口 (output)
   static bool isOutputPort(Offset gridPos, List<PlacedBuilding> buildings) {
@@ -260,6 +266,24 @@ class TransportBeltRenderer {
         .replaceAll('#8c8c8c', '#FFFFFF'); // 灰色箭头 -> 白色
   }
 
+  /// 异步加载物品 PNG 图片并缓存
+  static Future<void> _loadItemImage(String assetPath) async {
+    if (_itemImageCache.containsKey(assetPath) || _itemImageLoading.contains(assetPath)) return;
+    _itemImageLoading.add(assetPath);
+    try {
+      final data = await rootBundle.load(assetPath);
+      final bytes = data.buffer.asUint8List();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      _itemImageCache[assetPath] = frame.image;
+      onItemImageReady?.call();
+    } catch (e) {
+      debugPrint('Failed to load item image: $e');
+    } finally {
+      _itemImageLoading.remove(assetPath);
+    }
+  }
+
   static bool get isReady =>
       _initialized &&
       _movePicture != null &&
@@ -393,11 +417,146 @@ class TransportBeltRenderer {
     List<PlacedBuilding> buildings, {
     int detailLevel = 2,
     double arrowProgress = 0.0,
+    Item? lastItem,
   }) {
     if (belt.path.isEmpty) return;
 
+    final isProducing = item != null && belt.itemId.isNotEmpty;
+    final isFlowing = !belt.isBlocked;
+
+    final hasItemImage = item != null && item.imageAssetPath.isNotEmpty;
+    final itemImage = hasItemImage ? _itemImageCache[item.imageAssetPath] : null;
+
+    // 残留物品图片
+    final hasLastItemImage = lastItem != null && lastItem.imageAssetPath.isNotEmpty;
+    final lastItemImage = hasLastItemImage ? _itemImageCache[lastItem.imageAssetPath] : null;
+
+    double effectiveFillProgress = belt.itemFillProgress;
+    double effectiveDrainProgress = belt.itemDrainProgress;
+    final now = DateTime.now();
+
+    // === 当前物品的填充/排空逻辑 ===
+    if (isFlowing) {
+      if (isProducing || effectiveFillProgress > 0) {
+        belt.itemFillStartTime ??= now;
+        belt.itemFillStartProgress ??= arrowProgress;
+
+        final elapsed = now.difference(belt.itemFillStartTime!).inMilliseconds / 1000.0;
+        final expectedElapsedProgress = elapsed * 0.5;
+        final delta = arrowProgress - belt.itemFillStartProgress!;
+        final cycles = (expectedElapsedProgress - delta).roundToDouble();
+        effectiveFillProgress = cycles + 1.0;
+        if (effectiveFillProgress < 0.0) effectiveFillProgress = 0.0;
+        belt.itemFillProgress = effectiveFillProgress;
+      }
+
+      if (isProducing) {
+        belt.itemDrainStartTime = null;
+        belt.itemDrainStartProgress = null;
+        belt.itemDrainProgress = 0.0;
+        effectiveDrainProgress = 0.0;
+      } else if (effectiveFillProgress > 0.0) {
+        belt.itemDrainStartTime ??= now;
+        belt.itemDrainStartProgress ??= arrowProgress;
+
+        final elapsed = now.difference(belt.itemDrainStartTime!).inMilliseconds / 1000.0;
+        final expectedElapsedProgress = elapsed * 0.5;
+        final delta = arrowProgress - belt.itemDrainStartProgress!;
+        final cycles = (expectedElapsedProgress - delta).roundToDouble();
+        effectiveDrainProgress = cycles;
+        if (effectiveDrainProgress < 0.0) effectiveDrainProgress = 0.0;
+        belt.itemDrainProgress = effectiveDrainProgress;
+
+        if (effectiveDrainProgress >= effectiveFillProgress || effectiveDrainProgress >= belt.path.length) {
+          belt.itemFillStartTime = null;
+          belt.itemFillStartProgress = null;
+          belt.itemFillProgress = 0.0;
+          effectiveFillProgress = 0.0;
+
+          belt.itemDrainStartTime = null;
+          belt.itemDrainStartProgress = null;
+          belt.itemDrainProgress = 0.0;
+          effectiveDrainProgress = 0.0;
+        }
+      }
+    } else {
+      // Freeze progress by continually shifting the start anchors so that they stay at current values
+      belt.itemFillStartTime = now;
+      belt.itemFillStartProgress = arrowProgress;
+      if (belt.itemDrainStartTime != null) {
+        belt.itemDrainStartTime = now;
+        belt.itemDrainStartProgress = arrowProgress;
+      }
+    }
+
+    if (effectiveFillProgress == 0.0 && !isProducing) {
+        // Completely drained, clean state safely
+        belt.itemFillStartTime = null;
+        belt.itemFillStartProgress = null;
+        belt.itemDrainStartTime = null;
+        belt.itemDrainStartProgress = null;
+    }
+
+    // === 残留物品的排空逻辑 ===
+    double effectiveLastFillProgress = belt.lastItemFillProgress;
+    double effectiveLastDrainProgress = belt.lastItemDrainProgress;
+
+    if (isFlowing && effectiveLastFillProgress > 0.0) {
+      belt.lastItemDrainStartTime ??= now;
+      belt.lastItemDrainStartProgress ??= arrowProgress;
+
+      final elapsed = now.difference(belt.lastItemDrainStartTime!).inMilliseconds / 1000.0;
+      final expectedElapsedProgress = elapsed * 0.5;
+      final delta = arrowProgress - belt.lastItemDrainStartProgress!;
+      final cycles = (expectedElapsedProgress - delta).roundToDouble();
+
+      // 排空进度：从存储值开始递增
+      effectiveLastDrainProgress = belt.lastItemDrainProgress + cycles;
+      if (effectiveLastDrainProgress < 0.0) effectiveLastDrainProgress = 0.0;
+
+      // 填充进度：与排空同速推进（物品在移动）
+      effectiveLastFillProgress = belt.lastItemFillProgress + cycles;
+      if (effectiveLastFillProgress < 0.0) effectiveLastFillProgress = 0.0;
+
+      // 更新存储值并重置计时锚点（避免下次帧重复计算）
+      belt.lastItemDrainProgress = effectiveLastDrainProgress;
+      belt.lastItemFillProgress = effectiveLastFillProgress;
+      belt.lastItemDrainStartTime = now;
+      belt.lastItemDrainStartProgress = arrowProgress;
+
+      if (effectiveLastDrainProgress >= effectiveLastFillProgress || effectiveLastDrainProgress >= belt.path.length) {
+        belt.lastItemFillProgress = 0.0;
+        effectiveLastFillProgress = 0.0;
+        belt.lastItemDrainProgress = 0.0;
+        effectiveLastDrainProgress = 0.0;
+        belt.lastItemDrainStartTime = null;
+        belt.lastItemDrainStartProgress = null;
+      }
+    } else if (!isFlowing && effectiveLastFillProgress > 0.0) {
+      // 冻结残留物品进度
+      belt.lastItemDrainStartTime = now;
+      belt.lastItemDrainStartProgress = arrowProgress;
+    }
+
+    if (effectiveLastFillProgress <= 0.0) {
+      belt.lastItemFillProgress = 0.0;
+      belt.lastItemDrainProgress = 0.0;
+      belt.lastItemDrainStartTime = null;
+      belt.lastItemDrainStartProgress = null;
+    }
+
     if (isReady) {
-      _renderWithSvg(canvas, belt.path, cellSize, buildings, forcedDirection: belt.forcedDirection, incomingDirection: belt.incomingDirection, arrowProgress: arrowProgress);
+      _renderWithSvg(canvas, belt.path, cellSize, buildings,
+        forcedDirection: belt.forcedDirection,
+        incomingDirection: belt.incomingDirection,
+        arrowProgress: arrowProgress,
+        itemImage: itemImage,
+        itemFillProgress: effectiveFillProgress,
+        itemDrainProgress: effectiveDrainProgress,
+        lastItemImage: lastItemImage,
+        lastItemFillProgress: effectiveLastFillProgress,
+        lastItemDrainProgress: effectiveLastDrainProgress,
+      );
     } else {
       for (int i = 0; i < belt.path.length; i++) {
         final cell = belt.path[i];
@@ -426,9 +585,17 @@ class TransportBeltRenderer {
       }
     }
 
-    // LOD 2: 粒子动画
-    if (detailLevel >= 2 && item != null && !belt.isBlocked) {
-      _renderParticles(canvas, belt, item, cellSize, buildings);
+    // LOD 2: 无物品图片时回退到粒子动画
+    if (detailLevel >= 2 && item != null && (effectiveFillProgress > effectiveDrainProgress) && itemImage == null) {
+      _renderParticles(canvas, belt, item!, cellSize, buildings);
+    }
+
+    // 触发图片异步加载
+    if (hasItemImage && itemImage == null && !_itemImageLoading.contains(item!.imageAssetPath)) {
+      _loadItemImage(item!.imageAssetPath);
+    }
+    if (hasLastItemImage && lastItemImage == null && !_itemImageLoading.contains(lastItem!.imageAssetPath)) {
+      _loadItemImage(lastItem!.imageAssetPath);
     }
 
     if (belt.isBlocked && belt.path.isNotEmpty) {
@@ -447,6 +614,12 @@ class TransportBeltRenderer {
     String? forcedDirection,
     String? incomingDirection,
     double arrowProgress = 0.0,
+    ui.Image? itemImage,
+    double itemFillProgress = 0.0,
+    double itemDrainProgress = 0.0,
+    ui.Image? lastItemImage,
+    double lastItemFillProgress = 0.0,
+    double lastItemDrainProgress = 0.0,
   }) {
     // 第一次绘制：只绘制背景（传送带）
     for (int i = 0; i < path.length; i++) {
@@ -484,11 +657,22 @@ class TransportBeltRenderer {
       canvas.restore();
     }
 
-    // 第二次绘制：只绘制前景（指针），避免指针被相邻背景覆盖
+    // 第二次绘制：只绘制前景（指针/物品），避免被相邻背景覆盖
+    // 所有格子统一使用 arrowProgress 作为位置，itemFillProgress 只决定画什么
+    final int fillCount = itemFillProgress.clamp(0.0, path.length.toDouble()).floor();
+    final int drainCount = itemDrainProgress.clamp(0.0, path.length.toDouble()).floor();
+    final int lastFillCount = lastItemFillProgress.clamp(0.0, path.length.toDouble()).floor();
+    final int lastDrainCount = lastItemDrainProgress.clamp(0.0, path.length.toDouble()).floor();
+
     for (int i = 0; i < path.length; i++) {
       final cell = path[i];
       final cx = cell.dx * cellSize + cellSize / 2;
       final cy = cell.dy * cellSize + cellSize / 2;
+
+      // 判断当前格子的物品状态：当前物品优先，其次残留物品，最后指针
+      final cellCurrentFilled = itemImage != null && i >= drainCount && i < fillCount;
+      final cellLastFilled = !cellCurrentFilled && lastItemImage != null && i >= lastDrainCount && i < lastFillCount;
+      final cellItemImage = cellCurrentFilled ? itemImage : (cellLastFilled ? lastItemImage : null);
 
       canvas.save();
       canvas.translate(cx, cy);
@@ -504,7 +688,6 @@ class TransportBeltRenderer {
         incomingDirection: incomingDirection,
       );
       if (clip != null) {
-        // 依然保留端点的裁剪，以防进入建筑的指针越界
         canvas.clipRect(clip);
       }
 
@@ -517,6 +700,7 @@ class TransportBeltRenderer {
         arrowProgress: arrowProgress,
         drawBackground: false,
         drawPointer: true,
+        itemImage: cellItemImage,
       );
       canvas.restore();
     }
@@ -858,6 +1042,7 @@ class TransportBeltRenderer {
     double arrowProgress = 0.0,
     bool drawBackground = true,
     bool drawPointer = true,
+    ui.Image? itemImage,
   }) {
     // 确定用于转弯检测的路径 and 索引
     List<Offset> turnPath = path;
@@ -924,12 +1109,10 @@ class TransportBeltRenderer {
       }
     }
 
-    if (!isPreview && _pointerPicture != null && drawPointer) {
+    if (!isPreview && drawPointer && (_pointerPicture != null || itemImage != null)) {
       canvas.save();
-      final pSize = _pointerPicture!.size;
-      final double uniformScale = (cellSize * 0.25) / pSize.height;
 
-      void drawPointerIter(double pProgress) {
+      void drawItemAt(double pProgress) {
         if (isTurn) {
           final (_, inDir, outDir, isCCW) = _getCellTurnInfo(turnPath, turnIndex, incomingDirection: incomingDirection, forcedDirection: forcedDirection);
           double eX = 0, eY = 0;
@@ -963,9 +1146,18 @@ class TransportBeltRenderer {
           canvas.translate(px * cellSize, py * cellSize);
           canvas.rotate(tangentAngle + math.pi / 2);
 
-          canvas.scale(uniformScale, uniformScale);
-          canvas.translate(-pSize.width / 2, -pSize.height / 2);
-          canvas.drawPicture(_pointerPicture!.picture);
+          if (itemImage != null) {
+            final drawSize = cellSize * 0.35;
+            final srcRect = Rect.fromLTWH(0, 0, itemImage.width.toDouble(), itemImage.height.toDouble());
+            final dstRect = Rect.fromCenter(center: Offset.zero, width: drawSize, height: drawSize);
+            canvas.drawImageRect(itemImage, srcRect, dstRect, Paint());
+          } else {
+            final pSize = _pointerPicture!.size;
+            final double uniformScale = (cellSize * 0.25) / pSize.height;
+            canvas.scale(uniformScale, uniformScale);
+            canvas.translate(-pSize.width / 2, -pSize.height / 2);
+            canvas.drawPicture(_pointerPicture!.picture);
+          }
           canvas.restore();
         } else {
           // straight movement
@@ -978,15 +1170,24 @@ class TransportBeltRenderer {
           canvas.save();
           canvas.rotate(rotation);
           canvas.translate(0, moveDist);
-          
-          canvas.scale(uniformScale, uniformScale);
-          canvas.translate(-pSize.width / 2, -pSize.height / 2);
-          canvas.drawPicture(_pointerPicture!.picture);
+
+          if (itemImage != null) {
+            final drawSize = cellSize * 0.35;
+            final srcRect = Rect.fromLTWH(0, 0, itemImage.width.toDouble(), itemImage.height.toDouble());
+            final dstRect = Rect.fromCenter(center: Offset.zero, width: drawSize, height: drawSize);
+            canvas.drawImageRect(itemImage, srcRect, dstRect, Paint());
+          } else {
+            final pSize = _pointerPicture!.size;
+            final double uniformScale = (cellSize * 0.25) / pSize.height;
+            canvas.scale(uniformScale, uniformScale);
+            canvas.translate(-pSize.width / 2, -pSize.height / 2);
+            canvas.drawPicture(_pointerPicture!.picture);
+          }
           canvas.restore();
         }
       }
 
-      drawPointerIter(arrowProgress);
+      drawItemAt(arrowProgress);
 
       canvas.restore();
     }

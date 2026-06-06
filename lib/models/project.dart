@@ -106,6 +106,7 @@ class PlacedBuilding {
   double gridY;
   int rotation;
   String? activeRecipeId;
+  String? depotOutputItemId;
   List<PortState> inputPorts;
   List<PortState> outputPorts;
   bool isBlocked;
@@ -118,6 +119,7 @@ class PlacedBuilding {
     required this.gridY,
     this.rotation = 0,
     this.activeRecipeId,
+    this.depotOutputItemId,
     this.isBlocked = false,
     this.productionProgress = 0.0,
   })  : inputPorts = List.generate(
@@ -167,22 +169,47 @@ class ConveyorBelt {
   final String id;
   final List<Offset> path;
   String itemId;
+  String lastItemId;
   List<Offset> particles;
   double flowProgress;
+  double itemFillProgress;
+  double itemDrainProgress;
+  DateTime? itemFillStartTime;
+  double? itemFillStartProgress;
+  DateTime? itemDrainStartTime;
+  double? itemDrainStartProgress;
   bool isBlocked;
   final String? forcedDirection;
   final String? incomingDirection;
+
+  // 残留物品（源断开后的旧物品，正在排空中）
+  double lastItemFillProgress;
+  double lastItemDrainProgress;
+  DateTime? lastItemDrainStartTime;
+  double? lastItemDrainStartProgress;
 
   ConveyorBelt({
     required this.id,
     required this.path,
     required this.itemId,
+    String? lastItemId,
     List<Offset>? particles,
     this.flowProgress = 0.0,
+    this.itemFillProgress = 0.0,
+    this.itemDrainProgress = 0.0,
+    this.itemFillStartTime,
+    this.itemFillStartProgress,
+    this.itemDrainStartTime,
+    this.itemDrainStartProgress,
     this.isBlocked = false,
     this.forcedDirection,
     this.incomingDirection,
-  }) : particles = particles ?? [];
+    this.lastItemFillProgress = 0.0,
+    this.lastItemDrainProgress = 0.0,
+    this.lastItemDrainStartTime,
+    this.lastItemDrainStartProgress,
+  }) : particles = particles ?? [],
+       lastItemId = lastItemId ?? itemId;
 
   static const double _cellSize = 48.0;
 

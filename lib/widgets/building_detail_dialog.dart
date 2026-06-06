@@ -16,6 +16,7 @@ class BuildingDetailDialog extends StatefulWidget {
   final List<ConveyorBelt>? conveyors;
   final VoidCallback? onMove;
   final VoidCallback? onDelete;
+  final ValueChanged<String?>? onOutputItemSelected;
 
   const BuildingDetailDialog({
     super.key,
@@ -24,6 +25,7 @@ class BuildingDetailDialog extends StatefulWidget {
     this.conveyors,
     this.onMove,
     this.onDelete,
+    this.onOutputItemSelected,
   });
 
   static Future<void> show(
@@ -33,6 +35,7 @@ class BuildingDetailDialog extends StatefulWidget {
     List<ConveyorBelt>? conveyors,
     VoidCallback? onMove,
     VoidCallback? onDelete,
+    ValueChanged<String?>? onOutputItemSelected,
   }) {
     return showDialog<void>(
       context: context,
@@ -43,6 +46,7 @@ class BuildingDetailDialog extends StatefulWidget {
         conveyors: conveyors,
         onMove: onMove,
         onDelete: onDelete,
+        onOutputItemSelected: onOutputItemSelected,
       ),
     );
   }
@@ -92,6 +96,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   @override
   void initState() {
     super.initState();
+    _selectedOutputItemId = widget.placedBuilding.depotOutputItemId;
     _allItems = _buildResourceList();
     _loadLogo();
     _loadLiquidSwitch();
@@ -512,6 +517,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                             _selectedOutputItemId = item.id;
                             _isAddMode = false;
                           });
+                          widget.placedBuilding.depotOutputItemId = item.id;
+                          widget.onOutputItemSelected?.call(item.id);
                         }
                       : null,
                 );
@@ -771,6 +778,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                           // 移除物品
                           _selectedOutputItemId = null;
                           _isAddMode = false;
+                          widget.placedBuilding.depotOutputItemId = null;
+                          widget.onOutputItemSelected?.call(null);
                         } else {
                           _isAddMode = !_isAddMode;
                         }

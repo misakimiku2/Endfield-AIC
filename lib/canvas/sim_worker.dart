@@ -96,7 +96,11 @@ class _SimWorker {
         id: c.id,
         itemId: c.itemId,
         flowProgress: c.flowProgress,
+        itemFillProgress: c.itemFillProgress,
+        itemDrainProgress: c.itemDrainProgress,
         isBlocked: c.isBlocked,
+        lastItemFillProgress: c.lastItemFillProgress,
+        lastItemDrainProgress: c.lastItemDrainProgress,
       )).toList(),
     );
 
@@ -113,48 +117,35 @@ class _SimWorker {
       if (belt.isBlocked) continue;
 
       // 更新流动进度
-      _conveyors[i] = SimConveyorData(
-        id: belt.id,
-        path: belt.path,
-        itemId: belt.itemId,
-        flowProgress: belt.flowProgress + dt * 60,
-        isBlocked: belt.isBlocked,
-      );
-      if (_conveyors[i].flowProgress > 100000) {
-        _conveyors[i] = SimConveyorData(
-          id: belt.id,
-          path: belt.path,
-          itemId: belt.itemId,
-          flowProgress: 0,
-          isBlocked: belt.isBlocked,
-        );
-      }
+      double newFlow = belt.flowProgress + dt * 60;
+      if (newFlow > 100000) newFlow = 0;
 
       // 检查源设备是否阻塞
       final startPos = _beltStart(belt);
       final sourceBuilding = _findSourceBuilding(startPos);
-      if (sourceBuilding != null && (_buildingBlocked[sourceBuilding.id] ?? false)) {
-        _conveyors[i] = SimConveyorData(
-          id: belt.id,
-          path: belt.path,
-          itemId: belt.itemId,
-          flowProgress: _conveyors[i].flowProgress,
-          isBlocked: true,
-        );
-      } else {
-        _conveyors[i] = SimConveyorData(
-          id: belt.id,
-          path: belt.path,
-          itemId: belt.itemId,
-          flowProgress: _conveyors[i].flowProgress,
-          isBlocked: false,
-        );
-      }
+      final bool blocked = sourceBuilding != null && (_buildingBlocked[sourceBuilding.id] ?? false);
+
+      _conveyors[i] = SimConveyorData(
+        id: belt.id,
+        path: belt.path,
+        itemId: belt.itemId,
+        flowProgress: newFlow,
+        itemFillProgress: belt.itemFillProgress,
+        isBlocked: blocked,
+        lastItemFillProgress: belt.lastItemFillProgress,
+        lastItemDrainProgress: belt.lastItemDrainProgress,
+      );
     }
   }
 
   void _updateBuildings(double dt) {
     for (final pb in _buildings) {
+      // 仓库取货口：不需要配方，直接将 depotOutputItemId 推送到连接的传送带
+      if (pb.buildingId == 'depot_unloader_3x1') {
+        _produceDepotOutput(pb);
+        continue;
+      }
+
       if (pb.activeRecipeId == null) continue;
       final recipe = _recipes.where((r) => r.id == pb.activeRecipeId).firstOrNull;
       if (recipe == null) continue;
@@ -175,6 +166,32 @@ class _SimWorker {
         _buildingProgress[pb.id] = 0.0;
         _consumeInputs(pb, recipe);
         _produceOutputs(pb, recipe);
+      }
+    }
+  }
+
+  /// 仓库取货口：将 depotOutputItemId 推送到连接的空传送带
+  void _produceDepotOutput(SimBuildingData pb) {
+    final outputItemId = pb.depotOutputItemId;
+    if (outputItemId.isEmpty) return;
+    for (final port in pb.outputPorts) {
+      final portWorld = _portWorldPosition(port, pb);
+      for (int i = 0; i < _conveyors.length; i++) {
+        final belt = _conveyors[i];
+        if ((_beltStart(belt) - portWorld).distance < _portConnectionThreshold) {
+          if (belt.itemId.isEmpty) {
+            _conveyors[i] = SimConveyorData(
+              id: belt.id,
+              path: belt.path,
+              itemId: outputItemId,
+              flowProgress: belt.flowProgress,
+              itemFillProgress: belt.itemFillProgress,
+              isBlocked: belt.isBlocked,
+              lastItemFillProgress: belt.lastItemFillProgress,
+              lastItemDrainProgress: belt.lastItemDrainProgress,
+            );
+          }
+        }
       }
     }
   }
@@ -225,7 +242,10 @@ class _SimWorker {
                 path: belt.path,
                 itemId: '',
                 flowProgress: belt.flowProgress,
+                itemFillProgress: belt.itemFillProgress,
                 isBlocked: belt.isBlocked,
+                lastItemFillProgress: belt.lastItemFillProgress,
+                lastItemDrainProgress: belt.lastItemDrainProgress,
               );
               break;
             }
@@ -248,7 +268,10 @@ class _SimWorker {
                 path: belt.path,
                 itemId: output.itemId,
                 flowProgress: belt.flowProgress,
+                itemFillProgress: belt.itemFillProgress,
                 isBlocked: belt.isBlocked,
+                lastItemFillProgress: belt.lastItemFillProgress,
+                lastItemDrainProgress: belt.lastItemDrainProgress,
               );
               break;
             }

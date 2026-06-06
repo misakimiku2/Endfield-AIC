@@ -44,6 +44,7 @@ class _EditorPageState extends State<EditorPage> {
     widget.simulationEngine.attach(_project);
     // 监听仿真引擎的 tick 结果，触发 UI 重绘
     widget.simulationEngine.addListener(_onSimTick);
+    widget.simulationEngine.start();
     // 异步初始化计算 Isolate
     widget.simulationEngine.init().then((_) {
       // Isolate 就绪后同步当前状态
@@ -99,6 +100,9 @@ class _EditorPageState extends State<EditorPage> {
           });
           widget.simulationEngine.attach(_project);
         },
+        onOutputItemSelected: (itemId) {
+          _setDepotOutputItem(pb, itemId);
+        },
       );
     }
     setState(() {
@@ -106,6 +110,24 @@ class _EditorPageState extends State<EditorPage> {
       _placingBuilding = null;
       _conveyorMode = false;
     });
+  }
+
+  /// 将仓库取货口的输出物品写入连接的传送带
+  void _setDepotOutputItem(PlacedBuilding pb, String? itemId) {
+    const cellSize = 48.0;
+    const threshold = 30.0;
+    for (final port in pb.outputPorts) {
+      final portWorld = port.worldPosition(
+          pb.gridX, pb.gridY, cellSize, pb.building.gridWidth, pb.building.gridHeight,
+          rotation: pb.rotation);
+      for (final belt in _project.conveyors) {
+        if ((belt.start - portWorld).distance < threshold) {
+          belt.itemId = itemId ?? '';
+        }
+      }
+    }
+    widget.simulationEngine.attach(_project);
+    setState(() {});
   }
 
   void _toggleConveyorMode() {
@@ -449,13 +471,6 @@ class _EditorPageState extends State<EditorPage> {
             ),
           ),
           const Spacer(),
-          _toolbarButton(
-            widget.simulationEngine.isRunning ? '暂停' : '启动',
-            widget.simulationEngine.isRunning ? Icons.pause : Icons.play_arrow,
-            false,
-            () => widget.simulationEngine.toggle(),
-          ),
-          const SizedBox(width: 8),
           _speedControl(),
           const SizedBox(width: 8),
           _toolbarButton('导出', Icons.file_upload_outlined, false,
@@ -567,16 +582,6 @@ class _EditorPageState extends State<EditorPage> {
               '传送带模式 (ESC退出)',
               style: TextStyle(color: Color(0xFF4488FF), fontSize: 10),
             )
-          else if (widget.simulationEngine.isRunning)
-            const Text(
-              '● 仿真运行中',
-              style: TextStyle(color: Color(0xFF00FF66), fontSize: 10),
-            )
-          else
-            const Text(
-              '● 仿真已暂停',
-              style: TextStyle(color: Color(0xFF666666), fontSize: 10),
-            ),
         ],
       ),
     );
