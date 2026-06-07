@@ -96,11 +96,11 @@ class _SimWorker {
         id: c.id,
         itemId: c.itemId,
         flowProgress: c.flowProgress,
-        itemFillProgress: c.itemFillProgress,
-        itemDrainProgress: c.itemDrainProgress,
+        itemFillCount: c.itemFillCount,
+        itemDrainCount: c.itemDrainCount,
         isBlocked: c.isBlocked,
-        lastItemFillProgress: c.lastItemFillProgress,
-        lastItemDrainProgress: c.lastItemDrainProgress,
+        lastItemFillCount: c.lastItemFillCount,
+        lastItemDrainCount: c.lastItemDrainCount,
       )).toList(),
     );
 
@@ -130,10 +130,11 @@ class _SimWorker {
         path: belt.path,
         itemId: belt.itemId,
         flowProgress: newFlow,
-        itemFillProgress: belt.itemFillProgress,
+        itemFillCount: belt.itemFillCount,
+        itemDrainCount: belt.itemDrainCount,
         isBlocked: blocked,
-        lastItemFillProgress: belt.lastItemFillProgress,
-        lastItemDrainProgress: belt.lastItemDrainProgress,
+        lastItemFillCount: belt.lastItemFillCount,
+        lastItemDrainCount: belt.lastItemDrainCount,
       );
     }
   }
@@ -185,10 +186,11 @@ class _SimWorker {
               path: belt.path,
               itemId: outputItemId,
               flowProgress: belt.flowProgress,
-              itemFillProgress: belt.itemFillProgress,
+              itemFillCount: belt.itemFillCount,
+              itemDrainCount: belt.itemDrainCount,
               isBlocked: belt.isBlocked,
-              lastItemFillProgress: belt.lastItemFillProgress,
-              lastItemDrainProgress: belt.lastItemDrainProgress,
+              lastItemFillCount: belt.lastItemFillCount,
+              lastItemDrainCount: belt.lastItemDrainCount,
             );
           }
         }
@@ -242,10 +244,11 @@ class _SimWorker {
                 path: belt.path,
                 itemId: '',
                 flowProgress: belt.flowProgress,
-                itemFillProgress: belt.itemFillProgress,
+                itemFillCount: belt.itemFillCount,
+                itemDrainCount: belt.itemDrainCount,
                 isBlocked: belt.isBlocked,
-                lastItemFillProgress: belt.lastItemFillProgress,
-                lastItemDrainProgress: belt.lastItemDrainProgress,
+                lastItemFillCount: belt.lastItemFillCount,
+                lastItemDrainCount: belt.lastItemDrainCount,
               );
               break;
             }
@@ -268,10 +271,11 @@ class _SimWorker {
                 path: belt.path,
                 itemId: output.itemId,
                 flowProgress: belt.flowProgress,
-                itemFillProgress: belt.itemFillProgress,
+                itemFillCount: belt.itemFillCount,
+                itemDrainCount: belt.itemDrainCount,
                 isBlocked: belt.isBlocked,
-                lastItemFillProgress: belt.lastItemFillProgress,
-                lastItemDrainProgress: belt.lastItemDrainProgress,
+                lastItemFillCount: belt.lastItemFillCount,
+                lastItemDrainCount: belt.lastItemDrainCount,
               );
               break;
             }

@@ -95,8 +95,16 @@ class SimulationEngine extends ChangeNotifier {
       final belt = _project!.conveyors.where((c) => c.id == cr.id).firstOrNull;
       if (belt != null) {
         // 只有当没有残留物品时才更新 lastItemId，避免覆盖残留物品的 ID
-        if (cr.itemId.isNotEmpty && belt.lastItemFillProgress <= 0) {
+        if (cr.itemId.isNotEmpty && belt.lastItemFillCount <= 0) {
           belt.lastItemId = cr.itemId;
+        }
+        // 当 itemId 首次从空变为非空时，立即初始化第一格物品
+        // 避免等待下一个动画周期（最多 2 秒延迟）
+        if (cr.itemId.isNotEmpty && belt.itemId.isEmpty) {
+          belt.itemFillCount = 1;
+          belt.itemDrainCount = 0;
+          belt.lastItemFillCount = 0;
+          belt.lastItemDrainCount = 0;
         }
         belt.itemId = cr.itemId;
         belt.flowProgress = cr.flowProgress;
@@ -149,12 +157,13 @@ class SimulationEngine extends ChangeNotifier {
         path: c.path,
         itemId: c.itemId,
         flowProgress: c.flowProgress,
-        itemFillProgress: c.itemFillProgress,
+        itemFillCount: c.itemFillCount,
+        itemDrainCount: c.itemDrainCount,
         isBlocked: c.isBlocked,
         forcedDirection: c.forcedDirection,
         incomingDirection: c.incomingDirection,
-        lastItemFillProgress: c.lastItemFillProgress,
-        lastItemDrainProgress: c.lastItemDrainProgress,
+        lastItemFillCount: c.lastItemFillCount,
+        lastItemDrainCount: c.lastItemDrainCount,
       )).toList(),
       recipes: _dataLoader.recipes.values.map((r) => SimRecipeData(
         id: r.id,
@@ -223,6 +232,9 @@ class SimulationEngine extends ChangeNotifier {
 
     notifyListeners();
   }
+
+  // 用于限制日志输出频率
+  int _fallbackLogCounter = 0;
 
   void _fallbackUpdateConveyors(double dt) {
     if (_project == null) return;
@@ -295,11 +307,18 @@ class SimulationEngine extends ChangeNotifier {
       final portWorld = port.worldPosition(
           pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
       for (final belt in _project!.conveyors) {
-        if ((belt.start - portWorld).distance < _portConnectionThreshold) {
+        final dist = (belt.start - portWorld).distance;
+        if (dist < _portConnectionThreshold) {
           if (belt.itemId.isEmpty) {
             belt.itemId = outputItemId;
+            // 立即初始化第一格物品，避免等待下一个动画周期（最多 2 秒延迟）
+            belt.itemFillCount = 1;
+            belt.itemDrainCount = 0;
+            belt.lastItemFillCount = 0;
+            belt.lastItemDrainCount = 0;
             port.connected = true;
             port.linkedItemId = outputItemId;
+            print('[SimFallback] Set belt ${belt.id} itemId=$outputItemId, fillCount=1, dist=$dist');
           }
         }
       }

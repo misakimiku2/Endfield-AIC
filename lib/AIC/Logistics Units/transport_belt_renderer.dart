@@ -424,6 +424,9 @@ class TransportBeltRenderer {
     final isProducing = item != null && belt.itemId.isNotEmpty;
     final isFlowing = !belt.isBlocked;
 
+    // 检测是否是断头传送带（终点未连接设备输入端口）
+    final isDeadEnd = !isInputPort(belt.path.last, buildings);
+
     final hasItemImage = item != null && item.imageAssetPath.isNotEmpty;
     final itemImage = hasItemImage ? _itemImageCache[item.imageAssetPath] : null;
 
@@ -431,131 +434,58 @@ class TransportBeltRenderer {
     final hasLastItemImage = lastItem != null && lastItem.imageAssetPath.isNotEmpty;
     final lastItemImage = hasLastItemImage ? _itemImageCache[lastItem.imageAssetPath] : null;
 
-    double effectiveFillProgress = belt.itemFillProgress;
-    double effectiveDrainProgress = belt.itemDrainProgress;
-    final now = DateTime.now();
+    // 新模型：纯粹基于 itemFillCount/itemDrainCount 整数计数
+    // 填充/排空逻辑由 canvas_editor.dart 中 _onTick 的跨零检测驱动
+    final effectiveFillCount = belt.itemFillCount.clamp(0, belt.path.length);
+    final effectiveDrainCount = belt.itemDrainCount.clamp(0, belt.path.length);
+    final effectiveLastFillCount = belt.lastItemFillCount.clamp(0, belt.path.length);
+    final effectiveLastDrainCount = belt.lastItemDrainCount.clamp(0, belt.path.length);
 
-    // === 当前物品的填充/排空逻辑 ===
-    if (isFlowing) {
-      if (isProducing || effectiveFillProgress > 0) {
-        belt.itemFillStartTime ??= now;
-        belt.itemFillStartProgress ??= arrowProgress;
+    // === 断头传送带满载时冻结 arrowProgress ===
+    // 当物品填满了断头传送带，停止物品动画（物品冻结在终点）
+    // 如果之后传送带被加长，冻结自动解除（deadEndFreezeProgress 被清空）
+    // 当前物品或残留物品任意一方填满整条传送带即可触发冻结
+    // （源断开后当前物品转为残留，effectiveFillCount 变为 0 但 lastFill 仍为满）
+    final currentFull = effectiveFillCount >= belt.path.length;
+    final lastFull = effectiveLastFillCount >= belt.path.length;
+    final allFilled = currentFull || lastFull;
+    final bool shouldFreeze = isDeadEnd && allFilled;
 
-        final elapsed = now.difference(belt.itemFillStartTime!).inMilliseconds / 1000.0;
-        final expectedElapsedProgress = elapsed * 0.5;
-        final delta = arrowProgress - belt.itemFillStartProgress!;
-        final cycles = (expectedElapsedProgress - delta).roundToDouble();
-        effectiveFillProgress = cycles + 1.0;
-        if (effectiveFillProgress < 0.0) effectiveFillProgress = 0.0;
-        belt.itemFillProgress = effectiveFillProgress;
-      }
-
-      if (isProducing) {
-        belt.itemDrainStartTime = null;
-        belt.itemDrainStartProgress = null;
-        belt.itemDrainProgress = 0.0;
-        effectiveDrainProgress = 0.0;
-      } else if (effectiveFillProgress > 0.0) {
-        belt.itemDrainStartTime ??= now;
-        belt.itemDrainStartProgress ??= arrowProgress;
-
-        final elapsed = now.difference(belt.itemDrainStartTime!).inMilliseconds / 1000.0;
-        final expectedElapsedProgress = elapsed * 0.5;
-        final delta = arrowProgress - belt.itemDrainStartProgress!;
-        final cycles = (expectedElapsedProgress - delta).roundToDouble();
-        effectiveDrainProgress = cycles;
-        if (effectiveDrainProgress < 0.0) effectiveDrainProgress = 0.0;
-        belt.itemDrainProgress = effectiveDrainProgress;
-
-        if (effectiveDrainProgress >= effectiveFillProgress || effectiveDrainProgress >= belt.path.length) {
-          belt.itemFillStartTime = null;
-          belt.itemFillStartProgress = null;
-          belt.itemFillProgress = 0.0;
-          effectiveFillProgress = 0.0;
-
-          belt.itemDrainStartTime = null;
-          belt.itemDrainStartProgress = null;
-          belt.itemDrainProgress = 0.0;
-          effectiveDrainProgress = 0.0;
-        }
-      }
-    } else {
-      // Freeze progress by continually shifting the start anchors so that they stay at current values
-      belt.itemFillStartTime = now;
-      belt.itemFillStartProgress = arrowProgress;
-      if (belt.itemDrainStartTime != null) {
-        belt.itemDrainStartTime = now;
-        belt.itemDrainStartProgress = arrowProgress;
+    if (shouldFreeze && belt.deadEndFreezeProgress == null) {
+      // 刚达到满载：不立即冻结。设置为 -1.0 表示 "等待自然到位"
+      // 渲染时会继续用实时 arrowProgress，直到物品移动到末端再冻结
+      belt.deadEndFreezeProgress = -1.0;
+      print('[Freeze] belt ${belt.id} pending freeze (waiting for arrow to reach exit edge)');
+    }
+    if (shouldFreeze && belt.deadEndFreezeProgress == -1.0) {
+      // 等待 arrowProgress 到达出口边缘（> 0.95）时冻结
+      if (arrowProgress > 0.95) {
+        belt.deadEndFreezeProgress = 1.0;
+        print('[Freeze] belt ${belt.id} frozen at arrowProgress=1.0');
       }
     }
-
-    if (effectiveFillProgress == 0.0 && !isProducing) {
-        // Completely drained, clean state safely
-        belt.itemFillStartTime = null;
-        belt.itemFillStartProgress = null;
-        belt.itemDrainStartTime = null;
-        belt.itemDrainStartProgress = null;
+    if (!shouldFreeze && belt.deadEndFreezeProgress != null) {
+      // 不再满载（如被加长或源断开排空）：清除冻结值
+      belt.deadEndFreezeProgress = null;
+      print('[Freeze] belt ${belt.id} unfrozen');
     }
 
-    // === 残留物品的排空逻辑 ===
-    double effectiveLastFillProgress = belt.lastItemFillProgress;
-    double effectiveLastDrainProgress = belt.lastItemDrainProgress;
-
-    if (isFlowing && effectiveLastFillProgress > 0.0) {
-      belt.lastItemDrainStartTime ??= now;
-      belt.lastItemDrainStartProgress ??= arrowProgress;
-
-      final elapsed = now.difference(belt.lastItemDrainStartTime!).inMilliseconds / 1000.0;
-      final expectedElapsedProgress = elapsed * 0.5;
-      final delta = arrowProgress - belt.lastItemDrainStartProgress!;
-      final cycles = (expectedElapsedProgress - delta).roundToDouble();
-
-      // 排空进度：从存储值开始递增
-      effectiveLastDrainProgress = belt.lastItemDrainProgress + cycles;
-      if (effectiveLastDrainProgress < 0.0) effectiveLastDrainProgress = 0.0;
-
-      // 填充进度：与排空同速推进（物品在移动）
-      effectiveLastFillProgress = belt.lastItemFillProgress + cycles;
-      if (effectiveLastFillProgress < 0.0) effectiveLastFillProgress = 0.0;
-
-      // 更新存储值并重置计时锚点（避免下次帧重复计算）
-      belt.lastItemDrainProgress = effectiveLastDrainProgress;
-      belt.lastItemFillProgress = effectiveLastFillProgress;
-      belt.lastItemDrainStartTime = now;
-      belt.lastItemDrainStartProgress = arrowProgress;
-
-      if (effectiveLastDrainProgress >= effectiveLastFillProgress || effectiveLastDrainProgress >= belt.path.length) {
-        belt.lastItemFillProgress = 0.0;
-        effectiveLastFillProgress = 0.0;
-        belt.lastItemDrainProgress = 0.0;
-        effectiveLastDrainProgress = 0.0;
-        belt.lastItemDrainStartTime = null;
-        belt.lastItemDrainStartProgress = null;
-      }
-    } else if (!isFlowing && effectiveLastFillProgress > 0.0) {
-      // 冻结残留物品进度
-      belt.lastItemDrainStartTime = now;
-      belt.lastItemDrainStartProgress = arrowProgress;
-    }
-
-    if (effectiveLastFillProgress <= 0.0) {
-      belt.lastItemFillProgress = 0.0;
-      belt.lastItemDrainProgress = 0.0;
-      belt.lastItemDrainStartTime = null;
-      belt.lastItemDrainStartProgress = null;
-    }
+    // 冻结中（-1.0 表示等待到位，仍用实时 arrowProgress）
+    final effectiveArrowProgress = (shouldFreeze && belt.deadEndFreezeProgress != null && belt.deadEndFreezeProgress! > 0)
+        ? belt.deadEndFreezeProgress!
+        : arrowProgress;
 
     if (isReady) {
       _renderWithSvg(canvas, belt.path, cellSize, buildings,
         forcedDirection: belt.forcedDirection,
         incomingDirection: belt.incomingDirection,
-        arrowProgress: arrowProgress,
+        arrowProgress: effectiveArrowProgress,
         itemImage: itemImage,
-        itemFillProgress: effectiveFillProgress,
-        itemDrainProgress: effectiveDrainProgress,
+        itemFillCount: effectiveFillCount,
+        itemDrainCount: effectiveDrainCount,
         lastItemImage: lastItemImage,
-        lastItemFillProgress: effectiveLastFillProgress,
-        lastItemDrainProgress: effectiveLastDrainProgress,
+        lastItemFillCount: effectiveLastFillCount,
+        lastItemDrainCount: effectiveLastDrainCount,
       );
     } else {
       for (int i = 0; i < belt.path.length; i++) {
@@ -586,7 +516,7 @@ class TransportBeltRenderer {
     }
 
     // LOD 2: 无物品图片时回退到粒子动画
-    if (detailLevel >= 2 && item != null && (effectiveFillProgress > effectiveDrainProgress) && itemImage == null) {
+    if (detailLevel >= 2 && item != null && (effectiveFillCount > effectiveDrainCount) && itemImage == null) {
       _renderParticles(canvas, belt, item!, cellSize, buildings);
     }
 
@@ -615,11 +545,11 @@ class TransportBeltRenderer {
     String? incomingDirection,
     double arrowProgress = 0.0,
     ui.Image? itemImage,
-    double itemFillProgress = 0.0,
-    double itemDrainProgress = 0.0,
+    int itemFillCount = 0,
+    int itemDrainCount = 0,
     ui.Image? lastItemImage,
-    double lastItemFillProgress = 0.0,
-    double lastItemDrainProgress = 0.0,
+    int lastItemFillCount = 0,
+    int lastItemDrainCount = 0,
   }) {
     // 第一次绘制：只绘制背景（传送带）
     for (int i = 0; i < path.length; i++) {
@@ -658,11 +588,16 @@ class TransportBeltRenderer {
     }
 
     // 第二次绘制：只绘制前景（指针/物品），避免被相邻背景覆盖
-    // 所有格子统一使用 arrowProgress 作为位置，itemFillProgress 只决定画什么
-    final int fillCount = itemFillProgress.clamp(0.0, path.length.toDouble()).floor();
-    final int drainCount = itemDrainProgress.clamp(0.0, path.length.toDouble()).floor();
-    final int lastFillCount = lastItemFillProgress.clamp(0.0, path.length.toDouble()).floor();
-    final int lastDrainCount = lastItemDrainProgress.clamp(0.0, path.length.toDouble()).floor();
+    //
+    // === 渲染不变量（添加新功能时必须遵守）===
+    // 1. 每个格子只画一个前景元素：物品 > 残留物品 > 指针（优先级从高到低）
+    // 2. 有 itemImage 时 _drawSvgCellAtOrigin 总是画物品，不受 drawPointer 影响
+    // 3. 新模型：fillCount/drainCount 为整数，由 _onTick 跨零检测驱动
+    //
+    final int fillCount = itemFillCount.clamp(0, path.length);
+    final int drainCount = itemDrainCount.clamp(0, path.length);
+    final int lastFillCount = lastItemFillCount.clamp(0, path.length);
+    final int lastDrainCount = lastItemDrainCount.clamp(0, path.length);
 
     for (int i = 0; i < path.length; i++) {
       final cell = path[i];
@@ -670,6 +605,7 @@ class TransportBeltRenderer {
       final cy = cell.dy * cellSize + cellSize / 2;
 
       // 判断当前格子的物品状态：当前物品优先，其次残留物品，最后指针
+      // 新模型：纯整数比较，物品位置由 arrowProgress 统一驱动
       final cellCurrentFilled = itemImage != null && i >= drainCount && i < fillCount;
       final cellLastFilled = !cellCurrentFilled && lastItemImage != null && i >= lastDrainCount && i < lastFillCount;
       final cellItemImage = cellCurrentFilled ? itemImage : (cellLastFilled ? lastItemImage : null);
@@ -1109,7 +1045,11 @@ class TransportBeltRenderer {
       }
     }
 
-    if (!isPreview && drawPointer && (_pointerPicture != null || itemImage != null)) {
+    // 渲染前景（指针/物品）：
+    // - 有 itemImage 时总是画物品（不受 drawPointer 影响）
+    // - 无 itemImage 且 drawPointer=true 时画指针
+    // 这确保物品一旦出现就不会因为 drawPointer 标志而被意外隐藏
+    if (!isPreview && (itemImage != null || (drawPointer && _pointerPicture != null))) {
       canvas.save();
 
       void drawItemAt(double pProgress) {

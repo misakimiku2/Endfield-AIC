@@ -172,21 +172,18 @@ class ConveyorBelt {
   String lastItemId;
   List<Offset> particles;
   double flowProgress;
-  double itemFillProgress;
-  double itemDrainProgress;
-  DateTime? itemFillStartTime;
-  double? itemFillStartProgress;
-  DateTime? itemDrainStartTime;
-  double? itemDrainStartProgress;
+  int itemFillCount;
+  int itemDrainCount;
   bool isBlocked;
   final String? forcedDirection;
   final String? incomingDirection;
 
   // 残留物品（源断开后的旧物品，正在排空中）
-  double lastItemFillProgress;
-  double lastItemDrainProgress;
-  DateTime? lastItemDrainStartTime;
-  double? lastItemDrainStartProgress;
+  int lastItemFillCount;
+  int lastItemDrainCount;
+
+  // 断头传送带满载时冻结的 arrowProgress 值，用于平滑过渡
+  double? deadEndFreezeProgress;
 
   ConveyorBelt({
     required this.id,
@@ -195,19 +192,14 @@ class ConveyorBelt {
     String? lastItemId,
     List<Offset>? particles,
     this.flowProgress = 0.0,
-    this.itemFillProgress = 0.0,
-    this.itemDrainProgress = 0.0,
-    this.itemFillStartTime,
-    this.itemFillStartProgress,
-    this.itemDrainStartTime,
-    this.itemDrainStartProgress,
+    this.itemFillCount = 0,
+    this.itemDrainCount = 0,
     this.isBlocked = false,
     this.forcedDirection,
     this.incomingDirection,
-    this.lastItemFillProgress = 0.0,
-    this.lastItemDrainProgress = 0.0,
-    this.lastItemDrainStartTime,
-    this.lastItemDrainStartProgress,
+    this.lastItemFillCount = 0,
+    this.lastItemDrainCount = 0,
+    this.deadEndFreezeProgress,
   }) : particles = particles ?? [],
        lastItemId = lastItemId ?? itemId;
 

@@ -228,6 +228,9 @@ class TransportBeltController {
         fullPath.addAll(_mergeTarget!.path.sublist(1));
       }
 
+      // 使用 anchors.first（用户实际点击的位置）作为分叉点
+      final startCell = anchors.first;
+
       // 查找 fullPath 首格来源的旧传送带，继承其 incomingDirection
       String? newBeltIncomingDir;
       if (fullPath.isNotEmpty) {
@@ -242,32 +245,53 @@ class TransportBeltController {
         }
       }
 
+      // 查找源传送带（用户从其终点开始创建新传送带的旧传送带）
+      // 当 startCell 是某条旧传送带的终点时，继承其物品状态
+      ConveyorBelt? sourceBelt;
+      for (final oldBelt in project.conveyors) {
+        if (oldBelt.path.isNotEmpty &&
+            oldBelt.path.last.dx == startCell.dx &&
+            oldBelt.path.last.dy == startCell.dy) {
+          sourceBelt = oldBelt;
+          break;
+        }
+      }
+
       // 合并时保留目标传送带的物品状态
       String newItemId = '';
       String newLastItemId = '';
-      double newLastItemFillProgress = 0.0;
-      double newLastItemDrainProgress = 0.0;
-      DateTime? newLastItemDrainStartTime;
-      double? newLastItemDrainStartProgress;
+      int newItemFillCount = 0;
+      int newItemDrainCount = 0;
+      int newLastItemFillCount = 0;
+      int newLastItemDrainCount = 0;
+
+      // 继承源传送带的物品状态（加长断头传送带时）
+      if (sourceBelt != null) {
+        newItemId = sourceBelt.itemId;
+        newItemFillCount = sourceBelt.itemFillCount;
+        newItemDrainCount = sourceBelt.itemDrainCount;
+        // 源传送带的残留物品也继承
+        if (sourceBelt.lastItemFillCount > 0) {
+          newLastItemId = sourceBelt.lastItemId;
+          newLastItemFillCount = sourceBelt.lastItemFillCount;
+          newLastItemDrainCount = sourceBelt.lastItemDrainCount;
+        }
+      }
 
       if (_mergeTarget != null) {
         final mergeBelt = _mergeTarget!;
-        final offset = (newSegmentLength - 1).toDouble(); // 合并目标首格已包含在 fullPath 中
+        final offset = newSegmentLength - 1; // 合并目标首格已包含在 fullPath 中
 
         if (mergeBelt.itemId.isNotEmpty) {
           // 合并目标有当前物品 → 转为残留物品
           newLastItemId = mergeBelt.itemId;
-          newLastItemFillProgress = mergeBelt.itemFillProgress + offset;
-          newLastItemDrainProgress = mergeBelt.itemDrainProgress + offset;
-          newLastItemDrainStartTime = mergeBelt.itemDrainStartTime;
-          newLastItemDrainStartProgress = mergeBelt.itemDrainStartProgress;
-        } else if (mergeBelt.lastItemFillProgress > 0) {
+          newLastItemFillCount = mergeBelt.itemFillCount + offset;
+          newLastItemDrainCount = mergeBelt.itemDrainCount + offset;
+        } else if (mergeBelt.lastItemFillCount > 0) {
           // 合并目标已有残留物品 → 继承
           newLastItemId = mergeBelt.lastItemId;
-          newLastItemFillProgress = mergeBelt.lastItemFillProgress + offset;
-          newLastItemDrainProgress = mergeBelt.lastItemDrainProgress + offset;
-          newLastItemDrainStartTime = mergeBelt.lastItemDrainStartTime;
-          newLastItemDrainStartProgress = mergeBelt.lastItemDrainStartProgress;
+          newLastItemFillCount = mergeBelt.lastItemFillCount + offset;
+          newLastItemDrainCount = mergeBelt.lastItemDrainCount + offset;
         }
       }
 
@@ -278,15 +302,13 @@ class TransportBeltController {
         lastItemId: newLastItemId.isNotEmpty ? newLastItemId : null,
         isBlocked: false,
         incomingDirection: newBeltIncomingDir,
-        lastItemFillProgress: newLastItemFillProgress,
-        lastItemDrainProgress: newLastItemDrainProgress,
-        lastItemDrainStartTime: newLastItemDrainStartTime,
-        lastItemDrainStartProgress: newLastItemDrainStartProgress,
+        itemFillCount: newItemFillCount,
+        itemDrainCount: newItemDrainCount,
+        lastItemFillCount: newLastItemFillCount,
+        lastItemDrainCount: newLastItemDrainCount,
       );
 
       // 检查新传送带的起点是否在某条旧传送带的节点上，进行截断与拆分
-      // 使用 anchors.first（用户实际点击的位置）作为分叉点，而非 fullPath.first
-      final startCell = anchors.first;
       final toRemove = <ConveyorBelt>[];
       final toAdd = <ConveyorBelt>[];
 

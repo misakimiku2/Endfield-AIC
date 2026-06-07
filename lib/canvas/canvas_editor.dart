@@ -99,6 +99,13 @@ class CanvasEditorState extends State<CanvasEditor>
   // 记录最近一次 onPointerDown 是否为左键
   bool _lastPointerWasPrimary = false;
 
+  // 跟踪每个传送带的上一帧 itemId，用于检测 itemId 变化
+  final Map<String, String> _prevBeltItemIds = {};
+  final Map<String, String> _prevBeltLastItemIds = {};
+
+  // 传送带填充时钟：用于在 addListener 中检测 arrowProgress 跨零
+  double _prevArrowForTick = 0.0;
+
   // 重绘触发计数器，确保图片缓存清理后，即使其他属性不变，也能正常强制触发 CustomPainter 完成重绘
   int _repaintTrigger = 0;
 
@@ -152,6 +159,17 @@ class CanvasEditorState extends State<CanvasEditor>
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat();
+    // 监听 animation value 变化，检测跨零（完成一格传输）来触发传送带填充时钟滴答
+    _prevArrowForTick = _beltArrowController.value;
+    _beltArrowController.addListener(() {
+      final v = _beltArrowController.value;
+      // 跨零检测：从 >0.5 跳到 <0.5（即从 ~1.0 重置到 ~0.0）
+      if (_prevArrowForTick > 0.5 && v < 0.5) {
+        print('[BeltTick] cross-zero prev=${_prevArrowForTick.toStringAsFixed(6)} curr=${v.toStringAsFixed(6)} (belt clock tick)');
+        _onBeltTick();
+      }
+      _prevArrowForTick = v;
+    });
     _rebuildPortConnectionsCache();
     TransportBeltRenderer.init();
     TransportBeltRenderer.onItemImageReady = _forceRepaint;
@@ -161,6 +179,7 @@ class CanvasEditorState extends State<CanvasEditor>
     DepotAccessRenderer.init(onReady: () {
       _forceRepaint();
     });
+    print('[BeltTick] CanvasEditor initState complete, controller value=${_beltArrowController.value}');
   }
 
   @override
@@ -248,6 +267,142 @@ class CanvasEditorState extends State<CanvasEditor>
     }
 
     setState(() {});
+  }
+
+  /// 传送带物品填充时钟滴答：每次 arrowProgress 跨零时触发
+  /// 驱动所有传送带的 itemFillCount / itemDrainCount 增减
+  void _onBeltTick() {
+    final buildings = _project.buildings;
+    final items = widget.dataLoader.items;
+
+    // 跟踪本轮刚创建残留的传送带，避免同 tick 内立即排空
+    final justCreatedResidual = <String>{};
+
+    print('[BeltTick] _onBeltTick called, conveyors: ${_project.conveyors.length}');
+
+    for (final belt in _project.conveyors) {
+      if (belt.isBlocked) continue;
+      if (belt.path.isEmpty) continue;
+
+      final pathLen = belt.path.length;
+
+      // 检测是否是断头传送带（终点未连接设备输入端口）
+      final isDeadEnd = !TransportBeltRenderer.isInputPort(belt.path.last, buildings);
+
+      // 检测 itemId 变化：如果 itemId 从空变为非空，初始化 fillCount
+      final prevItemId = _prevBeltItemIds[belt.id] ?? '';
+      final prevLastItemId = _prevBeltLastItemIds[belt.id] ?? '';
+
+      print('[BeltTick] belt=${belt.id} id=${belt.id.hashCode.toRadixString(16)} '
+          'isDeadEnd=$isDeadEnd '
+          'itemId="${belt.itemId}" prevItemId="$prevItemId" '
+          'fill=$belt.itemFillCount drain=$belt.itemDrainCount pathLen=$pathLen '
+          'lastFill=$belt.lastItemFillCount lastDrain=$belt.lastItemDrainCount '
+          'lastId="${belt.lastItemId}"');
+
+      // 跟踪本轮是否刚初始化了 fillCount（跳过递增，让物品自然流出）
+      bool justInitialized = false;
+
+      if (belt.itemId.isNotEmpty && prevItemId.isEmpty) {
+        // 新的物品开始填充
+        // 如果 _applyTickResult 已初始化 fillCount（即时响应），保留其值
+        // 否则初始化为 1（手动创建的传送带可能已有 itemId）
+        if (belt.itemFillCount == 0) {
+          belt.itemFillCount = 1;
+          justInitialized = true;
+        }
+        belt.itemDrainCount = 0;
+      }
+      if (belt.itemId.isNotEmpty && prevItemId.isNotEmpty && belt.itemId != prevItemId) {
+        // 物品切换：旧物品变为残留
+        if (belt.itemFillCount > 0) {
+          belt.lastItemId = prevItemId;
+          belt.lastItemFillCount = belt.itemFillCount;
+          belt.lastItemDrainCount = 0;
+          justCreatedResidual.add(belt.id);
+        }
+        belt.itemFillCount = 0;
+        belt.itemDrainCount = 0;
+      }
+      if (belt.itemId.isEmpty && prevItemId.isNotEmpty) {
+        // 源断开：当前物品转为残留（如果还有）
+        if (belt.itemFillCount > 0) {
+          belt.lastItemId = prevItemId;
+          belt.lastItemFillCount = belt.itemFillCount;
+          belt.lastItemDrainCount = 0;
+          justCreatedResidual.add(belt.id);
+        }
+        belt.itemFillCount = 0;
+        belt.itemDrainCount = 0;
+      }
+
+      _prevBeltItemIds[belt.id] = belt.itemId;
+      _prevBeltLastItemIds[belt.id] = belt.lastItemId;
+
+      // 判断是否有源在生产
+      final item = items[belt.itemId];
+      final isProducing = item != null && belt.itemId.isNotEmpty;
+
+      // === 当前物品的填充/排空 ===
+      if (isProducing) {
+        // 源存在：每 tick 填充一格
+        // 当 itemId 首次出现时（justInitialized），跳过本次的递增，让物品自然流出
+        if (!justInitialized && belt.itemFillCount < pathLen) {
+          belt.itemFillCount++;
+        }
+        belt.itemDrainCount = 0;
+        // 有新产品进入，清除残留
+        if (belt.lastItemFillCount > 0) {
+          belt.lastItemFillCount = 0;
+          belt.lastItemDrainCount = 0;
+        }
+      } else if (belt.itemFillCount > 0 && !isDeadEnd) {
+        // 源断开 + 非断头传送带：每 tick 排空一格
+        if (belt.itemDrainCount < belt.itemFillCount) {
+          belt.itemDrainCount++;
+        }
+        if (belt.itemDrainCount >= belt.itemFillCount) {
+          belt.itemFillCount = 0;
+          belt.itemDrainCount = 0;
+        }
+      }
+      // 断头传送带 + 源断开：不排空当前物品，转为残留后"水龙头"模式流向末端
+      // （当前物品已被转为残留，见上面 itemId.isEmpty 的分支）
+
+      // === 残留物品的处理 ===
+      // 跳过本轮刚创建的残留，避免同 tick 内创建即操作
+      if (belt.lastItemFillCount > 0 && !isProducing && !justCreatedResidual.contains(belt.id)) {
+        if (isDeadEnd) {
+          // 断头传送带："关水龙头"模式 — 物品向末端流动并堆积
+          // fillCount 和 drainCount 同时前进，物品整体向右平移
+          // 当 fillCount 碰壁（达到 pathLen）后停止，物品堆积在末端
+          if (belt.lastItemFillCount < pathLen) {
+            // 尚未碰壁：整体向右平移一格
+            belt.lastItemFillCount++;
+            belt.lastItemDrainCount++;
+            print('[BeltTick] dead-end residual shift: fill=${belt.lastItemFillCount} drain=${belt.lastItemDrainCount}');
+          } else {
+            print('[BeltTick] dead-end residual at wall: fill=${belt.lastItemFillCount} (capped at $pathLen), frozen');
+          }
+          // 碰壁后不继续排空，物品停留在末端
+        } else {
+          // 非断头传送带：残留物品逐格排空（流入设备）
+          if (belt.lastItemDrainCount < belt.lastItemFillCount) {
+            belt.lastItemDrainCount++;
+            print('[BeltTick] connected residual drain: drain=${belt.lastItemDrainCount} fill=${belt.lastItemFillCount}');
+          }
+          if (belt.lastItemDrainCount >= belt.lastItemFillCount) {
+            belt.lastItemFillCount = 0;
+            belt.lastItemDrainCount = 0;
+            print('[BeltTick] connected residual fully drained');
+          }
+        }
+      }
+    }
+    // 确保重绘（当从 AnimationController listener 触发时，ticker 可能已暂停）
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void _startAnimation() {
@@ -553,19 +708,13 @@ class CanvasEditorState extends State<CanvasEditor>
           path: beforePath,
           itemId: belt.itemId,
           lastItemId: belt.lastItemId,
-          itemFillProgress: belt.itemFillProgress,
-          itemDrainProgress: belt.itemDrainProgress,
-          itemFillStartTime: belt.itemFillStartTime,
-          itemFillStartProgress: belt.itemFillStartProgress,
-          itemDrainStartTime: belt.itemDrainStartTime,
-          itemDrainStartProgress: belt.itemDrainStartProgress,
           isBlocked: belt.isBlocked,
           incomingDirection: belt.incomingDirection,
           forcedDirection: beforeForcedDir,
-          lastItemFillProgress: belt.lastItemFillProgress,
-          lastItemDrainProgress: belt.lastItemDrainProgress,
-          lastItemDrainStartTime: belt.lastItemDrainStartTime,
-          lastItemDrainStartProgress: belt.lastItemDrainStartProgress,
+          itemFillCount: math.min(belt.itemFillCount, beforePath.length),
+          itemDrainCount: math.min(belt.itemDrainCount, beforePath.length),
+          lastItemFillCount: math.min(belt.lastItemFillCount, beforePath.length),
+          lastItemDrainCount: math.min(belt.lastItemDrainCount, beforePath.length),
         ));
       }
 
@@ -594,23 +743,17 @@ class CanvasEditorState extends State<CanvasEditor>
           path: afterPath,
           itemId: belt.itemId,
           lastItemId: belt.lastItemId,
-          itemFillProgress: math.max(0.0, belt.itemFillProgress - (cellIndex + 1)),
-          itemDrainProgress: math.max(0.0, belt.itemDrainProgress - (cellIndex + 1)),
-          itemFillStartTime: belt.itemFillStartTime,
-          itemFillStartProgress: belt.itemFillStartProgress,
-          itemDrainStartTime: belt.itemDrainStartTime,
-          itemDrainStartProgress: belt.itemDrainStartProgress,
           isBlocked: belt.isBlocked,
           forcedDirection: forcedDir,
           incomingDirection: incomingDir,
-          lastItemFillProgress: belt.lastItemFillProgress > 0
-              ? math.max(0.0, belt.lastItemFillProgress - (cellIndex + 1))
-              : 0.0,
-          lastItemDrainProgress: belt.lastItemFillProgress > 0
-              ? math.max(0.0, belt.lastItemDrainProgress - (cellIndex + 1))
-              : 0.0,
-          lastItemDrainStartTime: belt.lastItemDrainStartTime,
-          lastItemDrainStartProgress: belt.lastItemDrainStartProgress,
+          itemFillCount: math.max(0, belt.itemFillCount - (cellIndex + 1)),
+          itemDrainCount: math.max(0, belt.itemDrainCount - (cellIndex + 1)),
+          lastItemFillCount: belt.lastItemFillCount > 0
+              ? math.max(0, belt.lastItemFillCount - (cellIndex + 1))
+              : 0,
+          lastItemDrainCount: belt.lastItemFillCount > 0
+              ? math.max(0, belt.lastItemDrainCount - (cellIndex + 1))
+              : 0,
         ));
       }
 
@@ -810,21 +953,21 @@ class CanvasEditorState extends State<CanvasEditor>
           final lostSource = start > 0 &&
               outputPortCells.contains('${belt.path[start - 1].dx.toInt()}_${belt.path[start - 1].dy.toInt()}');
 
-          // 计算该段内的 itemFillProgress（相对于段起始位置）
-          final segFillProgress = start == 0
-              ? belt.itemFillProgress
-              : math.max(0.0, belt.itemFillProgress - start);
-          final segDrainProgress = start == 0
-              ? belt.itemDrainProgress
-              : math.max(0.0, belt.itemDrainProgress - start);
-          final segLastFillProgress = start == 0
-              ? belt.lastItemFillProgress
-              : math.max(0.0, belt.lastItemFillProgress - start);
-          final segLastDrainProgress = start == 0
-              ? belt.lastItemFillProgress > 0
-                  ? math.max(0.0, belt.lastItemDrainProgress - start)
-                  : 0.0
-              : 0.0;
+          // 计算该段内的 itemFillCount（相对于段起始位置）
+          final segFillCount = start == 0
+              ? belt.itemFillCount
+              : math.max(0, belt.itemFillCount - start);
+          final segDrainCount = start == 0
+              ? belt.itemDrainCount
+              : math.max(0, belt.itemDrainCount - start);
+          final segLastFillCount = start == 0
+              ? belt.lastItemFillCount
+              : math.max(0, belt.lastItemFillCount - start);
+          final segLastDrainCount = start == 0
+              ? belt.lastItemFillCount > 0
+                  ? math.max(0, belt.lastItemDrainCount - start)
+                  : 0
+              : 0;
 
           if (lostSource && belt.itemId.isNotEmpty) {
             // 源断开：将当前物品状态转移到残留物品，清空当前物品
@@ -833,19 +976,13 @@ class CanvasEditorState extends State<CanvasEditor>
               path: segment,
               itemId: '',
               lastItemId: belt.itemId,
-              itemFillProgress: 0.0,
-              itemDrainProgress: 0.0,
-              itemFillStartTime: null,
-              itemFillStartProgress: null,
-              itemDrainStartTime: null,
-              itemDrainStartProgress: null,
+              itemFillCount: 0,
+              itemDrainCount: 0,
               isBlocked: belt.isBlocked,
               forcedDirection: forcedDir,
               incomingDirection: incomingDir,
-              lastItemFillProgress: segFillProgress,
-              lastItemDrainProgress: segDrainProgress,
-              lastItemDrainStartTime: belt.itemDrainStartTime,
-              lastItemDrainStartProgress: belt.itemDrainStartProgress,
+              lastItemFillCount: segFillCount,
+              lastItemDrainCount: segDrainCount,
             ));
           } else {
             toAdd.add(ConveyorBelt(
@@ -853,19 +990,13 @@ class CanvasEditorState extends State<CanvasEditor>
               path: segment,
               itemId: belt.itemId,
               lastItemId: belt.lastItemId,
-              itemFillProgress: segFillProgress,
-              itemDrainProgress: segDrainProgress,
-              itemFillStartTime: belt.itemFillStartTime,
-              itemFillStartProgress: belt.itemFillStartProgress,
-              itemDrainStartTime: belt.itemDrainStartTime,
-              itemDrainStartProgress: belt.itemDrainStartProgress,
+              itemFillCount: segFillCount,
+              itemDrainCount: segDrainCount,
               isBlocked: belt.isBlocked,
               forcedDirection: forcedDir,
               incomingDirection: incomingDir,
-              lastItemFillProgress: segLastFillProgress,
-              lastItemDrainProgress: segLastDrainProgress,
-              lastItemDrainStartTime: belt.lastItemDrainStartTime,
-              lastItemDrainStartProgress: belt.lastItemDrainStartProgress,
+              lastItemFillCount: segLastFillCount,
+              lastItemDrainCount: segLastDrainCount,
             ));
           }
         }
@@ -896,14 +1027,14 @@ class CanvasEditorState extends State<CanvasEditor>
         final lostSource = start > 0 &&
             outputPortCells.contains('${belt.path[start - 1].dx.toInt()}_${belt.path[start - 1].dy.toInt()}');
 
-        final segFillProgress = math.max(0.0, belt.itemFillProgress - start);
-        final segDrainProgress = math.max(0.0, belt.itemDrainProgress - start);
-        final segLastFillProgress = belt.lastItemFillProgress > 0
-            ? math.max(0.0, belt.lastItemFillProgress - start)
-            : 0.0;
-        final segLastDrainProgress = belt.lastItemFillProgress > 0
-            ? math.max(0.0, belt.lastItemDrainProgress - start)
-            : 0.0;
+        final segFillCount = math.max(0, belt.itemFillCount - start);
+        final segDrainCount = math.max(0, belt.itemDrainCount - start);
+        final segLastFillCount = belt.lastItemFillCount > 0
+            ? math.max(0, belt.lastItemFillCount - start)
+            : 0;
+        final segLastDrainCount = belt.lastItemFillCount > 0
+            ? math.max(0, belt.lastItemDrainCount - start)
+            : 0;
 
         if (lostSource && belt.itemId.isNotEmpty) {
           // 源断开：将当前物品状态转移到残留物品，清空当前物品
@@ -912,19 +1043,13 @@ class CanvasEditorState extends State<CanvasEditor>
             path: segment,
             itemId: '',
             lastItemId: belt.itemId,
-            itemFillProgress: 0.0,
-            itemDrainProgress: 0.0,
-            itemFillStartTime: null,
-            itemFillStartProgress: null,
-            itemDrainStartTime: null,
-            itemDrainStartProgress: null,
+            itemFillCount: 0,
+            itemDrainCount: 0,
             isBlocked: belt.isBlocked,
             forcedDirection: forcedDir,
             incomingDirection: incomingDir,
-            lastItemFillProgress: segFillProgress,
-            lastItemDrainProgress: segDrainProgress,
-            lastItemDrainStartTime: belt.itemDrainStartTime,
-            lastItemDrainStartProgress: belt.itemDrainStartProgress,
+            lastItemFillCount: segFillCount,
+            lastItemDrainCount: segDrainCount,
           ));
         } else {
           toAdd.add(ConveyorBelt(
@@ -932,19 +1057,13 @@ class CanvasEditorState extends State<CanvasEditor>
             path: segment,
             itemId: belt.itemId,
             lastItemId: belt.lastItemId,
-            itemFillProgress: segFillProgress,
-            itemDrainProgress: segDrainProgress,
-            itemFillStartTime: belt.itemFillStartTime,
-            itemFillStartProgress: belt.itemFillStartProgress,
-            itemDrainStartTime: belt.itemDrainStartTime,
-            itemDrainStartProgress: belt.itemDrainStartProgress,
+            itemFillCount: segFillCount,
+            itemDrainCount: segDrainCount,
             isBlocked: belt.isBlocked,
             forcedDirection: forcedDir,
             incomingDirection: incomingDir,
-            lastItemFillProgress: segLastFillProgress,
-            lastItemDrainProgress: segLastDrainProgress,
-            lastItemDrainStartTime: belt.lastItemDrainStartTime,
-            lastItemDrainStartProgress: belt.lastItemDrainStartProgress,
+            lastItemFillCount: segLastFillCount,
+            lastItemDrainCount: segLastDrainCount,
           ));
         }
       }
@@ -1393,10 +1512,15 @@ class _EditorPainter extends CustomPainter {
           }
         }
         if (forkIdx >= 0 && forkIdx < belt.path.length - 1) {
+          // 分叉点在中间：裁剪分叉点之后的路径段
           renderPath = belt.path.sublist(forkIdx + 1);
-        } else if (forkIdx >= 0) {
-          // 分叉点在末尾或之后，整条旧道被替代，不渲染
-          continue;
+        } else if (forkIdx >= 0 && forkIdx >= belt.path.length - 1) {
+          // 分叉点在末尾或之后：整条旧道被替代改为保留原样
+          // 当用户从传送带末尾格开始延伸时（forkIdx == path.length - 1），
+          // 传送带尚未被实际拆分，应继续渲染原传送带及其物品
+          renderPath = belt.path;
+        } else {
+          // 没有分叉：继续使用 renderPath
         }
       }
 
@@ -1406,8 +1530,8 @@ class _EditorPainter extends CustomPainter {
       }
       final effectiveItemId = belt.itemId.isNotEmpty ? belt.itemId : belt.lastItemId;
       final item = dataLoader.getItem(effectiveItemId);
-      // 残留物品：当 lastItemFillProgress > 0 且 lastItemId 与当前 itemId 不同时
-      final lastItem = belt.lastItemFillProgress > 0 && belt.lastItemId.isNotEmpty && belt.lastItemId != belt.itemId
+      // 残留物品：当 lastItemFillCount > 0 且 lastItemId 与当前 itemId 不同时
+      final lastItem = belt.lastItemFillCount > 0 && belt.lastItemId.isNotEmpty && belt.lastItemId != belt.itemId
           ? dataLoader.getItem(belt.lastItemId)
           : null;
       // 如果路径被裁剪，创建临时 ConveyorBelt 用于渲染
@@ -1433,23 +1557,21 @@ class _EditorPainter extends CustomPainter {
           path: renderPath,
           itemId: belt.itemId,
           lastItemId: belt.lastItemId,
-          itemFillProgress: belt.itemFillProgress,
-          itemFillStartTime: belt.itemFillStartTime,
-          itemFillStartProgress: belt.itemFillStartProgress,
-          itemDrainProgress: belt.itemDrainProgress,
-          itemDrainStartTime: belt.itemDrainStartTime,
-          itemDrainStartProgress: belt.itemDrainStartProgress,
+          itemFillCount: forkIdx >= 0
+              ? math.max(0, belt.itemFillCount - (forkIdx + 1))
+              : belt.itemFillCount,
+          itemDrainCount: forkIdx >= 0
+              ? math.max(0, belt.itemDrainCount - (forkIdx + 1))
+              : belt.itemDrainCount,
           isBlocked: belt.isBlocked,
           forcedDirection: forcedDir,
           incomingDirection: incomingDir,
-          lastItemFillProgress: belt.lastItemFillProgress > 0 && forkIdx >= 0
-              ? math.max(0.0, belt.lastItemFillProgress - (forkIdx + 1))
-              : belt.lastItemFillProgress,
-          lastItemDrainProgress: belt.lastItemFillProgress > 0 && forkIdx >= 0
-              ? math.max(0.0, belt.lastItemDrainProgress - (forkIdx + 1))
-              : belt.lastItemDrainProgress,
-          lastItemDrainStartTime: belt.lastItemDrainStartTime,
-          lastItemDrainStartProgress: belt.lastItemDrainStartProgress,
+          lastItemFillCount: belt.lastItemFillCount > 0 && forkIdx >= 0
+              ? math.max(0, belt.lastItemFillCount - (forkIdx + 1))
+              : belt.lastItemFillCount,
+          lastItemDrainCount: belt.lastItemFillCount > 0 && forkIdx >= 0
+              ? math.max(0, belt.lastItemDrainCount - (forkIdx + 1))
+              : belt.lastItemDrainCount,
         );
         TransportBeltRenderer.renderConveyorPath(canvas, clippedBelt, item, cellSize, project.buildings, detailLevel: detailLevel, arrowProgress: beltArrowController.value, lastItem: lastItem);
       } else {

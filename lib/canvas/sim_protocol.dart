@@ -143,26 +143,26 @@ class SimConveyorData {
   final List<Offset> path;
   final String itemId;
   final double flowProgress;
-  final double itemFillProgress;
-  final double itemDrainProgress;
+  final int itemFillCount;
+  final int itemDrainCount;
   final bool isBlocked;
   final String? forcedDirection;
   final String? incomingDirection;
-  final double lastItemFillProgress;
-  final double lastItemDrainProgress;
+  final int lastItemFillCount;
+  final int lastItemDrainCount;
 
   const SimConveyorData({
     required this.id,
     required this.path,
     required this.itemId,
     this.flowProgress = 0.0,
-    this.itemFillProgress = 0.0,
-    this.itemDrainProgress = 0.0,
+    this.itemFillCount = 0,
+    this.itemDrainCount = 0,
     this.isBlocked = false,
     this.forcedDirection,
     this.incomingDirection,
-    this.lastItemFillProgress = 0.0,
-    this.lastItemDrainProgress = 0.0,
+    this.lastItemFillCount = 0,
+    this.lastItemDrainCount = 0,
   });
 
   Map<String, dynamic> toJson() => {
@@ -170,13 +170,13 @@ class SimConveyorData {
         'path': path.map((p) => {'x': p.dx, 'y': p.dy}).toList(),
         'itemId': itemId,
         'flowProgress': flowProgress,
-        'itemFillProgress': itemFillProgress,
-        'itemDrainProgress': itemDrainProgress,
+        'itemFillCount': itemFillCount,
+        'itemDrainCount': itemDrainCount,
         'isBlocked': isBlocked,
         'forcedDirection': forcedDirection,
         'incomingDirection': incomingDirection,
-        'lastItemFillProgress': lastItemFillProgress,
-        'lastItemDrainProgress': lastItemDrainProgress,
+        'lastItemFillCount': lastItemFillCount,
+        'lastItemDrainCount': lastItemDrainCount,
       };
 
   factory SimConveyorData.fromJson(Map<String, dynamic> json) => SimConveyorData(
@@ -186,13 +186,13 @@ class SimConveyorData {
             .toList(),
         itemId: json['itemId'] as String? ?? '',
         flowProgress: (json['flowProgress'] as num?)?.toDouble() ?? 0.0,
-        itemFillProgress: (json['itemFillProgress'] as num?)?.toDouble() ?? 0.0,
-        itemDrainProgress: (json['itemDrainProgress'] as num?)?.toDouble() ?? 0.0,
+        itemFillCount: (json['itemFillCount'] as num?)?.toInt() ?? 0,
+        itemDrainCount: (json['itemDrainCount'] as num?)?.toInt() ?? 0,
         isBlocked: json['isBlocked'] as bool? ?? false,
         forcedDirection: json['forcedDirection'] as String?,
         incomingDirection: json['incomingDirection'] as String?,
-        lastItemFillProgress: (json['lastItemFillProgress'] as num?)?.toDouble() ?? 0.0,
-        lastItemDrainProgress: (json['lastItemDrainProgress'] as num?)?.toDouble() ?? 0.0,
+        lastItemFillCount: (json['lastItemFillCount'] as num?)?.toInt() ?? 0,
+        lastItemDrainCount: (json['lastItemDrainCount'] as num?)?.toInt() ?? 0,
       );
 }
 
@@ -300,43 +300,43 @@ class SimConveyorResult {
   final String id;
   final String itemId;
   final double flowProgress;
-  final double itemFillProgress;
-  final double itemDrainProgress;
+  final int itemFillCount;
+  final int itemDrainCount;
   final bool isBlocked;
-  final double lastItemFillProgress;
-  final double lastItemDrainProgress;
+  final int lastItemFillCount;
+  final int lastItemDrainCount;
 
   const SimConveyorResult({
     required this.id,
     required this.itemId,
     required this.flowProgress,
-    required this.itemFillProgress,
-    required this.itemDrainProgress,
+    required this.itemFillCount,
+    required this.itemDrainCount,
     required this.isBlocked,
-    this.lastItemFillProgress = 0.0,
-    this.lastItemDrainProgress = 0.0,
+    this.lastItemFillCount = 0,
+    this.lastItemDrainCount = 0,
   });
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'itemId': itemId,
         'flowProgress': flowProgress,
-        'itemFillProgress': itemFillProgress,
-        'itemDrainProgress': itemDrainProgress,
+        'itemFillCount': itemFillCount,
+        'itemDrainCount': itemDrainCount,
         'isBlocked': isBlocked,
-        'lastItemFillProgress': lastItemFillProgress,
-        'lastItemDrainProgress': lastItemDrainProgress,
+        'lastItemFillCount': lastItemFillCount,
+        'lastItemDrainCount': lastItemDrainCount,
       };
 
   factory SimConveyorResult.fromJson(Map<String, dynamic> json) => SimConveyorResult(
         id: json['id'] as String,
         itemId: json['itemId'] as String? ?? '',
         flowProgress: (json['flowProgress'] as num?)?.toDouble() ?? 0.0,
-        itemFillProgress: (json['itemFillProgress'] as num?)?.toDouble() ?? 0.0,
-        itemDrainProgress: (json['itemDrainProgress'] as num?)?.toDouble() ?? 0.0,
+        itemFillCount: (json['itemFillCount'] as num?)?.toInt() ?? 0,
+        itemDrainCount: (json['itemDrainCount'] as num?)?.toInt() ?? 0,
         isBlocked: json['isBlocked'] as bool? ?? false,
-        lastItemFillProgress: (json['lastItemFillProgress'] as num?)?.toDouble() ?? 0.0,
-        lastItemDrainProgress: (json['lastItemDrainProgress'] as num?)?.toDouble() ?? 0.0,
+        lastItemFillCount: (json['lastItemFillCount'] as num?)?.toInt() ?? 0,
+        lastItemDrainCount: (json['lastItemDrainCount'] as num?)?.toInt() ?? 0,
       );
 }
 
