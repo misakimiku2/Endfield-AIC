@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../models/project.dart';
 import '../../models/item.dart';
-import '../../models/building.dart';
 
 class TransportBeltRenderer {
   static const double _cellMargin = 3.0;
@@ -49,7 +48,8 @@ class TransportBeltRenderer {
       final gw = pb.building.gridWidth;
       final gh = pb.building.gridHeight;
       for (final port in pb.outputPorts) {
-        final portGrid = port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
+        final portGrid =
+            port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
         if (portGrid.dx.round() == gx && portGrid.dy.round() == gy) {
           return true;
         }
@@ -67,7 +67,8 @@ class TransportBeltRenderer {
       final gw = pb.building.gridWidth;
       final gh = pb.building.gridHeight;
       for (final port in pb.inputPorts) {
-        final portGrid = port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
+        final portGrid =
+            port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
         if (portGrid.dx.round() == gx && portGrid.dy.round() == gy) {
           return true;
         }
@@ -111,7 +112,8 @@ class TransportBeltRenderer {
     // 情况 1：起点 — 裁剪入方向的反侧
     if (actualIndex == 0) {
       // 优先使用 incomingDirection（转角首格），否则从路径推断出方向再取反侧
-      final dir = incomingDirection ?? _getCellDirection(actualPath, actualIndex);
+      final dir =
+          incomingDirection ?? _getCellDirection(actualPath, actualIndex);
       final isPort = isOutputPort(cell, buildings);
       switch (dir) {
         case 'right':
@@ -150,7 +152,10 @@ class TransportBeltRenderer {
       }
     }
 
-    if (clipLeft == -10000 && clipRight == 10000 && clipTop == -10000 && clipBottom == 10000) {
+    if (clipLeft == -10000 &&
+        clipRight == 10000 &&
+        clipTop == -10000 &&
+        clipBottom == 10000) {
       return null;
     }
 
@@ -223,8 +228,10 @@ class TransportBeltRenderer {
 
     try {
       // 1. 加载原始 SVG 字符串
-      final moveStr = await rootBundle.loadString('assets/svg/Transport_Belt_Move.svg');
-      final rotateStr = await rootBundle.loadString('assets/svg/Transport_Belt_rotate.svg');
+      final moveStr =
+          await rootBundle.loadString('assets/svg/Transport_Belt_Move.svg');
+      final rotateStr =
+          await rootBundle.loadString('assets/svg/Transport_Belt_rotate.svg');
 
       // 2. 生成蓝色预览 SVG 字符串
       final moveBlueStr = _makePreviewSvg(moveStr, '#44AAFF');
@@ -235,8 +242,10 @@ class TransportBeltRenderer {
       final rotateRedStr = _makePreviewSvg(rotateStr, '#FF4444');
 
       final results = await Future.wait([
-        vg.loadPicture(const SvgAssetLoader('assets/svg/Transport_Belt_Move.svg'), null),
-        vg.loadPicture(const SvgAssetLoader('assets/svg/Transport_Belt_rotate.svg'), null),
+        vg.loadPicture(
+            const SvgAssetLoader('assets/svg/Transport_Belt_Move.svg'), null),
+        vg.loadPicture(
+            const SvgAssetLoader('assets/svg/Transport_Belt_rotate.svg'), null),
         vg.loadPicture(SvgStringLoader(moveBlueStr), null),
         vg.loadPicture(SvgStringLoader(rotateBlueStr), null),
         vg.loadPicture(SvgStringLoader(moveRedStr), null),
@@ -268,7 +277,10 @@ class TransportBeltRenderer {
 
   /// 异步加载物品 PNG 图片并缓存
   static Future<void> _loadItemImage(String assetPath) async {
-    if (_itemImageCache.containsKey(assetPath) || _itemImageLoading.contains(assetPath)) return;
+    if (_itemImageCache.containsKey(assetPath) ||
+        _itemImageLoading.contains(assetPath)) {
+      return;
+    }
     _itemImageLoading.add(assetPath);
     try {
       final data = await rootBundle.load(assetPath);
@@ -341,16 +353,20 @@ class TransportBeltRenderer {
   /// 判断格子是直线段还是转弯点
   /// 返回 (isTurn, incomingDir, outgoingDir, isCounterClockwise)
   static (bool, String, String, bool) _getCellTurnInfo(
-      List<Offset> path, int index, {String? incomingDirection, String? forcedDirection}) {
+      List<Offset> path, int index,
+      {String? incomingDirection, String? forcedDirection}) {
     if (path.length == 1) {
-      if (incomingDirection != null && forcedDirection != null && incomingDirection != forcedDirection) {
+      if (incomingDirection != null &&
+          forcedDirection != null &&
+          incomingDirection != forcedDirection) {
         final inIdx = _directionToIndex(incomingDirection);
         final outIdx = _directionToIndex(forcedDirection);
         final diff = (outIdx - inIdx + 4) % 4;
         final isCCW = diff == 3;
         return (true, incomingDirection, forcedDirection, isCCW);
       }
-      final dir = _getCellDirection(path, index, forcedDirection: forcedDirection);
+      final dir =
+          _getCellDirection(path, index, forcedDirection: forcedDirection);
       return (false, dir, dir, false);
     }
 
@@ -369,7 +385,8 @@ class TransportBeltRenderer {
         final isCCW = diff == 3;
         return (true, incomingDirection, outgoingDir, isCCW);
       }
-      final dir = _getCellDirection(path, index, forcedDirection: forcedDirection);
+      final dir =
+          _getCellDirection(path, index, forcedDirection: forcedDirection);
       return (false, dir, dir, false);
     }
 
@@ -384,7 +401,8 @@ class TransportBeltRenderer {
         final isCCW = diff == 3;
         return (true, incomingDir, forcedDirection, isCCW);
       }
-      final dir = _getCellDirection(path, index, forcedDirection: forcedDirection);
+      final dir =
+          _getCellDirection(path, index, forcedDirection: forcedDirection);
       return (false, dir, dir, false);
     }
 
@@ -418,79 +436,163 @@ class TransportBeltRenderer {
     int detailLevel = 2,
     double arrowProgress = 0.0,
     Item? lastItem,
+    Map<String, Item>? allItems,
   }) {
     if (belt.path.isEmpty) return;
-
-    final isProducing = item != null && belt.itemId.isNotEmpty;
-    final isFlowing = !belt.isBlocked;
 
     // 检测是否是断头传送带（终点未连接设备输入端口）
     final isDeadEnd = !isInputPort(belt.path.last, buildings);
 
+    belt.ensureItemSegmentsFromLegacy();
+
     final hasItemImage = item != null && item.imageAssetPath.isNotEmpty;
-    final itemImage = hasItemImage ? _itemImageCache[item.imageAssetPath] : null;
+    final itemImage =
+        hasItemImage ? _itemImageCache[item.imageAssetPath] : null;
 
     // 残留物品图片
-    final hasLastItemImage = lastItem != null && lastItem.imageAssetPath.isNotEmpty;
-    final lastItemImage = hasLastItemImage ? _itemImageCache[lastItem.imageAssetPath] : null;
+    final hasLastItemImage =
+        lastItem != null && lastItem.imageAssetPath.isNotEmpty;
+    final lastItemImage =
+        hasLastItemImage ? _itemImageCache[lastItem.imageAssetPath] : null;
 
-    // 新模型：纯粹基于 itemFillCount/itemDrainCount 整数计数
-    // 填充/排空逻辑由 canvas_editor.dart 中 _onTick 的跨零检测驱动
-    final effectiveFillCount = belt.itemFillCount.clamp(0, belt.path.length);
-    final effectiveDrainCount = belt.itemDrainCount.clamp(0, belt.path.length);
-    final effectiveLastFillCount = belt.lastItemFillCount.clamp(0, belt.path.length);
-    final effectiveLastDrainCount = belt.lastItemDrainCount.clamp(0, belt.path.length);
+    final renderSegments = belt.itemSegments
+        .where((segment) => segment.hasItems)
+        .map((segment) => ConveyorItemSegment(
+              itemId: segment.itemId,
+              fillCount: segment.fillCount.clamp(0, belt.path.length).toInt(),
+              drainCount: segment.drainCount.clamp(0, belt.path.length).toInt(),
+              freezeProgress: segment.freezeProgress,
+            ))
+        .toList()
+      ..sort((a, b) => a.drainCount.compareTo(b.drainCount));
+
+    final segmentImages = <String, ui.Image?>{};
+    for (final segment in renderSegments) {
+      final dataItem = allItems?[segment.itemId] ??
+          (segment.itemId == belt.itemId
+              ? item
+              : (segment.itemId == belt.lastItemId ? lastItem : null));
+      final imagePath = dataItem?.imageAssetPath;
+      segmentImages[segment.itemId] = imagePath != null && imagePath.isNotEmpty
+          ? _itemImageCache[imagePath]
+          : null;
+    }
 
     // === 断头传送带满载时冻结 arrowProgress ===
-    // 当物品填满了断头传送带，停止物品动画（物品冻结在终点）
-    // 如果之后传送带被加长，冻结自动解除（deadEndFreezeProgress 被清空）
-    // 当前物品或残留物品任意一方填满整条传送带即可触发冻结
-    // （源断开后当前物品转为残留，effectiveFillCount 变为 0 但 lastFill 仍为满）
-    final currentFull = effectiveFillCount >= belt.path.length;
-    final lastFull = effectiveLastFillCount >= belt.path.length;
-    final allFilled = currentFull || lastFull;
-    final bool shouldFreeze = isDeadEnd && allFilled;
+    // 队列段优先：每一段抵达它前方的阻挡位置后单独冻结，避免 B→A
+    // 这类多物品队列在断源或重连时重新播放一小段移动动画。
+    if (renderSegments.isNotEmpty) {
+      final sourceSegments = belt.itemSegments
+          .where((segment) => segment.hasItems)
+          .toList()
+        ..sort((a, b) => a.drainCount.compareTo(b.drainCount));
+      for (int i = renderSegments.length - 1; i >= 0; i--) {
+        final segment = renderSegments[i];
+        final limit = i + 1 < renderSegments.length
+            ? renderSegments[i + 1].drainCount.clamp(0, belt.path.length)
+            : belt.path.length;
+        final shouldFreezeSegment = isDeadEnd && segment.fillCount >= limit;
+        final sourceSegment =
+            i < sourceSegments.length ? sourceSegments[i] : segment;
+        if (shouldFreezeSegment && sourceSegment.freezeProgress == null) {
+          sourceSegment.freezeProgress = -1.0;
+        }
+        if (shouldFreezeSegment && sourceSegment.freezeProgress == -1.0) {
+          if (arrowProgress >= 0.5) {
+            sourceSegment.freezeProgress = 0.5;
+          }
+        }
+        if (!shouldFreezeSegment && sourceSegment.freezeProgress != null) {
+          sourceSegment.freezeProgress = null;
+        }
+        segment.freezeProgress = sourceSegment.freezeProgress;
+      }
+      belt.syncLegacyFromSegments();
+    }
 
-    if (shouldFreeze && belt.deadEndFreezeProgress == null) {
+    final currentFillLimit =
+        belt.currentItemFillLimit.clamp(0, belt.path.length);
+    final currentFull = currentFillLimit > 0 &&
+        belt.itemFillCount.clamp(0, belt.path.length) >= currentFillLimit;
+    final lastFull =
+        belt.lastItemFillCount.clamp(0, belt.path.length) >= belt.path.length;
+    final bool shouldFreezeCurrent =
+        isDeadEnd && currentFull && renderSegments.isEmpty;
+    final bool shouldFreezeLast =
+        isDeadEnd && lastFull && renderSegments.isEmpty;
+
+    if (shouldFreezeCurrent && belt.deadEndFreezeProgress == null) {
       // 刚达到满载：不立即冻结。设置为 -1.0 表示 "等待自然到位"
       // 渲染时会继续用实时 arrowProgress，直到物品移动到末端再冻结
       belt.deadEndFreezeProgress = -1.0;
-      print('[Freeze] belt ${belt.id} pending freeze (waiting for arrow to reach exit edge)');
+      print('[Freeze] belt ${belt.id} current pending freeze');
     }
-    if (shouldFreeze && belt.deadEndFreezeProgress == -1.0) {
-      // 等待 arrowProgress 到达出口边缘（> 0.95）时冻结
-      if (arrowProgress > 0.95) {
-        belt.deadEndFreezeProgress = 1.0;
-        print('[Freeze] belt ${belt.id} frozen at arrowProgress=1.0');
+    if (shouldFreezeCurrent && belt.deadEndFreezeProgress == -1.0) {
+      // Wait until the leading item reaches the center of the final belt cell.
+      // Freezing at the exit edge (1.0) clips half of the item outside a dead end.
+      if (arrowProgress >= 0.5) {
+        belt.deadEndFreezeProgress = 0.5;
+        print('[Freeze] belt ${belt.id} current frozen at arrowProgress=0.5');
       }
     }
-    if (!shouldFreeze && belt.deadEndFreezeProgress != null) {
+    if (!shouldFreezeCurrent && belt.deadEndFreezeProgress != null) {
       // 不再满载（如被加长或源断开排空）：清除冻结值
       belt.deadEndFreezeProgress = null;
-      print('[Freeze] belt ${belt.id} unfrozen');
+      print('[Freeze] belt ${belt.id} current unfrozen');
     }
 
-    // 冻结中（-1.0 表示等待到位，仍用实时 arrowProgress）
-    final effectiveArrowProgress = (shouldFreeze && belt.deadEndFreezeProgress != null && belt.deadEndFreezeProgress! > 0)
+    if (shouldFreezeLast && belt.lastItemFreezeProgress == null) {
+      belt.lastItemFreezeProgress = -1.0;
+      print('[Freeze] belt ${belt.id} last pending freeze');
+    }
+    if (shouldFreezeLast && belt.lastItemFreezeProgress == -1.0) {
+      if (arrowProgress >= 0.5) {
+        belt.lastItemFreezeProgress = 0.5;
+        print('[Freeze] belt ${belt.id} last frozen at arrowProgress=0.5');
+      }
+    }
+    if (!shouldFreezeLast && belt.lastItemFreezeProgress != null) {
+      belt.lastItemFreezeProgress = null;
+      print('[Freeze] belt ${belt.id} last unfrozen');
+    }
+
+    final effectiveArrowProgress = (shouldFreezeCurrent &&
+            belt.deadEndFreezeProgress != null &&
+            belt.deadEndFreezeProgress! > 0)
         ? belt.deadEndFreezeProgress!
+        : arrowProgress;
+    final effectiveLastArrowProgress = (shouldFreezeLast &&
+            belt.lastItemFreezeProgress != null &&
+            belt.lastItemFreezeProgress! > 0)
+        ? belt.lastItemFreezeProgress!
         : arrowProgress;
 
     if (isReady) {
-      _renderWithSvg(canvas, belt.path, cellSize, buildings,
+      _renderWithSvg(
+        canvas,
+        belt.path,
+        cellSize,
+        buildings,
         forcedDirection: belt.forcedDirection,
         incomingDirection: belt.incomingDirection,
         arrowProgress: effectiveArrowProgress,
+        lastArrowProgress: effectiveLastArrowProgress,
         itemImage: itemImage,
-        itemFillCount: effectiveFillCount,
-        itemDrainCount: effectiveDrainCount,
+        itemFillCount: belt.itemFillCount.clamp(0, belt.path.length).toInt(),
+        itemDrainCount: belt.itemDrainCount.clamp(0, belt.path.length).toInt(),
         lastItemImage: lastItemImage,
-        lastItemFillCount: effectiveLastFillCount,
-        lastItemDrainCount: effectiveLastDrainCount,
+        lastItemFillCount:
+            belt.lastItemFillCount.clamp(0, belt.path.length).toInt(),
+        lastItemDrainCount:
+            belt.lastItemDrainCount.clamp(0, belt.path.length).toInt(),
+        itemSegments: renderSegments,
+        segmentImages: segmentImages,
       );
     } else {
       for (int i = 0; i < belt.path.length; i++) {
         final cell = belt.path[i];
-        final direction = _getCellDirection(belt.path, i, forcedDirection: belt.forcedDirection);
+        final direction = _getCellDirection(belt.path, i,
+            forcedDirection: belt.forcedDirection);
         final cx = cell.dx * cellSize + cellSize / 2;
         final cy = cell.dy * cellSize + cellSize / 2;
         final localClip = getLocalClipRect(
@@ -516,16 +618,35 @@ class TransportBeltRenderer {
     }
 
     // LOD 2: 无物品图片时回退到粒子动画
-    if (detailLevel >= 2 && item != null && (effectiveFillCount > effectiveDrainCount) && itemImage == null) {
-      _renderParticles(canvas, belt, item!, cellSize, buildings);
+    if (detailLevel >= 2 &&
+        item != null &&
+        (belt.itemFillCount > belt.itemDrainCount) &&
+        itemImage == null) {
+      _renderParticles(canvas, belt, item, cellSize, buildings);
     }
 
     // 触发图片异步加载
-    if (hasItemImage && itemImage == null && !_itemImageLoading.contains(item!.imageAssetPath)) {
-      _loadItemImage(item!.imageAssetPath);
+    if (hasItemImage &&
+        itemImage == null &&
+        !_itemImageLoading.contains(item.imageAssetPath)) {
+      _loadItemImage(item.imageAssetPath);
     }
-    if (hasLastItemImage && lastItemImage == null && !_itemImageLoading.contains(lastItem!.imageAssetPath)) {
-      _loadItemImage(lastItem!.imageAssetPath);
+    if (hasLastItemImage &&
+        lastItemImage == null &&
+        !_itemImageLoading.contains(lastItem.imageAssetPath)) {
+      _loadItemImage(lastItem.imageAssetPath);
+    }
+    if (allItems != null) {
+      for (final segment in renderSegments) {
+        final segmentItem = allItems[segment.itemId];
+        final imagePath = segmentItem?.imageAssetPath;
+        if (imagePath != null &&
+            imagePath.isNotEmpty &&
+            !_itemImageCache.containsKey(imagePath) &&
+            !_itemImageLoading.contains(imagePath)) {
+          _loadItemImage(imagePath);
+        }
+      }
     }
 
     if (belt.isBlocked && belt.path.isNotEmpty) {
@@ -544,12 +665,15 @@ class TransportBeltRenderer {
     String? forcedDirection,
     String? incomingDirection,
     double arrowProgress = 0.0,
+    double? lastArrowProgress,
     ui.Image? itemImage,
     int itemFillCount = 0,
     int itemDrainCount = 0,
     ui.Image? lastItemImage,
     int lastItemFillCount = 0,
     int lastItemDrainCount = 0,
+    List<ConveyorItemSegment>? itemSegments,
+    Map<String, ui.Image?>? segmentImages,
   }) {
     // 第一次绘制：只绘制背景（传送带）
     for (int i = 0; i < path.length; i++) {
@@ -575,7 +699,10 @@ class TransportBeltRenderer {
       }
 
       _drawSvgCellAtOrigin(
-        canvas, path, i, cellSize,
+        canvas,
+        path,
+        i,
+        cellSize,
         fullPathContext: fullPathContext,
         contextStartIndex: contextStartIndex,
         forcedDirection: forcedDirection,
@@ -598,17 +725,45 @@ class TransportBeltRenderer {
     final int drainCount = itemDrainCount.clamp(0, path.length);
     final int lastFillCount = lastItemFillCount.clamp(0, path.length);
     final int lastDrainCount = lastItemDrainCount.clamp(0, path.length);
+    final lastProgress = lastArrowProgress ?? arrowProgress;
+    final segments = itemSegments?.where((segment) => segment.hasItems).toList()
+      ?..sort((a, b) => a.drainCount.compareTo(b.drainCount));
 
     for (int i = 0; i < path.length; i++) {
       final cell = path[i];
       final cx = cell.dx * cellSize + cellSize / 2;
       final cy = cell.dy * cellSize + cellSize / 2;
 
-      // 判断当前格子的物品状态：当前物品优先，其次残留物品，最后指针
-      // 新模型：纯整数比较，物品位置由 arrowProgress 统一驱动
-      final cellCurrentFilled = itemImage != null && i >= drainCount && i < fillCount;
-      final cellLastFilled = !cellCurrentFilled && lastItemImage != null && i >= lastDrainCount && i < lastFillCount;
-      final cellItemImage = cellCurrentFilled ? itemImage : (cellLastFilled ? lastItemImage : null);
+      ui.Image? cellItemImage;
+      double cellArrowProgress = arrowProgress;
+      if (segments != null && segments.isNotEmpty) {
+        for (int j = segments.length - 1; j >= 0; j--) {
+          final segment = segments[j];
+          final segmentDrain = segment.drainCount.clamp(0, path.length);
+          final segmentFill = segment.fillCount.clamp(0, path.length);
+          if (i >= segmentDrain && i < segmentFill) {
+            cellItemImage = segmentImages?[segment.itemId];
+            final frozen = segment.freezeProgress;
+            if (frozen != null && frozen > 0) {
+              cellArrowProgress = frozen;
+            }
+            break;
+          }
+        }
+      } else {
+        // 判断当前格子的物品状态：当前物品优先，其次残留物品，最后指针
+        // 新模型：纯整数比较，物品位置由 arrowProgress 统一驱动
+        final cellLastFilled =
+            lastItemImage != null && i >= lastDrainCount && i < lastFillCount;
+        final cellCurrentFilled = !cellLastFilled &&
+            itemImage != null &&
+            i >= drainCount &&
+            i < fillCount;
+        cellItemImage = cellLastFilled
+            ? lastItemImage
+            : (cellCurrentFilled ? itemImage : null);
+        cellArrowProgress = cellLastFilled ? lastProgress : arrowProgress;
+      }
 
       canvas.save();
       canvas.translate(cx, cy);
@@ -628,12 +783,15 @@ class TransportBeltRenderer {
       }
 
       _drawSvgCellAtOrigin(
-        canvas, path, i, cellSize,
+        canvas,
+        path,
+        i,
+        cellSize,
         fullPathContext: fullPathContext,
         contextStartIndex: contextStartIndex,
         forcedDirection: forcedDirection,
         incomingDirection: incomingDirection,
-        arrowProgress: arrowProgress,
+        arrowProgress: cellArrowProgress,
         drawBackground: false,
         drawPointer: true,
         itemImage: cellItemImage,
@@ -760,7 +918,8 @@ class TransportBeltRenderer {
     canvas.drawPath(path, paint);
   }
 
-  static String _getCellDirection(List<Offset> path, int index, {String? forcedDirection}) {
+  static String _getCellDirection(List<Offset> path, int index,
+      {String? forcedDirection}) {
     if (forcedDirection != null && path.length == 1) return forcedDirection;
     if (index < path.length - 1) {
       final dx = path[index + 1].dx - path[index].dx;
@@ -792,7 +951,8 @@ class TransportBeltRenderer {
     if (totalLength <= 0) return;
 
     final particlePaint = Paint()..color = item.color;
-    final particleCount = (totalLength / _particleSpacing).floor().clamp(1, 200);
+    final particleCount =
+        (totalLength / _particleSpacing).floor().clamp(1, 200);
     final flowOffset = belt.flowProgress * _particleSpacing;
 
     for (int i = 0; i < particleCount; i++) {
@@ -823,12 +983,14 @@ class TransportBeltRenderer {
     );
   }
 
-  static void _renderBlockedIndicator(Canvas canvas, Offset cell, double cellSize) {
+  static void _renderBlockedIndicator(
+      Canvas canvas, Offset cell, double cellSize) {
     final cx = cell.dx * cellSize + cellSize / 2;
     final cy = cell.dy * cellSize + cellSize / 2;
     final pos = Offset(cx, cy);
 
-    canvas.drawCircle(pos, _particleSize * 2, Paint()..color = const Color(0xFFFF3333));
+    canvas.drawCircle(
+        pos, _particleSize * 2, Paint()..color = const Color(0xFFFF3333));
 
     final crossPaint = Paint()
       ..color = const Color(0xFFFFFFFF)
@@ -861,14 +1023,21 @@ class TransportBeltRenderer {
     if (path.isEmpty) return;
 
     if (isReady) {
-      _renderPreviewWithSvg(canvas, path, cellSize, occupiedKeys, buildings, isInvalid: isInvalid, fullPathContext: fullPathContext, contextStartIndex: contextStartIndex, forcedDirection: forcedDirection, incomingDirection: incomingDirection);
+      _renderPreviewWithSvg(canvas, path, cellSize, occupiedKeys, buildings,
+          isInvalid: isInvalid,
+          fullPathContext: fullPathContext,
+          contextStartIndex: contextStartIndex,
+          forcedDirection: forcedDirection,
+          incomingDirection: incomingDirection);
     } else {
-      _renderPreviewLegacy(canvas, path, cellSize, occupiedKeys, buildings, isInvalid: isInvalid);
+      _renderPreviewLegacy(canvas, path, cellSize, occupiedKeys, buildings,
+          isInvalid: isInvalid);
     }
   }
 
   /// 判断是否是转弯点
-  static bool _isTurn(List<Offset> path, int index, {String? incomingDirection}) {
+  static bool _isTurn(List<Offset> path, int index,
+      {String? incomingDirection}) {
     if (index == 0) {
       // 首格：如果有 incomingDirection 且路径有后继，检查入方向与出方向是否不同
       if (incomingDirection != null && index < path.length - 1) {
@@ -890,7 +1059,8 @@ class TransportBeltRenderer {
   }
 
   /// 获取对应的 SVG 画卷
-  static PictureInfo _getPicture({bool isTurn = false, bool isBlue = false, bool isRed = false}) {
+  static PictureInfo _getPicture(
+      {bool isTurn = false, bool isBlue = false, bool isRed = false}) {
     if (isTurn) {
       if (isBlue) return _rotateBluePicture!;
       if (isRed) return _rotateRedPicture!;
@@ -989,8 +1159,9 @@ class TransportBeltRenderer {
       turnIndex = contextStartIndex + index;
     }
 
-    final (isTurn, _, outgoingDir, isCCW) =
-        _getCellTurnInfo(turnPath, turnIndex, incomingDirection: incomingDirection, forcedDirection: forcedDirection);
+    final (isTurn, _, outgoingDir, isCCW) = _getCellTurnInfo(
+        turnPath, turnIndex,
+        incomingDirection: incomingDirection, forcedDirection: forcedDirection);
 
     final PictureInfo picture;
     if (isPreview) {
@@ -1032,7 +1203,8 @@ class TransportBeltRenderer {
         canvas.drawPicture(picture.picture);
         canvas.restore();
       } else {
-        final direction = _getCellDirection(turnPath, turnIndex, forcedDirection: forcedDirection);
+        final direction = _getCellDirection(turnPath, turnIndex,
+            forcedDirection: forcedDirection);
         final dirIdx = _directionToIndex(direction);
         final rotation = dirIdx * math.pi / 2;
 
@@ -1049,12 +1221,16 @@ class TransportBeltRenderer {
     // - 有 itemImage 时总是画物品（不受 drawPointer 影响）
     // - 无 itemImage 且 drawPointer=true 时画指针
     // 这确保物品一旦出现就不会因为 drawPointer 标志而被意外隐藏
-    if (!isPreview && (itemImage != null || (drawPointer && _pointerPicture != null))) {
+    if (!isPreview &&
+        (itemImage != null || (drawPointer && _pointerPicture != null))) {
       canvas.save();
 
       void drawItemAt(double pProgress) {
         if (isTurn) {
-          final (_, inDir, outDir, isCCW) = _getCellTurnInfo(turnPath, turnIndex, incomingDirection: incomingDirection, forcedDirection: forcedDirection);
+          final (_, inDir, outDir, isCCW) = _getCellTurnInfo(
+              turnPath, turnIndex,
+              incomingDirection: incomingDirection,
+              forcedDirection: forcedDirection);
           double eX = 0, eY = 0;
           if (inDir == 'up') eY = 0.5;
           if (inDir == 'down') eY = -0.5;
@@ -1088,8 +1264,10 @@ class TransportBeltRenderer {
 
           if (itemImage != null) {
             final drawSize = cellSize * 0.35;
-            final srcRect = Rect.fromLTWH(0, 0, itemImage.width.toDouble(), itemImage.height.toDouble());
-            final dstRect = Rect.fromCenter(center: Offset.zero, width: drawSize, height: drawSize);
+            final srcRect = Rect.fromLTWH(
+                0, 0, itemImage.width.toDouble(), itemImage.height.toDouble());
+            final dstRect = Rect.fromCenter(
+                center: Offset.zero, width: drawSize, height: drawSize);
             canvas.drawImageRect(itemImage, srcRect, dstRect, Paint());
           } else {
             final pSize = _pointerPicture!.size;
@@ -1101,20 +1279,23 @@ class TransportBeltRenderer {
           canvas.restore();
         } else {
           // straight movement
-          final direction = _getCellDirection(turnPath, turnIndex, forcedDirection: forcedDirection);
+          final direction = _getCellDirection(turnPath, turnIndex,
+              forcedDirection: forcedDirection);
           final dirIdx = _directionToIndex(direction);
           final rotation = dirIdx * math.pi / 2;
-          
+
           final double moveDist = (0.5 - pProgress) * cellSize;
-          
+
           canvas.save();
           canvas.rotate(rotation);
           canvas.translate(0, moveDist);
 
           if (itemImage != null) {
             final drawSize = cellSize * 0.35;
-            final srcRect = Rect.fromLTWH(0, 0, itemImage.width.toDouble(), itemImage.height.toDouble());
-            final dstRect = Rect.fromCenter(center: Offset.zero, width: drawSize, height: drawSize);
+            final srcRect = Rect.fromLTWH(
+                0, 0, itemImage.width.toDouble(), itemImage.height.toDouble());
+            final dstRect = Rect.fromCenter(
+                center: Offset.zero, width: drawSize, height: drawSize);
             canvas.drawImageRect(itemImage, srcRect, dstRect, Paint());
           } else {
             final pSize = _pointerPicture!.size;
@@ -1170,11 +1351,15 @@ class TransportBeltRenderer {
       if (localClip != null) {
         canvas.save();
         canvas.clipRect(localClip.shift(Offset(cx, cy)));
-        canvas.drawRRect(rect, Paint()..color = isOccupied ? _previewOccupiedFill : _previewFillColor);
         canvas.drawRRect(
             rect,
             Paint()
-              ..color = isOccupied ? _previewOccupiedBorder : _previewBorderColor
+              ..color = isOccupied ? _previewOccupiedFill : _previewFillColor);
+        canvas.drawRRect(
+            rect,
+            Paint()
+              ..color =
+                  isOccupied ? _previewOccupiedBorder : _previewBorderColor
               ..strokeWidth = 1.0
               ..style = PaintingStyle.stroke);
 
@@ -1184,11 +1369,15 @@ class TransportBeltRenderer {
         }
         canvas.restore();
       } else {
-        canvas.drawRRect(rect, Paint()..color = isOccupied ? _previewOccupiedFill : _previewFillColor);
         canvas.drawRRect(
             rect,
             Paint()
-              ..color = isOccupied ? _previewOccupiedBorder : _previewBorderColor
+              ..color = isOccupied ? _previewOccupiedFill : _previewFillColor);
+        canvas.drawRRect(
+            rect,
+            Paint()
+              ..color =
+                  isOccupied ? _previewOccupiedBorder : _previewBorderColor
               ..strokeWidth = 1.0
               ..style = PaintingStyle.stroke);
 
@@ -1277,7 +1466,8 @@ class TransportBeltRenderer {
     }
   }
 
-  static void renderHoverHighlight(Canvas canvas, Offset gridPos, double cellSize) {
+  static void renderHoverHighlight(
+      Canvas canvas, Offset gridPos, double cellSize) {
     final x = gridPos.dx * cellSize + _cellMargin;
     final y = gridPos.dy * cellSize + _cellMargin;
     final w = cellSize - _cellMargin * 2;
@@ -1314,12 +1504,17 @@ class TransportBeltRenderer {
     if (isReady) {
       // 使用 SVG 渲染，通过 saveLayer 降低透明度
       canvas.saveLayer(null, Paint()..color = const Color(0xCCFFFFFF));
-      _renderWithSvg(canvas, path, cellSize, buildings, fullPathContext: fullPathContext, contextStartIndex: contextStartIndex, forcedDirection: forcedDirection, incomingDirection: incomingDirection);
+      _renderWithSvg(canvas, path, cellSize, buildings,
+          fullPathContext: fullPathContext,
+          contextStartIndex: contextStartIndex,
+          forcedDirection: forcedDirection,
+          incomingDirection: incomingDirection);
       canvas.restore();
     } else {
       for (int i = 0; i < path.length; i++) {
         final cell = path[i];
-        final direction = _getCellDirection(path, i, forcedDirection: forcedDirection);
+        final direction =
+            _getCellDirection(path, i, forcedDirection: forcedDirection);
         final cx = cell.dx * cellSize + cellSize / 2;
         final cy = cell.dy * cellSize + cellSize / 2;
 
@@ -1338,14 +1533,24 @@ class TransportBeltRenderer {
           canvas.save();
           canvas.clipRect(localClip.shift(Offset(cx, cy)));
           _drawConveyorCell(
-            canvas, path[i], direction, cellSize,
-            _confirmedFillColor, _confirmedLineColor, _confirmedArrowColor,
+            canvas,
+            path[i],
+            direction,
+            cellSize,
+            _confirmedFillColor,
+            _confirmedLineColor,
+            _confirmedArrowColor,
           );
           canvas.restore();
         } else {
           _drawConveyorCell(
-            canvas, path[i], direction, cellSize,
-            _confirmedFillColor, _confirmedLineColor, _confirmedArrowColor,
+            canvas,
+            path[i],
+            direction,
+            cellSize,
+            _confirmedFillColor,
+            _confirmedLineColor,
+            _confirmedArrowColor,
           );
         }
       }

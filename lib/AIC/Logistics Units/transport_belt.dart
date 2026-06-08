@@ -25,6 +25,7 @@ class TransportBeltController {
   Set<String>? previewOccupied;
   Offset? mouseGridPos;
   ConveyorBelt? _mergeTarget;
+
   /// 预览路径的转角上下文扩展（合并目标的路径，仅用于转角检测，不渲染为蓝色预览）
   List<Offset>? previewContextExtension;
   String? _startingPortDirection;
@@ -136,8 +137,8 @@ class TransportBeltController {
     final mergeBelt = _findBeltStartCell(gridPos);
     if (mergeBelt != null) {
       // 不允许与路径中已包含的传送带合并（避免回环）
-      final alreadyInPath = fullPath.any(
-          (c) => c.dx == gridPos.dx && c.dy == gridPos.dy);
+      final alreadyInPath =
+          fullPath.any((c) => c.dx == gridPos.dx && c.dy == gridPos.dy);
       if (!alreadyInPath) {
         final blocked = _buildBlockedSet(excludeCell: gridPos);
         final verticalFirst = _isIncomingVertical();
@@ -172,7 +173,8 @@ class TransportBeltController {
     final blocked = _buildBlockedSet(excludeCell: isInputPort ? gridPos : null);
     final verticalFirst = _isIncomingVertical();
 
-    final segment = _findPath(anchors.last, gridPos, blocked, verticalFirst: verticalFirst);
+    final segment =
+        _findPath(anchors.last, gridPos, blocked, verticalFirst: verticalFirst);
     if (segment == null || segment.length < 2) return false;
 
     // 点击输入端口时自动完成创建
@@ -264,34 +266,56 @@ class TransportBeltController {
       int newItemDrainCount = 0;
       int newLastItemFillCount = 0;
       int newLastItemDrainCount = 0;
+      double? newDeadEndFreezeProgress;
+      double? newLastItemFreezeProgress;
+      final newItemSegments = <ConveyorItemSegment>[];
 
       // 继承源传送带的物品状态（加长断头传送带时）
       if (sourceBelt != null) {
+        newItemSegments.addAll(sourceBelt.shiftedItemSegments(0));
         newItemId = sourceBelt.itemId;
         newItemFillCount = sourceBelt.itemFillCount;
         newItemDrainCount = sourceBelt.itemDrainCount;
+        newDeadEndFreezeProgress = sourceBelt.deadEndFreezeProgress;
         // 源传送带的残留物品也继承
         if (sourceBelt.lastItemFillCount > 0) {
           newLastItemId = sourceBelt.lastItemId;
           newLastItemFillCount = sourceBelt.lastItemFillCount;
           newLastItemDrainCount = sourceBelt.lastItemDrainCount;
+          newLastItemFreezeProgress = sourceBelt.lastItemFreezeProgress;
         }
       }
 
       if (_mergeTarget != null) {
         final mergeBelt = _mergeTarget!;
         final offset = newSegmentLength - 1; // 合并目标首格已包含在 fullPath 中
+        newItemSegments.addAll(mergeBelt.shiftedItemSegments(offset));
 
         if (mergeBelt.itemId.isNotEmpty) {
-          // 合并目标有当前物品 → 转为残留物品
-          newLastItemId = mergeBelt.itemId;
-          newLastItemFillCount = mergeBelt.itemFillCount + offset;
-          newLastItemDrainCount = mergeBelt.itemDrainCount + offset;
+          if (mergeBelt.lastItemFillCount > 0) {
+            // 保留已经形成的排队状态，避免当前物品覆盖更下游的残留物品。
+            newItemId = mergeBelt.itemId;
+            newItemFillCount = mergeBelt.itemFillCount + offset;
+            newItemDrainCount = mergeBelt.itemDrainCount + offset;
+            newDeadEndFreezeProgress = mergeBelt.deadEndFreezeProgress;
+
+            newLastItemId = mergeBelt.lastItemId;
+            newLastItemFillCount = mergeBelt.lastItemFillCount + offset;
+            newLastItemDrainCount = mergeBelt.lastItemDrainCount + offset;
+            newLastItemFreezeProgress = mergeBelt.lastItemFreezeProgress;
+          } else {
+            // 合并目标有当前物品 → 转为残留物品
+            newLastItemId = mergeBelt.itemId;
+            newLastItemFillCount = mergeBelt.itemFillCount + offset;
+            newLastItemDrainCount = mergeBelt.itemDrainCount + offset;
+            newLastItemFreezeProgress = mergeBelt.deadEndFreezeProgress;
+          }
         } else if (mergeBelt.lastItemFillCount > 0) {
           // 合并目标已有残留物品 → 继承
           newLastItemId = mergeBelt.lastItemId;
           newLastItemFillCount = mergeBelt.lastItemFillCount + offset;
           newLastItemDrainCount = mergeBelt.lastItemDrainCount + offset;
+          newLastItemFreezeProgress = mergeBelt.lastItemFreezeProgress;
         }
       }
 
@@ -300,12 +324,15 @@ class TransportBeltController {
         path: List<Offset>.from(fullPath),
         itemId: newItemId,
         lastItemId: newLastItemId.isNotEmpty ? newLastItemId : null,
+        itemSegments: newItemSegments,
         isBlocked: false,
         incomingDirection: newBeltIncomingDir,
         itemFillCount: newItemFillCount,
         itemDrainCount: newItemDrainCount,
         lastItemFillCount: newLastItemFillCount,
         lastItemDrainCount: newLastItemDrainCount,
+        deadEndFreezeProgress: newDeadEndFreezeProgress,
+        lastItemFreezeProgress: newLastItemFreezeProgress,
       );
 
       // 检查新传送带的起点是否在某条旧传送带的节点上，进行截断与拆分
@@ -318,7 +345,8 @@ class TransportBeltController {
 
         int forkIdx = -1;
         for (int i = 0; i < oldBelt.path.length; i++) {
-          if (oldBelt.path[i].dx == startCell.dx && oldBelt.path[i].dy == startCell.dy) {
+          if (oldBelt.path[i].dx == startCell.dx &&
+              oldBelt.path[i].dy == startCell.dy) {
             forkIdx = i;
             break;
           }
@@ -333,30 +361,61 @@ class TransportBeltController {
               // 单格下游无法从路径邻居推断方向，从旧传送带记录原始方向
               String? forcedDir;
               if (downstream.length == 1 && forkIdx + 1 < oldBelt.path.length) {
-                final dx = oldBelt.path[forkIdx + 1].dx - oldBelt.path[forkIdx].dx;
-                final dy = oldBelt.path[forkIdx + 1].dy - oldBelt.path[forkIdx].dy;
-                if (dx > 0) { forcedDir = 'right'; }
-                else if (dx < 0) { forcedDir = 'left'; }
-                else if (dy > 0) { forcedDir = 'down'; }
-                else if (dy < 0) { forcedDir = 'up'; }
+                final dx =
+                    oldBelt.path[forkIdx + 1].dx - oldBelt.path[forkIdx].dx;
+                final dy =
+                    oldBelt.path[forkIdx + 1].dy - oldBelt.path[forkIdx].dy;
+                if (dx > 0) {
+                  forcedDir = 'right';
+                } else if (dx < 0) {
+                  forcedDir = 'left';
+                } else if (dy > 0) {
+                  forcedDir = 'down';
+                } else if (dy < 0) {
+                  forcedDir = 'up';
+                }
               }
               // 下游首格的入方向：从分叉点指向下游首格
               String? incomingDir;
               if (forkIdx >= 0) {
-                final dx = oldBelt.path[forkIdx + 1].dx - oldBelt.path[forkIdx].dx;
-                final dy = oldBelt.path[forkIdx + 1].dy - oldBelt.path[forkIdx].dy;
-                if (dx > 0) { incomingDir = 'right'; }
-                else if (dx < 0) { incomingDir = 'left'; }
-                else if (dy > 0) { incomingDir = 'down'; }
-                else if (dy < 0) { incomingDir = 'up'; }
+                final dx =
+                    oldBelt.path[forkIdx + 1].dx - oldBelt.path[forkIdx].dx;
+                final dy =
+                    oldBelt.path[forkIdx + 1].dy - oldBelt.path[forkIdx].dy;
+                if (dx > 0) {
+                  incomingDir = 'right';
+                } else if (dx < 0) {
+                  incomingDir = 'left';
+                } else if (dy > 0) {
+                  incomingDir = 'down';
+                } else if (dy < 0) {
+                  incomingDir = 'up';
+                }
               }
               toAdd.add(ConveyorBelt(
                 id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${oldBelt.id}',
                 path: downstream,
                 itemId: oldBelt.itemId,
+                lastItemId: oldBelt.lastItemId,
+                itemSegments: oldBelt.clippedItemSegments(
+                    forkIdx + 1, oldBelt.path.length),
                 isBlocked: oldBelt.isBlocked,
                 forcedDirection: forcedDir,
                 incomingDirection: incomingDir,
+                itemFillCount:
+                    _clampDownstreamCount(oldBelt.itemFillCount, forkIdx + 1),
+                itemDrainCount:
+                    _clampDownstreamCount(oldBelt.itemDrainCount, forkIdx + 1),
+                lastItemFillCount: oldBelt.lastItemFillCount > 0
+                    ? _clampDownstreamCount(
+                        oldBelt.lastItemFillCount, forkIdx + 1)
+                    : 0,
+                lastItemDrainCount: oldBelt.lastItemFillCount > 0
+                    ? _clampDownstreamCount(
+                        oldBelt.lastItemDrainCount, forkIdx + 1)
+                    : 0,
+                deadEndFreezeProgress: oldBelt.deadEndFreezeProgress,
+                lastItemFreezeProgress: oldBelt.lastItemFreezeProgress,
               ));
             }
           }
@@ -417,7 +476,9 @@ class TransportBeltController {
       final belt = _findBeltStartCell(neighbor);
       if (belt == null) continue;
       // 排除已在路径中的格子
-      if (fullPath.any((c) => c.dx == neighbor.dx && c.dy == neighbor.dy)) continue;
+      if (fullPath.any((c) => c.dx == neighbor.dx && c.dy == neighbor.dy)) {
+        continue;
+      }
       // 检查方向兼容性：从 fromCell 到 neighbor 的方向必须与传送带出方向一致
       final toDx = d.dx.toInt();
       final toDy = d.dy.toInt();
@@ -446,6 +507,11 @@ class TransportBeltController {
     return dx == beltDx && dy == beltDy;
   }
 
+  int _clampDownstreamCount(int count, int removedPrefixLength) {
+    final shifted = count - removedPrefixLength;
+    return shifted > 0 ? shifted : 0;
+  }
+
   /// 检查新路径在连接点处的方向是否与目标传送带起始方向一致
   bool _isDirectionCompatible(List<Offset> newPath, ConveyorBelt targetBelt) {
     if (newPath.length < 2) return false;
@@ -467,10 +533,14 @@ class TransportBeltController {
       // 单格传送带：使用 forcedDirection 推断方向
       final dir = targetBelt.forcedDirection!;
       beltDx = switch (dir) {
-        'right' => 1, 'left' => -1, _ => 0,
+        'right' => 1,
+        'left' => -1,
+        _ => 0,
       };
       beltDy = switch (dir) {
-        'down' => 1, 'up' => -1, _ => 0,
+        'down' => 1,
+        'up' => -1,
+        _ => 0,
       };
     } else {
       return false;
@@ -509,8 +579,10 @@ class TransportBeltController {
     for (final pb in project.buildings) {
       final bx = pb.effectiveGridX.toInt();
       final by = pb.effectiveGridY.toInt();
-      if (gx >= bx && gx < bx + pb.effectiveWidth &&
-          gy >= by && gy < by + pb.effectiveHeight) {
+      if (gx >= bx &&
+          gx < bx + pb.effectiveWidth &&
+          gy >= by &&
+          gy < by + pb.effectiveHeight) {
         return true;
       }
     }
@@ -528,8 +600,12 @@ class TransportBeltController {
     for (final pb in project.buildings) {
       final bx = pb.effectiveGridX.toInt();
       final by = pb.effectiveGridY.toInt();
-      if (gx >= bx && gx < bx + pb.effectiveWidth &&
-          gy >= by && gy < by + pb.effectiveHeight) return true;
+      if (gx >= bx &&
+          gx < bx + pb.effectiveWidth &&
+          gy >= by &&
+          gy < by + pb.effectiveHeight) {
+        return true;
+      }
     }
     return false;
   }
@@ -579,8 +655,12 @@ class TransportBeltController {
   // === 设备端口检测 ===
 
   /// 在 gridPos 处查找设备端口，返回 (设备, 端口定义, 'input'/'output', 旋转后的世界方向)
-  ({PlacedBuilding building, PortDefinition definition, String type, String worldDirection})?
-      _findPortAtCell(Offset gridPos) {
+  ({
+    PlacedBuilding building,
+    PortDefinition definition,
+    String type,
+    String worldDirection
+  })? _findPortAtCell(Offset gridPos) {
     final gx = gridPos.dx.round();
     final gy = gridPos.dy.round();
     for (final pb in project.buildings) {
@@ -589,7 +669,8 @@ class TransportBeltController {
       final gh = pb.building.gridHeight;
 
       for (final port in pb.inputPorts) {
-        final portGrid = port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
+        final portGrid =
+            port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
         final px = portGrid.dx.round();
         final py = portGrid.dy.round();
         if (px == gx && py == gy) {
@@ -602,7 +683,8 @@ class TransportBeltController {
         }
       }
       for (final port in pb.outputPorts) {
-        final portGrid = port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
+        final portGrid =
+            port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
         final px = portGrid.dx.round();
         final py = portGrid.dy.round();
         if (px == gx && py == gy) {
@@ -651,8 +733,8 @@ class TransportBeltController {
 
     Offset? excludeCell;
     if (mergeBelt != null) {
-      final alreadyInPath = fullPath.any(
-          (c) => c.dx == mouseGridPos!.dx && c.dy == mouseGridPos!.dy);
+      final alreadyInPath = fullPath
+          .any((c) => c.dx == mouseGridPos!.dx && c.dy == mouseGridPos!.dy);
       if (!alreadyInPath) {
         excludeCell = mouseGridPos!;
       }
@@ -663,14 +745,19 @@ class TransportBeltController {
     final blocked = _buildBlockedSet(excludeCell: excludeCell);
     final verticalFirst = _isIncomingVertical();
 
-    final livePath = _findPath(lastAnchor, mouseGridPos!, blocked, verticalFirst: verticalFirst);
+    final livePath = _findPath(lastAnchor, mouseGridPos!, blocked,
+        verticalFirst: verticalFirst);
     if (livePath == null) {
-      confirmedPath = fullPath.length > 1 ? fullPath.sublist(0, fullPath.length - 1) : <Offset>[];
+      confirmedPath = fullPath.length > 1
+          ? fullPath.sublist(0, fullPath.length - 1)
+          : <Offset>[];
       previewPath = _calculateStraightPath(lastAnchor, mouseGridPos!);
       previewOccupied = null;
       pathInvalid = true;
     } else {
-      confirmedPath = fullPath.length > 1 ? fullPath.sublist(0, fullPath.length - 1) : <Offset>[];
+      confirmedPath = fullPath.length > 1
+          ? fullPath.sublist(0, fullPath.length - 1)
+          : <Offset>[];
       previewPath = livePath;
       previewOccupied = null;
 
@@ -725,7 +812,8 @@ class TransportBeltController {
 
   // === 寻路 ===
 
-  List<Offset>? _findPath(Offset start, Offset end, Set<String> blocked, {bool verticalFirst = false}) {
+  List<Offset>? _findPath(Offset start, Offset end, Set<String> blocked,
+      {bool verticalFirst = false}) {
     final startKey = '${start.dx.toInt()}_${start.dy.toInt()}';
     final endKey = '${end.dx.toInt()}_${end.dy.toInt()}';
 
@@ -746,7 +834,8 @@ class TransportBeltController {
 
       if (dirOffset != const Offset(0, 0)) {
         final penultimate = end + dirOffset;
-        final penultimateKey = '${penultimate.dx.toInt()}_${penultimate.dy.toInt()}';
+        final penultimateKey =
+            '${penultimate.dx.toInt()}_${penultimate.dy.toInt()}';
 
         // 前驱格子如果被阻挡且不是起点，则寻路失败
         if (blocked.contains(penultimateKey) && penultimateKey != startKey) {
@@ -755,7 +844,8 @@ class TransportBeltController {
 
         // 暂时在寻路至前驱格子时将终点(输入端口)设为阻挡，预防擦过或斜插
         final tempBlocked = Set<String>.from(blocked)..add(endKey);
-        final subPath = _findPath(start, penultimate, tempBlocked, verticalFirst: verticalFirst);
+        final subPath = _findPath(start, penultimate, tempBlocked,
+            verticalFirst: verticalFirst);
         if (subPath == null) return null;
 
         return _deduplicatePath([...subPath, end]);
@@ -763,12 +853,12 @@ class TransportBeltController {
     }
 
     // 仅在创建第一段时（即 anchors.length <= 1），才施加起始端口物理方向的约束，之后的中继锚点寻路自由
-    final activeDirection = (anchors.length <= 1) ? _startingPortDirection : null;
+    final activeDirection =
+        (anchors.length <= 1) ? _startingPortDirection : null;
 
     // 如果有端口方向约束，优先尝试按端口方向走
     final momentumPath = _calculateMomentumPath(start, end,
-        verticalFirst: verticalFirst,
-        startingDirection: activeDirection);
+        verticalFirst: verticalFirst, startingDirection: activeDirection);
     bool momentumValid = true;
     for (final cell in momentumPath) {
       final key = '${cell.dx.toInt()}_${cell.dy.toInt()}';
@@ -780,12 +870,13 @@ class TransportBeltController {
     if (momentumValid) return _deduplicatePath(momentumPath);
 
     // BFS 也强制首步方向
-    final bfsPath = _findPathBFS(start, end, blocked,
-        firstStepDirection: activeDirection);
+    final bfsPath =
+        _findPathBFS(start, end, blocked, firstStepDirection: activeDirection);
     return bfsPath != null ? _deduplicatePath(bfsPath) : null;
   }
 
-  List<Offset> _calculateMomentumPath(Offset start, Offset end, {bool verticalFirst = false, String? startingDirection}) {
+  List<Offset> _calculateMomentumPath(Offset start, Offset end,
+      {bool verticalFirst = false, String? startingDirection}) {
     final sx = start.dx.toInt();
     final sy = start.dy.toInt();
     final ex = end.dx.toInt();
@@ -828,7 +919,9 @@ class TransportBeltController {
       if (cy != ey) {
         final dy = ey > cy ? 1 : -1;
         for (int y = cy; y != ey; y += dy) {
-          if (path.isEmpty || path.last.dx != cx.toDouble() || path.last.dy != y.toDouble()) {
+          if (path.isEmpty ||
+              path.last.dx != cx.toDouble() ||
+              path.last.dy != y.toDouble()) {
             path.add(Offset(cx.toDouble(), y.toDouble()));
           }
         }
@@ -836,7 +929,9 @@ class TransportBeltController {
       if (cx != ex) {
         final dx = ex > cx ? 1 : -1;
         for (int x = cx; x != ex; x += dx) {
-          if (path.isEmpty || path.last.dx != x.toDouble() || path.last.dy != ey.toDouble()) {
+          if (path.isEmpty ||
+              path.last.dx != x.toDouble() ||
+              path.last.dy != ey.toDouble()) {
             path.add(Offset(x.toDouble(), ey.toDouble()));
           }
         }
@@ -845,7 +940,9 @@ class TransportBeltController {
       if (cx != ex) {
         final dx = ex > cx ? 1 : -1;
         for (int x = cx; x != ex; x += dx) {
-          if (path.isEmpty || path.last.dx != x.toDouble() || path.last.dy != cy.toDouble()) {
+          if (path.isEmpty ||
+              path.last.dx != x.toDouble() ||
+              path.last.dy != cy.toDouble()) {
             path.add(Offset(x.toDouble(), cy.toDouble()));
           }
         }
@@ -853,7 +950,9 @@ class TransportBeltController {
       if (cy != ey) {
         final dy = ey > cy ? 1 : -1;
         for (int y = cy; y != ey; y += dy) {
-          if (path.isEmpty || path.last.dx != ex.toDouble() || path.last.dy != y.toDouble()) {
+          if (path.isEmpty ||
+              path.last.dx != ex.toDouble() ||
+              path.last.dy != y.toDouble()) {
             path.add(Offset(ex.toDouble(), y.toDouble()));
           }
         }
@@ -864,7 +963,8 @@ class TransportBeltController {
     return path;
   }
 
-  List<Offset>? _findPathBFS(Offset start, Offset end, Set<String> blocked, {String? firstStepDirection}) {
+  List<Offset>? _findPathBFS(Offset start, Offset end, Set<String> blocked,
+      {String? firstStepDirection}) {
     final startKey = '${start.dx.toInt()}_${start.dy.toInt()}';
     final endKey = '${end.dx.toInt()}_${end.dy.toInt()}';
 
@@ -895,7 +995,9 @@ class TransportBeltController {
           final parts = key.split('_');
           path.add(Offset(double.parse(parts[0]), double.parse(parts[1])));
           final parent = visited[key];
-          key = parent == null ? null : '${parent.dx.toInt()}_${parent.dy.toInt()}';
+          key = parent == null
+              ? null
+              : '${parent.dx.toInt()}_${parent.dy.toInt()}';
         }
         return path.reversed.toList();
       }
@@ -904,10 +1006,18 @@ class TransportBeltController {
       List<List<int>> dirs;
       if (nodeKey == startKey && firstStepDirection != null) {
         dirs = switch (firstStepDirection) {
-          'up' => const [[0, -1]],
-          'down' => const [[0, 1]],
-          'left' => const [[-1, 0]],
-          'right' => const [[1, 0]],
+          'up' => const [
+              [0, -1]
+            ],
+          'down' => const [
+              [0, 1]
+            ],
+          'left' => const [
+              [-1, 0]
+            ],
+          'right' => const [
+              [1, 0]
+            ],
           _ => allDirs,
         };
       } else {

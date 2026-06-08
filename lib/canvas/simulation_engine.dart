@@ -28,6 +28,18 @@ class SimulationEngine extends ChangeNotifier {
   static const double _portConnectionThreshold = 30.0;
 
   bool get isRunning => _isRunning;
+
+  bool _hasOutputSpace(ConveyorBelt belt) {
+    belt.ensureItemSegmentsFromLegacy();
+    if (belt.itemSegments.isNotEmpty) {
+      return belt.itemSegments.first.drainCount > 0 ||
+          belt.itemSegments.first.fillCount < belt.currentItemFillLimit;
+    }
+    if (belt.itemId.isNotEmpty) return false;
+    if (!belt.hasStoppedLastItems) return true;
+    return belt.lastItemDrainCount > 0;
+  }
+
   double get speedMultiplier => _speedMultiplier;
   set speedMultiplier(double v) {
     _speedMultiplier = v.clamp(0.25, 10.0);
@@ -94,6 +106,17 @@ class SimulationEngine extends ChangeNotifier {
     for (final cr in result.conveyors) {
       final belt = _project!.conveyors.where((c) => c.id == cr.id).firstOrNull;
       if (belt != null) {
+        final sourceItemId = _outputItemIdForBeltStart(belt);
+        if (cr.itemId.isNotEmpty && cr.itemId != sourceItemId) {
+          belt.flowProgress = cr.flowProgress;
+          belt.isBlocked = cr.isBlocked;
+          continue;
+        }
+        if (belt.itemSegments.isNotEmpty) {
+          belt.flowProgress = cr.flowProgress;
+          belt.isBlocked = cr.isBlocked;
+          continue;
+        }
         // 只有当没有残留物品时才更新 lastItemId，避免覆盖残留物品的 ID
         if (cr.itemId.isNotEmpty && belt.lastItemFillCount <= 0) {
           belt.lastItemId = cr.itemId;
@@ -103,14 +126,49 @@ class SimulationEngine extends ChangeNotifier {
         if (cr.itemId.isNotEmpty && belt.itemId.isEmpty) {
           belt.itemFillCount = 1;
           belt.itemDrainCount = 0;
-          belt.lastItemFillCount = 0;
-          belt.lastItemDrainCount = 0;
+          if (!belt.hasLastItems) {
+            belt.lastItemFillCount = 0;
+            belt.lastItemDrainCount = 0;
+            belt.lastItemFreezeProgress = null;
+          }
         }
-        belt.itemId = cr.itemId;
+        if (cr.itemId.isNotEmpty || belt.itemFillCount == 0) {
+          belt.itemId = cr.itemId;
+        }
         belt.flowProgress = cr.flowProgress;
         belt.isBlocked = cr.isBlocked;
       }
     }
+  }
+
+  String? _outputItemIdForBeltStart(ConveyorBelt belt) {
+    if (_project == null || belt.path.isEmpty) return null;
+    final start = belt.path.first;
+    final gx = start.dx.round();
+    final gy = start.dy.round();
+    for (final pb in _project!.buildings) {
+      final rot = pb.rotation;
+      final gw = pb.building.gridWidth;
+      final gh = pb.building.gridHeight;
+      for (int i = 0; i < pb.outputPorts.length; i++) {
+        final portCell = pb.outputPorts[i]
+            .gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
+        if (portCell.dx.round() != gx || portCell.dy.round() != gy) continue;
+        if (pb.building.id == 'depot_unloader_3x1') {
+          final itemId = pb.depotOutputItemId;
+          return itemId == null || itemId.isEmpty ? null : itemId;
+        }
+        final recipe = pb.activeRecipeId != null
+            ? _dataLoader.getRecipe(pb.activeRecipeId!)
+            : null;
+        if (recipe == null || recipe.outputs.isEmpty) return null;
+        final output = recipe.outputs.length > i
+            ? recipe.outputs[i]
+            : recipe.outputs.first;
+        return output.itemId;
+      }
+    }
+    return null;
   }
 
   void attach(ProjectState project) {
@@ -125,52 +183,70 @@ class SimulationEngine extends ChangeNotifier {
     if (_workerSendPort == null || _project == null) return;
 
     final state = SimSyncState(
-      buildings: _project!.buildings.map((pb) => SimBuildingData(
-        id: pb.id,
-        buildingId: pb.building.id,
-        gridX: pb.gridX,
-        gridY: pb.gridY,
-        rotation: pb.rotation,
-        activeRecipeId: pb.activeRecipeId,
-        depotOutputItemId: pb.depotOutputItemId ?? '',
-        gridWidth: pb.building.gridWidth,
-        gridHeight: pb.building.gridHeight,
-        inputPorts: pb.inputPorts.map((p) => SimPortData(
-          index: p.index,
-          type: p.type,
-          relativeX: p.definition.relativeX,
-          relativeY: p.definition.relativeY,
-          direction: p.definition.direction,
-          portType: p.definition.portType,
-        )).toList(),
-        outputPorts: pb.outputPorts.map((p) => SimPortData(
-          index: p.index,
-          type: p.type,
-          relativeX: p.definition.relativeX,
-          relativeY: p.definition.relativeY,
-          direction: p.definition.direction,
-          portType: p.definition.portType,
-        )).toList(),
-      )).toList(),
-      conveyors: _project!.conveyors.map((c) => SimConveyorData(
-        id: c.id,
-        path: c.path,
-        itemId: c.itemId,
-        flowProgress: c.flowProgress,
-        itemFillCount: c.itemFillCount,
-        itemDrainCount: c.itemDrainCount,
-        isBlocked: c.isBlocked,
-        forcedDirection: c.forcedDirection,
-        incomingDirection: c.incomingDirection,
-        lastItemFillCount: c.lastItemFillCount,
-        lastItemDrainCount: c.lastItemDrainCount,
-      )).toList(),
-      recipes: _dataLoader.recipes.values.map((r) => SimRecipeData(
-        id: r.id,
-        processTimeSeconds: r.processTimeSeconds,
-        inputs: r.inputs.map((io) => SimRecipeIOData(itemId: io.itemId, amount: io.amount)).toList(),
-        outputs: r.outputs.map((io) => SimRecipeIOData(itemId: io.itemId, amount: io.amount)).toList(),
-      )).toList(),
+      buildings: _project!.buildings
+          .map((pb) => SimBuildingData(
+                id: pb.id,
+                buildingId: pb.building.id,
+                gridX: pb.gridX,
+                gridY: pb.gridY,
+                rotation: pb.rotation,
+                activeRecipeId: pb.activeRecipeId,
+                depotOutputItemId: pb.depotOutputItemId ?? '',
+                gridWidth: pb.building.gridWidth,
+                gridHeight: pb.building.gridHeight,
+                inputPorts: pb.inputPorts
+                    .map((p) => SimPortData(
+                          index: p.index,
+                          type: p.type,
+                          relativeX: p.definition.relativeX,
+                          relativeY: p.definition.relativeY,
+                          direction: p.definition.direction,
+                          portType: p.definition.portType,
+                        ))
+                    .toList(),
+                outputPorts: pb.outputPorts
+                    .map((p) => SimPortData(
+                          index: p.index,
+                          type: p.type,
+                          relativeX: p.definition.relativeX,
+                          relativeY: p.definition.relativeY,
+                          direction: p.definition.direction,
+                          portType: p.definition.portType,
+                        ))
+                    .toList(),
+              ))
+          .toList(),
+      conveyors: _project!.conveyors
+          .map((c) => SimConveyorData(
+                id: c.id,
+                path: c.path,
+                itemId: c.itemId,
+                flowProgress: c.flowProgress,
+                itemFillCount: c.itemFillCount,
+                itemDrainCount: c.itemDrainCount,
+                isBlocked: c.isBlocked,
+                forcedDirection: c.forcedDirection,
+                incomingDirection: c.incomingDirection,
+                lastItemFillCount: c.lastItemFillCount,
+                lastItemDrainCount: c.lastItemDrainCount,
+                deadEndFreezeProgress: c.deadEndFreezeProgress,
+                lastItemFreezeProgress: c.lastItemFreezeProgress,
+              ))
+          .toList(),
+      recipes: _dataLoader.recipes.values
+          .map((r) => SimRecipeData(
+                id: r.id,
+                processTimeSeconds: r.processTimeSeconds,
+                inputs: r.inputs
+                    .map((io) =>
+                        SimRecipeIOData(itemId: io.itemId, amount: io.amount))
+                    .toList(),
+                outputs: r.outputs
+                    .map((io) =>
+                        SimRecipeIOData(itemId: io.itemId, amount: io.amount))
+                    .toList(),
+              ))
+          .toList(),
       speedMultiplier: _speedMultiplier,
     );
 
@@ -256,8 +332,9 @@ class SimulationEngine extends ChangeNotifier {
     if (_project == null) return null;
     for (final pb in _project!.buildings) {
       for (final port in pb.outputPorts) {
-        final portWorld = port.worldPosition(
-            pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
+        final portWorld = port.worldPosition(pb.gridX, pb.gridY, _cellSize,
+            pb.building.gridWidth, pb.building.gridHeight,
+            rotation: pb.rotation);
         if ((worldPos - portWorld).distance < _portConnectionThreshold) {
           return pb;
         }
@@ -304,21 +381,20 @@ class SimulationEngine extends ChangeNotifier {
     final outputItemId = pb.depotOutputItemId;
     if (outputItemId == null || outputItemId.isEmpty) return;
     for (final port in pb.outputPorts) {
-      final portWorld = port.worldPosition(
-          pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
+      final portWorld = port.worldPosition(pb.gridX, pb.gridY, _cellSize,
+          pb.building.gridWidth, pb.building.gridHeight,
+          rotation: pb.rotation);
       for (final belt in _project!.conveyors) {
         final dist = (belt.start - portWorld).distance;
         if (dist < _portConnectionThreshold) {
-          if (belt.itemId.isEmpty) {
-            belt.itemId = outputItemId;
-            // 立即初始化第一格物品，避免等待下一个动画周期（最多 2 秒延迟）
-            belt.itemFillCount = 1;
-            belt.itemDrainCount = 0;
-            belt.lastItemFillCount = 0;
-            belt.lastItemDrainCount = 0;
+          if (_hasOutputSpace(belt)) {
+            if (belt.itemSegments.isEmpty) {
+              belt.pushSourceItem(outputItemId);
+            }
             port.connected = true;
             port.linkedItemId = outputItemId;
-            print('[SimFallback] Set belt ${belt.id} itemId=$outputItemId, fillCount=1, dist=$dist');
+            print(
+                '[SimFallback] Set belt ${belt.id} itemId=$outputItemId, fillCount=1, dist=$dist');
           }
         }
       }
@@ -330,8 +406,9 @@ class SimulationEngine extends ChangeNotifier {
       bool found = false;
       for (final belt in _project!.conveyors) {
         for (final port in pb.inputPorts) {
-          final portWorld = port.worldPosition(
-              pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
+          final portWorld = port.worldPosition(pb.gridX, pb.gridY, _cellSize,
+              pb.building.gridWidth, pb.building.gridHeight,
+              rotation: pb.rotation);
           if ((belt.end - portWorld).distance < _portConnectionThreshold) {
             if (belt.itemId == input.itemId) {
               found = true;
@@ -349,11 +426,12 @@ class SimulationEngine extends ChangeNotifier {
   bool _fallbackCheckOutputSpace(PlacedBuilding pb) {
     if (pb.isBlocked) return false;
     for (final port in pb.outputPorts) {
-      final portWorld = port.worldPosition(
-          pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
+      final portWorld = port.worldPosition(pb.gridX, pb.gridY, _cellSize,
+          pb.building.gridWidth, pb.building.gridHeight,
+          rotation: pb.rotation);
       for (final belt in _project!.conveyors) {
         if ((belt.start - portWorld).distance < _portConnectionThreshold) {
-          if (belt.itemId.isEmpty) return true;
+          if (_hasOutputSpace(belt)) return true;
         }
       }
     }
@@ -363,12 +441,14 @@ class SimulationEngine extends ChangeNotifier {
   void _fallbackConsumeInputs(PlacedBuilding pb, Recipe recipe) {
     for (final input in recipe.inputs) {
       for (final port in pb.inputPorts) {
-        final portWorld = port.worldPosition(
-            pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
+        final portWorld = port.worldPosition(pb.gridX, pb.gridY, _cellSize,
+            pb.building.gridWidth, pb.building.gridHeight,
+            rotation: pb.rotation);
         for (final belt in _project!.conveyors) {
           if ((belt.end - portWorld).distance < _portConnectionThreshold) {
             if (belt.itemId == input.itemId) {
-              belt.itemId = '';
+              belt.itemSegments.clear();
+              belt.syncLegacyFromSegments();
               break;
             }
           }
@@ -380,12 +460,15 @@ class SimulationEngine extends ChangeNotifier {
   void _fallbackProduceOutputs(PlacedBuilding pb, Recipe recipe) {
     for (final output in recipe.outputs) {
       for (final port in pb.outputPorts) {
-        final portWorld = port.worldPosition(
-            pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
+        final portWorld = port.worldPosition(pb.gridX, pb.gridY, _cellSize,
+            pb.building.gridWidth, pb.building.gridHeight,
+            rotation: pb.rotation);
         for (final belt in _project!.conveyors) {
           if ((belt.start - portWorld).distance < _portConnectionThreshold) {
-            if (belt.itemId.isEmpty) {
-              belt.itemId = output.itemId;
+            if (_hasOutputSpace(belt)) {
+              if (belt.itemSegments.isEmpty) {
+                belt.pushSourceItem(output.itemId);
+              }
               port.connected = true;
               port.linkedItemId = output.itemId;
               break;

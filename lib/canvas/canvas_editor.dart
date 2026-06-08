@@ -65,7 +65,7 @@ class CanvasEditorState extends State<CanvasEditor>
   double _gestureStartScale = 1.0;
 
   double _displayAngle = 0.0; // 当前显示角度（弧度）
-  double _targetAngle = 0.0;  // 目标角度（弧度）
+  double _targetAngle = 0.0; // 目标角度（弧度）
 
   static const double _cellSize = 48.0;
   static const double _minScale = 0.25;
@@ -126,8 +126,9 @@ class CanvasEditorState extends State<CanvasEditor>
       final connections = <String, bool>{};
       for (final belt in _project.conveyors) {
         for (final port in [...pb.inputPorts, ...pb.outputPorts]) {
-          final portWorld = port.worldPosition(
-              pb.gridX, pb.gridY, _cellSize, pb.building.gridWidth, pb.building.gridHeight, rotation: pb.rotation);
+          final portWorld = port.worldPosition(pb.gridX, pb.gridY, _cellSize,
+              pb.building.gridWidth, pb.building.gridHeight,
+              rotation: pb.rotation);
           final distStart = (belt.start - portWorld).distance;
           final distEnd = (belt.end - portWorld).distance;
           if (distStart < 30 || distEnd < 30) {
@@ -165,7 +166,8 @@ class CanvasEditorState extends State<CanvasEditor>
       final v = _beltArrowController.value;
       // 跨零检测：从 >0.5 跳到 <0.5（即从 ~1.0 重置到 ~0.0）
       if (_prevArrowForTick > 0.5 && v < 0.5) {
-        print('[BeltTick] cross-zero prev=${_prevArrowForTick.toStringAsFixed(6)} curr=${v.toStringAsFixed(6)} (belt clock tick)');
+        print(
+            '[BeltTick] cross-zero prev=${_prevArrowForTick.toStringAsFixed(6)} curr=${v.toStringAsFixed(6)} (belt clock tick)');
         _onBeltTick();
       }
       _prevArrowForTick = v;
@@ -179,7 +181,8 @@ class CanvasEditorState extends State<CanvasEditor>
     DepotAccessRenderer.init(onReady: () {
       _forceRepaint();
     });
-    print('[BeltTick] CanvasEditor initState complete, controller value=${_beltArrowController.value}');
+    print(
+        '[BeltTick] CanvasEditor initState complete, controller value=${_beltArrowController.value}');
   }
 
   @override
@@ -226,11 +229,10 @@ class CanvasEditorState extends State<CanvasEditor>
   void _onTick(Duration elapsed) {
     // 长按进度计算
     if (_isLongPressing && _longPressStartTime != null) {
-      _longPressProgress = (DateTime.now()
-              .difference(_longPressStartTime!)
-              .inMilliseconds /
-          _longPressDuration.inMilliseconds)
-          .clamp(0.0, 1.0);
+      _longPressProgress =
+          (DateTime.now().difference(_longPressStartTime!).inMilliseconds /
+                  _longPressDuration.inMilliseconds)
+              .clamp(0.0, 1.0);
       if (_longPressProgress >= 1.0) {
         _enterMoveMode();
       }
@@ -255,9 +257,11 @@ class CanvasEditorState extends State<CanvasEditor>
     // 连续角度插值
     final angleDiff = _targetAngle - _displayAngle;
     final rotationDone = angleDiff.abs() < 0.005;
-    _displayAngle = rotationDone ? _targetAngle : _displayAngle + angleDiff * lerpFactor;
+    _displayAngle =
+        rotationDone ? _targetAngle : _displayAngle + angleDiff * lerpFactor;
 
-    final hasRunningAnimation = !scaleDone || !offsetXDone || !offsetYDone || !rotationDone;
+    final hasRunningAnimation =
+        !scaleDone || !offsetXDone || !offsetYDone || !rotationDone;
     if (!hasRunningAnimation && !_isLongPressing && _movingBuilding == null) {
       _animating = false;
       _ticker.stop();
@@ -273,136 +277,83 @@ class CanvasEditorState extends State<CanvasEditor>
   /// 驱动所有传送带的 itemFillCount / itemDrainCount 增减
   void _onBeltTick() {
     final buildings = _project.buildings;
-    final items = widget.dataLoader.items;
 
-    // 跟踪本轮刚创建残留的传送带，避免同 tick 内立即排空
-    final justCreatedResidual = <String>{};
-
-    print('[BeltTick] _onBeltTick called, conveyors: ${_project.conveyors.length}');
+    print(
+        '[BeltTick] _onBeltTick called, conveyors: ${_project.conveyors.length}');
 
     for (final belt in _project.conveyors) {
       if (belt.isBlocked) continue;
       if (belt.path.isEmpty) continue;
 
-      final pathLen = belt.path.length;
-
       // 检测是否是断头传送带（终点未连接设备输入端口）
-      final isDeadEnd = !TransportBeltRenderer.isInputPort(belt.path.last, buildings);
+      final isDeadEnd =
+          !TransportBeltRenderer.isInputPort(belt.path.last, buildings);
+      final sourceItemId = _getOutputItemIdForBeltStart(belt);
+      final isProducing = sourceItemId != null && sourceItemId.isNotEmpty;
 
-      // 检测 itemId 变化：如果 itemId 从空变为非空，初始化 fillCount
-      final prevItemId = _prevBeltItemIds[belt.id] ?? '';
-      final prevLastItemId = _prevBeltLastItemIds[belt.id] ?? '';
-
-      print('[BeltTick] belt=${belt.id} id=${belt.id.hashCode.toRadixString(16)} '
+      print(
+          '[BeltTick] belt=${belt.id} id=${belt.id.hashCode.toRadixString(16)} '
           'isDeadEnd=$isDeadEnd '
-          'itemId="${belt.itemId}" prevItemId="$prevItemId" '
-          'fill=$belt.itemFillCount drain=$belt.itemDrainCount pathLen=$pathLen '
+          'sourceItemId="${sourceItemId ?? ''}" itemId="${belt.itemId}" '
+          'fill=$belt.itemFillCount drain=$belt.itemDrainCount pathLen=${belt.path.length} '
           'lastFill=$belt.lastItemFillCount lastDrain=$belt.lastItemDrainCount '
           'lastId="${belt.lastItemId}"');
 
-      // 跟踪本轮是否刚初始化了 fillCount（跳过递增，让物品自然流出）
-      bool justInitialized = false;
-
-      if (belt.itemId.isNotEmpty && prevItemId.isEmpty) {
-        // 新的物品开始填充
-        // 如果 _applyTickResult 已初始化 fillCount（即时响应），保留其值
-        // 否则初始化为 1（手动创建的传送带可能已有 itemId）
-        if (belt.itemFillCount == 0) {
-          belt.itemFillCount = 1;
-          justInitialized = true;
-        }
-        belt.itemDrainCount = 0;
+      belt.ensureItemSegmentsFromLegacy();
+      if (isProducing) {
+        belt.pushSourceItem(sourceItemId);
       }
-      if (belt.itemId.isNotEmpty && prevItemId.isNotEmpty && belt.itemId != prevItemId) {
-        // 物品切换：旧物品变为残留
-        if (belt.itemFillCount > 0) {
-          belt.lastItemId = prevItemId;
-          belt.lastItemFillCount = belt.itemFillCount;
-          belt.lastItemDrainCount = 0;
-          justCreatedResidual.add(belt.id);
-        }
-        belt.itemFillCount = 0;
-        belt.itemDrainCount = 0;
-      }
-      if (belt.itemId.isEmpty && prevItemId.isNotEmpty) {
-        // 源断开：当前物品转为残留（如果还有）
-        if (belt.itemFillCount > 0) {
-          belt.lastItemId = prevItemId;
-          belt.lastItemFillCount = belt.itemFillCount;
-          belt.lastItemDrainCount = 0;
-          justCreatedResidual.add(belt.id);
-        }
-        belt.itemFillCount = 0;
-        belt.itemDrainCount = 0;
-      }
-
+      belt.advanceItemSegments(
+        isDeadEnd: isDeadEnd,
+        activeSourceItemId: isProducing ? sourceItemId : null,
+      );
       _prevBeltItemIds[belt.id] = belt.itemId;
       _prevBeltLastItemIds[belt.id] = belt.lastItemId;
-
-      // 判断是否有源在生产
-      final item = items[belt.itemId];
-      final isProducing = item != null && belt.itemId.isNotEmpty;
-
-      // === 当前物品的填充/排空 ===
-      if (isProducing) {
-        // 源存在：每 tick 填充一格
-        // 当 itemId 首次出现时（justInitialized），跳过本次的递增，让物品自然流出
-        if (!justInitialized && belt.itemFillCount < pathLen) {
-          belt.itemFillCount++;
-        }
-        belt.itemDrainCount = 0;
-        // 有新产品进入，清除残留
-        if (belt.lastItemFillCount > 0) {
-          belt.lastItemFillCount = 0;
-          belt.lastItemDrainCount = 0;
-        }
-      } else if (belt.itemFillCount > 0 && !isDeadEnd) {
-        // 源断开 + 非断头传送带：每 tick 排空一格
-        if (belt.itemDrainCount < belt.itemFillCount) {
-          belt.itemDrainCount++;
-        }
-        if (belt.itemDrainCount >= belt.itemFillCount) {
-          belt.itemFillCount = 0;
-          belt.itemDrainCount = 0;
-        }
-      }
-      // 断头传送带 + 源断开：不排空当前物品，转为残留后"水龙头"模式流向末端
-      // （当前物品已被转为残留，见上面 itemId.isEmpty 的分支）
-
-      // === 残留物品的处理 ===
-      // 跳过本轮刚创建的残留，避免同 tick 内创建即操作
-      if (belt.lastItemFillCount > 0 && !isProducing && !justCreatedResidual.contains(belt.id)) {
-        if (isDeadEnd) {
-          // 断头传送带："关水龙头"模式 — 物品向末端流动并堆积
-          // fillCount 和 drainCount 同时前进，物品整体向右平移
-          // 当 fillCount 碰壁（达到 pathLen）后停止，物品堆积在末端
-          if (belt.lastItemFillCount < pathLen) {
-            // 尚未碰壁：整体向右平移一格
-            belt.lastItemFillCount++;
-            belt.lastItemDrainCount++;
-            print('[BeltTick] dead-end residual shift: fill=${belt.lastItemFillCount} drain=${belt.lastItemDrainCount}');
-          } else {
-            print('[BeltTick] dead-end residual at wall: fill=${belt.lastItemFillCount} (capped at $pathLen), frozen');
-          }
-          // 碰壁后不继续排空，物品停留在末端
-        } else {
-          // 非断头传送带：残留物品逐格排空（流入设备）
-          if (belt.lastItemDrainCount < belt.lastItemFillCount) {
-            belt.lastItemDrainCount++;
-            print('[BeltTick] connected residual drain: drain=${belt.lastItemDrainCount} fill=${belt.lastItemFillCount}');
-          }
-          if (belt.lastItemDrainCount >= belt.lastItemFillCount) {
-            belt.lastItemFillCount = 0;
-            belt.lastItemDrainCount = 0;
-            print('[BeltTick] connected residual fully drained');
-          }
-        }
-      }
     }
     // 确保重绘（当从 AnimationController listener 触发时，ticker 可能已暂停）
     if (mounted) {
       setState(() {});
     }
+  }
+
+  String? _getOutputItemIdForBeltStart(ConveyorBelt belt) {
+    if (belt.path.isEmpty) return null;
+    final start = belt.path.first;
+    for (final pb in _project.buildings) {
+      final outputIndex = _findOutputPortIndexAtCell(pb, start);
+      if (outputIndex == null) continue;
+
+      if (pb.building.id == DepotUnloaderConfig.id) {
+        final itemId = pb.depotOutputItemId;
+        return itemId == null || itemId.isEmpty ? null : itemId;
+      }
+
+      final recipe = pb.activeRecipeId != null
+          ? widget.dataLoader.getRecipe(pb.activeRecipeId!)
+          : null;
+      if (recipe == null || recipe.outputs.isEmpty) return null;
+      final output = recipe.outputs.length > outputIndex
+          ? recipe.outputs[outputIndex]
+          : recipe.outputs.first;
+      return output.itemId;
+    }
+    return null;
+  }
+
+  int? _findOutputPortIndexAtCell(PlacedBuilding pb, Offset cell) {
+    final gx = cell.dx.round();
+    final gy = cell.dy.round();
+    final rot = pb.rotation;
+    final gw = pb.building.gridWidth;
+    final gh = pb.building.gridHeight;
+    for (int i = 0; i < pb.outputPorts.length; i++) {
+      final portCell = pb.outputPorts[i]
+          .gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
+      if (portCell.dx.round() == gx && portCell.dy.round() == gy) {
+        return i;
+      }
+    }
+    return null;
   }
 
   void _startAnimation() {
@@ -496,8 +447,8 @@ class CanvasEditorState extends State<CanvasEditor>
     if (_isMiddleDragging) return;
 
     final oldScale = _targetScale;
-    final newScale =
-        (_targetScale * (1 - event.scrollDelta.dy / 200)).clamp(_minScale, _maxScale);
+    final newScale = (_targetScale * (1 - event.scrollDelta.dy / 200))
+        .clamp(_minScale, _maxScale);
 
     if ((newScale - oldScale).abs() < 0.0001) return;
 
@@ -507,17 +458,21 @@ class CanvasEditorState extends State<CanvasEditor>
     final center = Offset(size.width / 2, size.height / 2);
     final cosA = math.cos(_displayAngle);
     final sinA = math.sin(_displayAngle);
-    var preRotationPos = Offset(localPos.dx - center.dx, localPos.dy - center.dy);
+    var preRotationPos =
+        Offset(localPos.dx - center.dx, localPos.dy - center.dy);
     preRotationPos = Offset(
       preRotationPos.dx * cosA + preRotationPos.dy * sinA,
       -preRotationPos.dx * sinA + preRotationPos.dy * cosA,
     );
-    preRotationPos = Offset(preRotationPos.dx + center.dx, preRotationPos.dy + center.dy);
+    preRotationPos =
+        Offset(preRotationPos.dx + center.dx, preRotationPos.dy + center.dy);
 
     _targetOffsetX =
-        (preRotationPos.dx + _targetOffsetX) * newScale / oldScale - preRotationPos.dx;
+        (preRotationPos.dx + _targetOffsetX) * newScale / oldScale -
+            preRotationPos.dx;
     _targetOffsetY =
-        (preRotationPos.dy + _targetOffsetY) * newScale / oldScale - preRotationPos.dy;
+        (preRotationPos.dy + _targetOffsetY) * newScale / oldScale -
+            preRotationPos.dy;
     _targetScale = newScale;
 
     _startAnimation();
@@ -607,7 +562,8 @@ class CanvasEditorState extends State<CanvasEditor>
       final gw = pb.building.gridWidth;
       final gh = pb.building.gridHeight;
       for (final port in [...pb.inputPorts, ...pb.outputPorts]) {
-        final portGrid = port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
+        final portGrid =
+            port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
         if (portGrid.dx.round() == gx && portGrid.dy.round() == gy) {
           return true;
         }
@@ -633,8 +589,9 @@ class CanvasEditorState extends State<CanvasEditor>
         final otherFirst = other.path.first;
         final otherLast = other.path.last;
 
-        final connectsAtStart = (firstCell.dx == otherLast.dx && firstCell.dy == otherLast.dy) ||
-            (lastCell.dx == otherFirst.dx && lastCell.dy == otherFirst.dy);
+        final connectsAtStart =
+            (firstCell.dx == otherLast.dx && firstCell.dy == otherLast.dy) ||
+                (lastCell.dx == otherFirst.dx && lastCell.dy == otherFirst.dy);
 
         if (connectsAtStart) {
           visited.add(other.id);
@@ -708,13 +665,18 @@ class CanvasEditorState extends State<CanvasEditor>
           path: beforePath,
           itemId: belt.itemId,
           lastItemId: belt.lastItemId,
+          itemSegments: belt.clippedItemSegments(0, cellIndex),
           isBlocked: belt.isBlocked,
           incomingDirection: belt.incomingDirection,
           forcedDirection: beforeForcedDir,
           itemFillCount: math.min(belt.itemFillCount, beforePath.length),
           itemDrainCount: math.min(belt.itemDrainCount, beforePath.length),
-          lastItemFillCount: math.min(belt.lastItemFillCount, beforePath.length),
-          lastItemDrainCount: math.min(belt.lastItemDrainCount, beforePath.length),
+          lastItemFillCount:
+              math.min(belt.lastItemFillCount, beforePath.length),
+          lastItemDrainCount:
+              math.min(belt.lastItemDrainCount, beforePath.length),
+          deadEndFreezeProgress: belt.deadEndFreezeProgress,
+          lastItemFreezeProgress: belt.lastItemFreezeProgress,
         ));
       }
 
@@ -743,6 +705,8 @@ class CanvasEditorState extends State<CanvasEditor>
           path: afterPath,
           itemId: belt.itemId,
           lastItemId: belt.lastItemId,
+          itemSegments:
+              belt.clippedItemSegments(cellIndex + 1, belt.path.length),
           isBlocked: belt.isBlocked,
           forcedDirection: forcedDir,
           incomingDirection: incomingDir,
@@ -754,6 +718,8 @@ class CanvasEditorState extends State<CanvasEditor>
           lastItemDrainCount: belt.lastItemFillCount > 0
               ? math.max(0, belt.lastItemDrainCount - (cellIndex + 1))
               : 0,
+          deadEndFreezeProgress: belt.deadEndFreezeProgress,
+          lastItemFreezeProgress: belt.lastItemFreezeProgress,
         ));
       }
 
@@ -772,9 +738,10 @@ class CanvasEditorState extends State<CanvasEditor>
 
   void _collectAllFromLine(List<ConveyorBelt> belts) {
     for (final belt in belts) {
-      if (belt.itemId.isNotEmpty) {
+      if (belt.itemId.isNotEmpty || belt.itemSegments.isNotEmpty) {
         setState(() {
-          belt.itemId = '';
+          belt.itemSegments.clear();
+          belt.syncLegacyFromSegments();
         });
       }
     }
@@ -782,7 +749,8 @@ class CanvasEditorState extends State<CanvasEditor>
   }
 
   /// 检查建筑在指定位置是否会发生碰撞（建筑重叠或传送带重叠）
-  bool _checkBuildingCollision(Building building, double cx, double cy, int rotation) {
+  bool _checkBuildingCollision(
+      Building building, double cx, double cy, int rotation) {
     final tempBuilding = PlacedBuilding(
       id: 'temp',
       building: building,
@@ -891,7 +859,8 @@ class CanvasEditorState extends State<CanvasEditor>
       outputPortCells.add('${cell.dx.toInt()}_${cell.dy.toInt()}');
     }
     for (final port in pb.inputPorts) {
-      portCells.add(port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot));
+      portCells
+          .add(port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot));
     }
 
     final toRemove = <ConveyorBelt>[];
@@ -951,7 +920,8 @@ class CanvasEditorState extends State<CanvasEditor>
           // 判断该段是否因输出端口断开而失去源
           // 如果该段前面紧挨着一个输出端口格子（被移除的），则该段失去了源
           final lostSource = start > 0 &&
-              outputPortCells.contains('${belt.path[start - 1].dx.toInt()}_${belt.path[start - 1].dy.toInt()}');
+              outputPortCells.contains(
+                  '${belt.path[start - 1].dx.toInt()}_${belt.path[start - 1].dy.toInt()}');
 
           // 计算该段内的 itemFillCount（相对于段起始位置）
           final segFillCount = start == 0
@@ -968,28 +938,22 @@ class CanvasEditorState extends State<CanvasEditor>
                   ? math.max(0, belt.lastItemDrainCount - start)
                   : 0
               : 0;
+          final segDeadEndFreezeProgress = (segFillCount >= segment.length)
+              ? belt.deadEndFreezeProgress
+              : null;
+          final segLastItemFreezeProgress = (segLastFillCount >= segment.length)
+              ? belt.lastItemFreezeProgress
+              : null;
+          final segmentItemSegments = belt.clippedItemSegments(start, portIdx);
 
           if (lostSource && belt.itemId.isNotEmpty) {
             // 源断开：将当前物品状态转移到残留物品，清空当前物品
             toAdd.add(ConveyorBelt(
               id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
               path: segment,
-              itemId: '',
-              lastItemId: belt.itemId,
-              itemFillCount: 0,
-              itemDrainCount: 0,
-              isBlocked: belt.isBlocked,
-              forcedDirection: forcedDir,
-              incomingDirection: incomingDir,
-              lastItemFillCount: segFillCount,
-              lastItemDrainCount: segDrainCount,
-            ));
-          } else {
-            toAdd.add(ConveyorBelt(
-              id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
-              path: segment,
               itemId: belt.itemId,
               lastItemId: belt.lastItemId,
+              itemSegments: segmentItemSegments,
               itemFillCount: segFillCount,
               itemDrainCount: segDrainCount,
               isBlocked: belt.isBlocked,
@@ -997,6 +961,25 @@ class CanvasEditorState extends State<CanvasEditor>
               incomingDirection: incomingDir,
               lastItemFillCount: segLastFillCount,
               lastItemDrainCount: segLastDrainCount,
+              deadEndFreezeProgress: segDeadEndFreezeProgress,
+              lastItemFreezeProgress: segLastItemFreezeProgress,
+            ));
+          } else {
+            toAdd.add(ConveyorBelt(
+              id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
+              path: segment,
+              itemId: belt.itemId,
+              lastItemId: belt.lastItemId,
+              itemSegments: segmentItemSegments,
+              itemFillCount: segFillCount,
+              itemDrainCount: segDrainCount,
+              isBlocked: belt.isBlocked,
+              forcedDirection: forcedDir,
+              incomingDirection: incomingDir,
+              lastItemFillCount: segLastFillCount,
+              lastItemDrainCount: segLastDrainCount,
+              deadEndFreezeProgress: segDeadEndFreezeProgress,
+              lastItemFreezeProgress: segLastItemFreezeProgress,
             ));
           }
         }
@@ -1025,7 +1008,8 @@ class CanvasEditorState extends State<CanvasEditor>
 
         // 判断最后一段是否因输出端口断开而失去源
         final lostSource = start > 0 &&
-            outputPortCells.contains('${belt.path[start - 1].dx.toInt()}_${belt.path[start - 1].dy.toInt()}');
+            outputPortCells.contains(
+                '${belt.path[start - 1].dx.toInt()}_${belt.path[start - 1].dy.toInt()}');
 
         final segFillCount = math.max(0, belt.itemFillCount - start);
         final segDrainCount = math.max(0, belt.itemDrainCount - start);
@@ -1035,28 +1019,23 @@ class CanvasEditorState extends State<CanvasEditor>
         final segLastDrainCount = belt.lastItemFillCount > 0
             ? math.max(0, belt.lastItemDrainCount - start)
             : 0;
+        final segDeadEndFreezeProgress = (segFillCount >= segment.length)
+            ? belt.deadEndFreezeProgress
+            : null;
+        final segLastItemFreezeProgress = (segLastFillCount >= segment.length)
+            ? belt.lastItemFreezeProgress
+            : null;
+        final segmentItemSegments =
+            belt.clippedItemSegments(start, belt.path.length);
 
         if (lostSource && belt.itemId.isNotEmpty) {
           // 源断开：将当前物品状态转移到残留物品，清空当前物品
           toAdd.add(ConveyorBelt(
             id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
             path: segment,
-            itemId: '',
-            lastItemId: belt.itemId,
-            itemFillCount: 0,
-            itemDrainCount: 0,
-            isBlocked: belt.isBlocked,
-            forcedDirection: forcedDir,
-            incomingDirection: incomingDir,
-            lastItemFillCount: segFillCount,
-            lastItemDrainCount: segDrainCount,
-          ));
-        } else {
-          toAdd.add(ConveyorBelt(
-            id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
-            path: segment,
             itemId: belt.itemId,
             lastItemId: belt.lastItemId,
+            itemSegments: segmentItemSegments,
             itemFillCount: segFillCount,
             itemDrainCount: segDrainCount,
             isBlocked: belt.isBlocked,
@@ -1064,6 +1043,25 @@ class CanvasEditorState extends State<CanvasEditor>
             incomingDirection: incomingDir,
             lastItemFillCount: segLastFillCount,
             lastItemDrainCount: segLastDrainCount,
+            deadEndFreezeProgress: segDeadEndFreezeProgress,
+            lastItemFreezeProgress: segLastItemFreezeProgress,
+          ));
+        } else {
+          toAdd.add(ConveyorBelt(
+            id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${toAdd.length}',
+            path: segment,
+            itemId: belt.itemId,
+            lastItemId: belt.lastItemId,
+            itemSegments: segmentItemSegments,
+            itemFillCount: segFillCount,
+            itemDrainCount: segDrainCount,
+            isBlocked: belt.isBlocked,
+            forcedDirection: forcedDir,
+            incomingDirection: incomingDir,
+            lastItemFillCount: segLastFillCount,
+            lastItemDrainCount: segLastDrainCount,
+            deadEndFreezeProgress: segDeadEndFreezeProgress,
+            lastItemFreezeProgress: segLastItemFreezeProgress,
           ));
         }
       }
@@ -1096,8 +1094,10 @@ class CanvasEditorState extends State<CanvasEditor>
 
   void _placeMovingBuilding(Offset gridPos) {
     if (_movingBuilding == null) return;
-    final cx = gridPos.dx - (_movingBuilding!.building.gridWidth ~/ 2).toDouble();
-    final cy = gridPos.dy - (_movingBuilding!.building.gridHeight ~/ 2).toDouble();
+    final cx =
+        gridPos.dx - (_movingBuilding!.building.gridWidth ~/ 2).toDouble();
+    final cy =
+        gridPos.dy - (_movingBuilding!.building.gridHeight ~/ 2).toDouble();
 
     // It was never removed from _project.buildings, but we temporarily updated it for collision checking.
     // Let's create a temporary clone for collision checking.
@@ -1109,7 +1109,10 @@ class CanvasEditorState extends State<CanvasEditor>
       rotation: _movingRotation,
     );
 
-    if (_checkBuildingCollision(tempBuilding.building, cx, cy, _movingRotation)) return;
+    if (_checkBuildingCollision(
+        tempBuilding.building, cx, cy, _movingRotation)) {
+      return;
+    }
 
     // Since we are confirming the move, NOW we execute port removal from the OLD location before updating coordinates
     _removePortBeltCells(_movingBuilding!);
@@ -1173,198 +1176,206 @@ class CanvasEditorState extends State<CanvasEditor>
       onKeyEvent: _handleKeyEvent,
       autofocus: true,
       child: MouseRegion(
-      onHover: (event) {
-        final renderBox = context.findRenderObject() as RenderBox;
-        final localPos = renderBox.globalToLocal(event.position);
-        final gridPos = _screenToGrid(localPos, renderBox.size);
-        // 只在网格位置变化时才触发重绘
-        if (_mouseGridPos == gridPos) return;
-        setState(() {
-          _mouseGridPos = gridPos;
-          // 检测悬停的建筑
-          _hoveredBuilding = widget.placingBuilding == null &&
-                  _movingBuilding == null
-              ? _getBuildingAt(gridPos)
-              : null;
-          if (widget.conveyorMode) {
-            _beltCtrl.handleHover(gridPos);
-          } else {
-            _beltCtrl.reset();
-          }
-        });
-      },
-      child: Listener(
-        onPointerSignal: (event) {
-          if (event is PointerScrollEvent) {
-            final renderBox = context.findRenderObject() as RenderBox;
-            final localPos = renderBox.globalToLocal(event.position);
-            _handleScroll(event, localPos);
-          }
+        onHover: (event) {
+          final renderBox = context.findRenderObject() as RenderBox;
+          final localPos = renderBox.globalToLocal(event.position);
+          final gridPos = _screenToGrid(localPos, renderBox.size);
+          // 只在网格位置变化时才触发重绘
+          if (_mouseGridPos == gridPos) return;
+          setState(() {
+            _mouseGridPos = gridPos;
+            // 检测悬停的建筑
+            _hoveredBuilding =
+                widget.placingBuilding == null && _movingBuilding == null
+                    ? _getBuildingAt(gridPos)
+                    : null;
+            if (widget.conveyorMode) {
+              _beltCtrl.handleHover(gridPos);
+            } else {
+              _beltCtrl.reset();
+            }
+          });
         },
-        onPointerDown: (event) {
-          _lastPointerWasPrimary = event.buttons & kPrimaryMouseButton != 0;
-          // 中键拖拽
-          if (event.buttons & kMiddleMouseButton != 0 && _middleDragPointerId == null) {
-            _middleDragPointerId = event.pointer;
-            _lastMiddlePos = event.localPosition;
-            _isMiddleDragging = true;
-            return;
-          }
-          // 左键
-          if (event.buttons & kPrimaryMouseButton != 0) {
+        child: Listener(
+          onPointerSignal: (event) {
+            if (event is PointerScrollEvent) {
+              final renderBox = context.findRenderObject() as RenderBox;
+              final localPos = renderBox.globalToLocal(event.position);
+              _handleScroll(event, localPos);
+            }
+          },
+          onPointerDown: (event) {
+            _lastPointerWasPrimary = event.buttons & kPrimaryMouseButton != 0;
+            // 中键拖拽
+            if (event.buttons & kMiddleMouseButton != 0 &&
+                _middleDragPointerId == null) {
+              _middleDragPointerId = event.pointer;
+              _lastMiddlePos = event.localPosition;
+              _isMiddleDragging = true;
+              return;
+            }
+            // 左键
+            if (event.buttons & kPrimaryMouseButton != 0) {
+              final renderBox = context.findRenderObject() as RenderBox;
+              final localPos = event.localPosition;
+              final gridPos = _screenToGrid(localPos, renderBox.size);
+
+              // 移动模式：点击放置
+              if (_movingBuilding != null) {
+                _placeMovingBuilding(gridPos);
+                setState(() {});
+                return;
+              }
+
+              // 放置模式：立即放置
+              if (widget.placingBuilding != null) {
+                _handleTap(localPos, renderBox.size);
+                setState(() {});
+                return;
+              }
+
+              // 传送带模式：立即处理
+              if (widget.conveyorMode) {
+                _handleTap(localPos, renderBox.size);
+                setState(() {});
+                return;
+              }
+
+              // 普通模式：检测是否点击了建筑（用于长按）
+              final pb = _getBuildingAt(gridPos);
+              if (pb != null) {
+                _startLongPress(localPos, pb);
+              }
+              setState(() {});
+            }
+            // 右键：移动模式下取消
+            if (event.buttons & kSecondaryMouseButton != 0 &&
+                _movingBuilding != null) {
+              cancelMoveMode();
+              setState(() {});
+            }
+          },
+          onPointerMove: (event) {
+            if (event.pointer == _middleDragPointerId &&
+                _lastMiddlePos != null) {
+              final delta = event.localPosition - _lastMiddlePos!;
+              final rotatedDelta = _screenDeltaToWorldDelta(delta);
+              _targetOffsetX -= rotatedDelta.dx;
+              _targetOffsetY -= rotatedDelta.dy;
+              _displayOffsetX = _targetOffsetX;
+              _displayOffsetY = _targetOffsetY;
+              _lastMiddlePos = event.localPosition;
+              setState(() {});
+            }
+            // 长按时移动过远则取消
+            if (_isLongPressing && _longPressScreenPos != null) {
+              const cancelDist = 30.0;
+              if ((event.localPosition - _longPressScreenPos!).distance >
+                  cancelDist) {
+                _cancelLongPress();
+                setState(() {});
+              }
+            }
+          },
+          onPointerUp: (event) {
+            if (event.pointer == _middleDragPointerId) {
+              _middleDragPointerId = null;
+              _lastMiddlePos = null;
+              _isMiddleDragging = false;
+              return;
+            }
+
+            // 仅左键释放时处理传送带弹窗和建筑选中
+            final isPrimaryButton = _lastPointerWasPrimary;
+
             final renderBox = context.findRenderObject() as RenderBox;
             final localPos = event.localPosition;
             final gridPos = _screenToGrid(localPos, renderBox.size);
 
-            // 移动模式：点击放置
-            if (_movingBuilding != null) {
-              _placeMovingBuilding(gridPos);
-              setState(() {});
-              return;
-            }
-
-            // 放置模式：立即放置
-            if (widget.placingBuilding != null) {
-              _handleTap(localPos, renderBox.size);
-              setState(() {});
-              return;
-            }
-
-            // 传送带模式：立即处理
-            if (widget.conveyorMode) {
-              _handleTap(localPos, renderBox.size);
-              setState(() {});
-              return;
-            }
-
-            // 普通模式：检测是否点击了建筑（用于长按）
-            final pb = _getBuildingAt(gridPos);
-            if (pb != null) {
-              _startLongPress(localPos, pb);
-            }
-            setState(() {});
-          }
-          // 右键：移动模式下取消
-          if (event.buttons & kSecondaryMouseButton != 0 && _movingBuilding != null) {
-            cancelMoveMode();
-            setState(() {});
-          }
-        },
-        onPointerMove: (event) {
-          if (event.pointer == _middleDragPointerId && _lastMiddlePos != null) {
-            final delta = event.localPosition - _lastMiddlePos!;
-            final rotatedDelta = _screenDeltaToWorldDelta(delta);
-            _targetOffsetX -= rotatedDelta.dx;
-            _targetOffsetY -= rotatedDelta.dy;
-            _displayOffsetX = _targetOffsetX;
-            _displayOffsetY = _targetOffsetY;
-            _lastMiddlePos = event.localPosition;
-            setState(() {});
-          }
-          // 长按时移动过远则取消
-          if (_isLongPressing && _longPressScreenPos != null) {
-            const cancelDist = 30.0;
-            if ((event.localPosition - _longPressScreenPos!).distance > cancelDist) {
+            if (_isLongPressing && _longPressProgress < 1.0) {
               _cancelLongPress();
+              if (isPrimaryButton &&
+                  !widget.conveyorMode &&
+                  widget.placingBuilding == null) {
+                final clickedBelt = _findBeltAtCell(gridPos);
+                if (clickedBelt != null && !_isCellOnBuildingPort(gridPos)) {
+                  _showConveyorBeltDialog(clickedBelt, gridPos);
+                  setState(() {});
+                  return;
+                }
+              }
+              _handleSingleClick(localPos, renderBox.size);
               setState(() {});
-            }
-          }
-        },
-        onPointerUp: (event) {
-          if (event.pointer == _middleDragPointerId) {
-            _middleDragPointerId = null;
-            _lastMiddlePos = null;
-            _isMiddleDragging = false;
-            return;
-          }
-
-          // 仅左键释放时处理传送带弹窗和建筑选中
-          final isPrimaryButton = _lastPointerWasPrimary;
-
-          final renderBox = context.findRenderObject() as RenderBox;
-          final localPos = event.localPosition;
-          final gridPos = _screenToGrid(localPos, renderBox.size);
-
-          if (_isLongPressing && _longPressProgress < 1.0) {
-            _cancelLongPress();
-            if (isPrimaryButton && !widget.conveyorMode && widget.placingBuilding == null) {
+            } else if (isPrimaryButton &&
+                !_isLongPressing &&
+                !widget.conveyorMode &&
+                widget.placingBuilding == null &&
+                _movingBuilding == null) {
               final clickedBelt = _findBeltAtCell(gridPos);
               if (clickedBelt != null && !_isCellOnBuildingPort(gridPos)) {
                 _showConveyorBeltDialog(clickedBelt, gridPos);
                 setState(() {});
-                return;
               }
             }
-            _handleSingleClick(localPos, renderBox.size);
-            setState(() {});
-          } else if (isPrimaryButton &&
-                     !_isLongPressing &&
-                     !widget.conveyorMode &&
-                     widget.placingBuilding == null &&
-                     _movingBuilding == null) {
-            final clickedBelt = _findBeltAtCell(gridPos);
-            if (clickedBelt != null && !_isCellOnBuildingPort(gridPos)) {
-              _showConveyorBeltDialog(clickedBelt, gridPos);
+          },
+          onPointerCancel: (event) {
+            if (event.pointer == _middleDragPointerId) {
+              _middleDragPointerId = null;
+              _lastMiddlePos = null;
+              _isMiddleDragging = false;
+            }
+            if (_isLongPressing) {
+              _cancelLongPress();
               setState(() {});
             }
-          }
-        },
-        onPointerCancel: (event) {
-          if (event.pointer == _middleDragPointerId) {
-            _middleDragPointerId = null;
-            _lastMiddlePos = null;
-            _isMiddleDragging = false;
-          }
-          if (_isLongPressing) {
-            _cancelLongPress();
-            setState(() {});
-          }
-        },
-        child: GestureDetector(
-          onScaleStart: _handleScaleStart,
-          onScaleUpdate: (details) {
-            final renderBox = context.findRenderObject() as RenderBox;
-            _handleScaleUpdate(details, renderBox.size);
           },
-          onScaleEnd: _handleScaleEnd,
-          onSecondaryTapUp: (details) {
-            final renderBox = context.findRenderObject() as RenderBox;
-            _handleRightClick(details.localPosition, renderBox.size);
-          },
-          child: CustomPaint(
-            painter: _EditorPainter(
-              repaintTrigger: _repaintTrigger,
-              project: _project,
-              dataLoader: widget.dataLoader,
-              cellSize: _cellSize,
-              placingBuilding: widget.placingBuilding,
-              placingRotation: _placingRotation,
-              mouseGridPos: _mouseGridPos,
-              hoveredBuilding: _hoveredBuilding,
-              conveyorMode: widget.conveyorMode,
-              conveyorConfirmedPath: _beltCtrl.confirmedPath,
-              conveyorPreviewPath: _beltCtrl.previewPath,
-              conveyorPreviewOccupied: _beltCtrl.previewOccupied,
-              conveyorPathInvalid: _beltCtrl.pathInvalid,
-              conveyorForkCell: _beltCtrl.anchors.isNotEmpty ? _beltCtrl.anchors.first : null,
-              conveyorIncomingDirection: _beltCtrl.incomingDirection,
-              previewContextExtension: _beltCtrl.previewContextExtension,
-              displayScale: _displayScale,
-              displayOffsetX: _displayOffsetX,
-              displayOffsetY: _displayOffsetY,
-              displayAngle: _displayAngle,
-              portConnectionsCache: _portConnectionsCache,
-              isLongPressing: _isLongPressing,
-              longPressScreenPos: _longPressScreenPos,
-              longPressProgress: _longPressProgress,
-              movingBuilding: _movingBuilding,
-              movingRotation: _movingRotation,
-              beltArrowController: _beltArrowController,
+          child: GestureDetector(
+            onScaleStart: _handleScaleStart,
+            onScaleUpdate: (details) {
+              final renderBox = context.findRenderObject() as RenderBox;
+              _handleScaleUpdate(details, renderBox.size);
+            },
+            onScaleEnd: _handleScaleEnd,
+            onSecondaryTapUp: (details) {
+              final renderBox = context.findRenderObject() as RenderBox;
+              _handleRightClick(details.localPosition, renderBox.size);
+            },
+            child: CustomPaint(
+              painter: _EditorPainter(
+                repaintTrigger: _repaintTrigger,
+                project: _project,
+                dataLoader: widget.dataLoader,
+                cellSize: _cellSize,
+                placingBuilding: widget.placingBuilding,
+                placingRotation: _placingRotation,
+                mouseGridPos: _mouseGridPos,
+                hoveredBuilding: _hoveredBuilding,
+                conveyorMode: widget.conveyorMode,
+                conveyorConfirmedPath: _beltCtrl.confirmedPath,
+                conveyorPreviewPath: _beltCtrl.previewPath,
+                conveyorPreviewOccupied: _beltCtrl.previewOccupied,
+                conveyorPathInvalid: _beltCtrl.pathInvalid,
+                conveyorForkCell: _beltCtrl.anchors.isNotEmpty
+                    ? _beltCtrl.anchors.first
+                    : null,
+                conveyorIncomingDirection: _beltCtrl.incomingDirection,
+                previewContextExtension: _beltCtrl.previewContextExtension,
+                displayScale: _displayScale,
+                displayOffsetX: _displayOffsetX,
+                displayOffsetY: _displayOffsetY,
+                displayAngle: _displayAngle,
+                portConnectionsCache: _portConnectionsCache,
+                isLongPressing: _isLongPressing,
+                longPressScreenPos: _longPressScreenPos,
+                longPressProgress: _longPressProgress,
+                movingBuilding: _movingBuilding,
+                movingRotation: _movingRotation,
+                beltArrowController: _beltArrowController,
+              ),
+              size: Size.infinite,
             ),
-            size: Size.infinite,
           ),
         ),
-      ),
       ),
     );
   }
@@ -1403,7 +1414,7 @@ class _EditorPainter extends CustomPainter {
   static final Map<String, ui.Picture> _pictureCache = {};
   static const int _maxCacheSize = 200;
 
-/// 清除所有静态渲染缓存
+  /// 清除所有静态渲染缓存
   static void clearPictureCache() {
     _pictureCache.clear();
   }
@@ -1482,8 +1493,10 @@ class _EditorPainter extends CustomPainter {
         fullPathContext = [...conveyorConfirmedPath, ...conveyorPreviewPath!];
         // 去重：已确认段末尾和实时段开头可能重叠
         if (fullPathContext.length >= 2 &&
-            fullPathContext[conveyorConfirmedPath.length - 1].dx == fullPathContext[conveyorConfirmedPath.length].dx &&
-            fullPathContext[conveyorConfirmedPath.length - 1].dy == fullPathContext[conveyorConfirmedPath.length].dy) {
+            fullPathContext[conveyorConfirmedPath.length - 1].dx ==
+                fullPathContext[conveyorConfirmedPath.length].dx &&
+            fullPathContext[conveyorConfirmedPath.length - 1].dy ==
+                fullPathContext[conveyorConfirmedPath.length].dy) {
           fullPathContext.removeAt(conveyorConfirmedPath.length);
           previewStartIndex = conveyorConfirmedPath.length - 1;
         }
@@ -1495,7 +1508,9 @@ class _EditorPainter extends CustomPainter {
     }
 
     // 追加转角上下文扩展（合并目标的路径，仅用于转角检测，不渲染为蓝色预览）
-    if (previewContextExtension != null && previewContextExtension!.isNotEmpty && fullPathContext != null) {
+    if (previewContextExtension != null &&
+        previewContextExtension!.isNotEmpty &&
+        fullPathContext != null) {
       fullPathContext.addAll(previewContextExtension!);
     }
 
@@ -1506,7 +1521,8 @@ class _EditorPainter extends CustomPainter {
       int forkIdx = -1;
       if (startCell != null) {
         for (int i = 0; i < belt.path.length; i++) {
-          if (belt.path[i].dx == startCell.dx && belt.path[i].dy == startCell.dy) {
+          if (belt.path[i].dx == startCell.dx &&
+              belt.path[i].dy == startCell.dy) {
             forkIdx = i;
             break;
           }
@@ -1528,10 +1544,13 @@ class _EditorPainter extends CustomPainter {
       if (!visible) {
         continue;
       }
-      final effectiveItemId = belt.itemId.isNotEmpty ? belt.itemId : belt.lastItemId;
+      final effectiveItemId =
+          belt.itemId.isNotEmpty ? belt.itemId : belt.lastItemId;
       final item = dataLoader.getItem(effectiveItemId);
       // 残留物品：当 lastItemFillCount > 0 且 lastItemId 与当前 itemId 不同时
-      final lastItem = belt.lastItemFillCount > 0 && belt.lastItemId.isNotEmpty && belt.lastItemId != belt.itemId
+      final lastItem = belt.lastItemFillCount > 0 &&
+              belt.lastItemId.isNotEmpty &&
+              belt.lastItemId != belt.itemId
           ? dataLoader.getItem(belt.lastItemId)
           : null;
       // 如果路径被裁剪，创建临时 ConveyorBelt 用于渲染
@@ -1543,10 +1562,15 @@ class _EditorPainter extends CustomPainter {
         if (forkIdx >= 0 && forkIdx + 1 < belt.path.length) {
           final dx = belt.path[forkIdx + 1].dx - belt.path[forkIdx].dx;
           final dy = belt.path[forkIdx + 1].dy - belt.path[forkIdx].dy;
-          if (dx > 0) { incomingDir = 'right'; }
-          else if (dx < 0) { incomingDir = 'left'; }
-          else if (dy > 0) { incomingDir = 'down'; }
-          else if (dy < 0) { incomingDir = 'up'; }
+          if (dx > 0) {
+            incomingDir = 'right';
+          } else if (dx < 0) {
+            incomingDir = 'left';
+          } else if (dy > 0) {
+            incomingDir = 'down';
+          } else if (dy < 0) {
+            incomingDir = 'up';
+          }
           if (renderPath.length == 1) {
             // 如果仅剩最后一格，且原传送带定义了 forcedDirection，则保留原转向
             forcedDir = belt.forcedDirection ?? incomingDir;
@@ -1557,6 +1581,9 @@ class _EditorPainter extends CustomPainter {
           path: renderPath,
           itemId: belt.itemId,
           lastItemId: belt.lastItemId,
+          itemSegments: forkIdx >= 0
+              ? belt.clippedItemSegments(forkIdx + 1, belt.path.length)
+              : belt.shiftedItemSegments(0),
           itemFillCount: forkIdx >= 0
               ? math.max(0, belt.itemFillCount - (forkIdx + 1))
               : belt.itemFillCount,
@@ -1572,10 +1599,22 @@ class _EditorPainter extends CustomPainter {
           lastItemDrainCount: belt.lastItemFillCount > 0 && forkIdx >= 0
               ? math.max(0, belt.lastItemDrainCount - (forkIdx + 1))
               : belt.lastItemDrainCount,
+          deadEndFreezeProgress: belt.deadEndFreezeProgress,
+          lastItemFreezeProgress: belt.lastItemFreezeProgress,
         );
-        TransportBeltRenderer.renderConveyorPath(canvas, clippedBelt, item, cellSize, project.buildings, detailLevel: detailLevel, arrowProgress: beltArrowController.value, lastItem: lastItem);
+        TransportBeltRenderer.renderConveyorPath(
+            canvas, clippedBelt, item, cellSize, project.buildings,
+            detailLevel: detailLevel,
+            arrowProgress: beltArrowController.value,
+            lastItem: lastItem,
+            allItems: dataLoader.items);
       } else {
-        TransportBeltRenderer.renderConveyorPath(canvas, belt, item, cellSize, project.buildings, detailLevel: detailLevel, arrowProgress: beltArrowController.value, lastItem: lastItem);
+        TransportBeltRenderer.renderConveyorPath(
+            canvas, belt, item, cellSize, project.buildings,
+            detailLevel: detailLevel,
+            arrowProgress: beltArrowController.value,
+            lastItem: lastItem,
+            allItems: dataLoader.items);
       }
     }
 
@@ -1593,7 +1632,9 @@ class _EditorPainter extends CustomPainter {
     // 已确认段始终使用传送带本色渲染（不论有效还是无效） - (放到建筑下方渲染)
     if (conveyorConfirmedPath.isNotEmpty) {
       TransportBeltRenderer.renderConfirmedPreviewPath(
-        canvas, conveyorConfirmedPath, cellSize,
+        canvas,
+        conveyorConfirmedPath,
+        cellSize,
         project.buildings,
         fullPathContext: fullPathContext,
         contextStartIndex: confirmedStartIndex,
@@ -1630,9 +1671,12 @@ class _EditorPainter extends CustomPainter {
           contextStartIndex: previewStartIndex,
           incomingDirection: conveyorIncomingDirection,
         );
-      } else if (conveyorMode && mouseGridPos != null && conveyorConfirmedPath.isEmpty) {
+      } else if (conveyorMode &&
+          mouseGridPos != null &&
+          conveyorConfirmedPath.isEmpty) {
         // 传送带处于尚未锚定的预备状态且当前空节点鼠标浮动时，高亮选中指示格
-        TransportBeltRenderer.renderHoverHighlight(canvas, mouseGridPos!, cellSize);
+        TransportBeltRenderer.renderHoverHighlight(
+            canvas, mouseGridPos!, cellSize);
       }
     }
 
@@ -1664,7 +1708,10 @@ class _EditorPainter extends CustomPainter {
         for (int i = 0; i < pb.inputPorts.length; i++) {
           final port = pb.inputPorts[i];
           final portGrid = port.gridPosition(
-            pb.gridX, pb.gridY, pb.building.gridWidth, pb.building.gridHeight,
+            pb.gridX,
+            pb.gridY,
+            pb.building.gridWidth,
+            pb.building.gridHeight,
             rotation: pb.rotation,
           );
           if (containsGrid(portGrid)) {
@@ -1674,7 +1721,10 @@ class _EditorPainter extends CustomPainter {
         for (int i = 0; i < pb.outputPorts.length; i++) {
           final port = pb.outputPorts[i];
           final portGrid = port.gridPosition(
-            pb.gridX, pb.gridY, pb.building.gridWidth, pb.building.gridHeight,
+            pb.gridX,
+            pb.gridY,
+            pb.building.gridWidth,
+            pb.building.gridHeight,
             rotation: pb.rotation,
           );
           if (containsGrid(portGrid)) {
@@ -1684,9 +1734,12 @@ class _EditorPainter extends CustomPainter {
       }
 
       // 预渲染缓存 key
-      final sortedEntries = combinedPorts.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
-      final portsHash = sortedEntries.map((e) => '${e.key}:${e.value}').join(',');
-      final cacheKey = '${pb.building.id}_${pb.rotation}_${detailLevel}_$portsHash';
+      final sortedEntries = combinedPorts.entries.toList()
+        ..sort((a, b) => a.key.compareTo(b.key));
+      final portsHash =
+          sortedEntries.map((e) => '${e.key}:${e.value}').join(',');
+      final cacheKey =
+          '${pb.building.id}_${pb.rotation}_${detailLevel}_$portsHash';
 
       final x = pb.gridX * cellSize;
       final y = pb.gridY * cellSize;
@@ -1701,7 +1754,8 @@ class _EditorPainter extends CustomPainter {
         recordCanvas.rotate(pb.rotation * math.pi / 2);
         recordCanvas.translate(-w / 2, -h / 2);
 
-        _renderBuildingStatic(recordCanvas, pb, cellSize, detailLevel, combinedPorts);
+        _renderBuildingStatic(
+            recordCanvas, pb, cellSize, detailLevel, combinedPorts);
 
         cachedPicture = recorder.endRecording();
         if (_pictureCache.length >= _maxCacheSize) {
@@ -1716,18 +1770,36 @@ class _EditorPainter extends CustomPainter {
       canvas.restore();
 
       // Logo 单独绘制（不缓存），始终不随设备/画布旋转
-      if (pb.building.id == RefiningUnitConfig.id && RefiningUnitRenderer.isReady) {
+      if (pb.building.id == RefiningUnitConfig.id &&
+          RefiningUnitRenderer.isReady) {
         RefiningUnitRenderer.renderLogo(
-          canvas, x, y, w, h, pb.rotation, displayAngle,
+          canvas,
+          x,
+          y,
+          w,
+          h,
+          pb.rotation,
+          displayAngle,
         );
-      } else if ((pb.building.id == DepotLoaderConfig.id || pb.building.id == DepotUnloaderConfig.id) && DepotAccessRenderer.isReady) {
+      } else if ((pb.building.id == DepotLoaderConfig.id ||
+              pb.building.id == DepotUnloaderConfig.id) &&
+          DepotAccessRenderer.isReady) {
         DepotAccessRenderer.renderLogo(
-          canvas, x, y, w, h, pb.building.id, pb.rotation, displayAngle,
+          canvas,
+          x,
+          y,
+          w,
+          h,
+          pb.building.id,
+          pb.rotation,
+          displayAngle,
         );
       }
 
       // 动态部分：进度条（每帧绘制，不缓存）
-      if (detailLevel >= 1 && pb.productionProgress > 0 && pb.productionProgress < 1.0) {
+      if (detailLevel >= 1 &&
+          pb.productionProgress > 0 &&
+          pb.productionProgress < 1.0) {
         canvas.save();
         canvas.translate(x + w / 2, y + h / 2);
         canvas.rotate(pb.rotation * math.pi / 2);
@@ -1738,27 +1810,48 @@ class _EditorPainter extends CustomPainter {
     }
 
     if (placingBuilding != null && mouseGridPos != null) {
-      final cx = mouseGridPos!.dx - (placingBuilding!.gridWidth ~/ 2).toDouble();
-      final cy = mouseGridPos!.dy - (placingBuilding!.gridHeight ~/ 2).toDouble();
-      final isBlocked = _isPreviewBlocked(placingBuilding!, cx, cy, placingRotation);
+      final cx =
+          mouseGridPos!.dx - (placingBuilding!.gridWidth ~/ 2).toDouble();
+      final cy =
+          mouseGridPos!.dy - (placingBuilding!.gridHeight ~/ 2).toDouble();
+      final isBlocked =
+          _isPreviewBlocked(placingBuilding!, cx, cy, placingRotation);
 
       if (placingBuilding!.id == RefiningUnitConfig.id) {
         RefiningUnitRenderer.renderPlaceholder(
-          canvas, placingBuilding!, cx, cy, cellSize, 0.6,
-          rotation: placingRotation, isBlocked: isBlocked,
+          canvas,
+          placingBuilding!,
+          cx,
+          cy,
+          cellSize,
+          0.6,
+          rotation: placingRotation,
+          isBlocked: isBlocked,
           canvasRotation: displayAngle,
         );
       } else if (placingBuilding!.id == DepotLoaderConfig.id ||
           placingBuilding!.id == DepotUnloaderConfig.id) {
         DepotAccessRenderer.renderPlaceholder(
-          canvas, placingBuilding!, cx, cy, cellSize, 0.6,
-          rotation: placingRotation, isBlocked: isBlocked,
+          canvas,
+          placingBuilding!,
+          cx,
+          cy,
+          cellSize,
+          0.6,
+          rotation: placingRotation,
+          isBlocked: isBlocked,
           canvasRotation: displayAngle,
         );
       } else {
         BuildingRenderer.renderPlaceholder(
-          canvas, placingBuilding!, cx, cy, cellSize, 0.6,
-          rotation: placingRotation, isBlocked: isBlocked,
+          canvas,
+          placingBuilding!,
+          cx,
+          cy,
+          cellSize,
+          0.6,
+          rotation: placingRotation,
+          isBlocked: isBlocked,
         );
       }
 
@@ -1777,21 +1870,39 @@ class _EditorPainter extends CustomPainter {
 
       if (mb.building.id == RefiningUnitConfig.id) {
         RefiningUnitRenderer.renderPlaceholder(
-          canvas, mb.building, cx, cy, cellSize, 0.6,
-          rotation: movingRotation, isBlocked: isBlocked,
+          canvas,
+          mb.building,
+          cx,
+          cy,
+          cellSize,
+          0.6,
+          rotation: movingRotation,
+          isBlocked: isBlocked,
           canvasRotation: displayAngle,
         );
       } else if (mb.building.id == DepotLoaderConfig.id ||
           mb.building.id == DepotUnloaderConfig.id) {
         DepotAccessRenderer.renderPlaceholder(
-          canvas, mb.building, cx, cy, cellSize, 0.6,
-          rotation: movingRotation, isBlocked: isBlocked,
+          canvas,
+          mb.building,
+          cx,
+          cy,
+          cellSize,
+          0.6,
+          rotation: movingRotation,
+          isBlocked: isBlocked,
           canvasRotation: displayAngle,
         );
       } else {
         BuildingRenderer.renderPlaceholder(
-          canvas, mb.building, cx, cy, cellSize, 0.6,
-          rotation: movingRotation, isBlocked: isBlocked,
+          canvas,
+          mb.building,
+          cx,
+          cy,
+          cellSize,
+          0.6,
+          rotation: movingRotation,
+          isBlocked: isBlocked,
         );
       }
 
@@ -1802,7 +1913,9 @@ class _EditorPainter extends CustomPainter {
     }
 
     // 悬停高亮白框
-    if (hoveredBuilding != null && placingBuilding == null && movingBuilding == null) {
+    if (hoveredBuilding != null &&
+        placingBuilding == null &&
+        movingBuilding == null) {
       final hb = hoveredBuilding!;
       final hx = hb.gridX * cellSize;
       final hy = hb.gridY * cellSize;
@@ -1826,7 +1939,9 @@ class _EditorPainter extends CustomPainter {
     canvas.restore();
 
     // 长按圆形进度条（屏幕空间绘制，进度超过阈值才显示，避免快速点击闪烁）
-    if (isLongPressing && longPressScreenPos != null && longPressProgress > 0.15) {
+    if (isLongPressing &&
+        longPressScreenPos != null &&
+        longPressProgress > 0.15) {
       final center = longPressScreenPos!;
       const radius = 24.0;
       const strokeW = 4.0;
@@ -1896,7 +2011,8 @@ class _EditorPainter extends CustomPainter {
   }
 
   /// 判断预览建筑是否与现有建筑或传送带碰撞
-  bool _isPreviewBlocked(Building building, double gridX, double gridY, int rotation) {
+  bool _isPreviewBlocked(
+      Building building, double gridX, double gridY, int rotation) {
     final tempPb = PlacedBuilding(
       id: '_preview',
       building: building,
@@ -1915,7 +2031,8 @@ class _EditorPainter extends CustomPainter {
     final previewCells = _getGridCells(building, gridX, gridY, rotation);
     for (final belt in project.conveyors) {
       for (final cell in belt.path) {
-        if (previewCells.contains(Offset(cell.dx.roundToDouble(), cell.dy.roundToDouble()))) {
+        if (previewCells.contains(
+            Offset(cell.dx.roundToDouble(), cell.dy.roundToDouble()))) {
           return true;
         }
       }
@@ -1924,7 +2041,8 @@ class _EditorPainter extends CustomPainter {
   }
 
   /// 获取建筑占用的网格坐标集合
-  Set<Offset> _getGridCells(Building building, double gridX, double gridY, int rotation) {
+  Set<Offset> _getGridCells(
+      Building building, double gridX, double gridY, int rotation) {
     final cells = <Offset>{};
     // 考虑旋转后的有效尺寸
     int effW, effH;
@@ -1941,27 +2059,36 @@ class _EditorPainter extends CustomPainter {
 
     for (int dx = 0; dx < effW; dx++) {
       for (int dy = 0; dy < effH; dy++) {
-        cells.add(Offset((effX + dx).roundToDouble(), (effY + dy).roundToDouble()));
+        cells.add(
+            Offset((effX + dx).roundToDouble(), (effY + dy).roundToDouble()));
       }
     }
     return cells;
   }
 
   /// 绘制碰撞对象的红色叠加层
-  void _drawBlockedOverlays(Canvas canvas, Building building, double gridX, double gridY, int rotation) {
+  void _drawBlockedOverlays(Canvas canvas, Building building, double gridX,
+      double gridY, int rotation) {
     final previewCells = _getGridCells(building, gridX, gridY, rotation);
-    final previewSet = previewCells.map((c) => '${c.dx.toInt()}_${c.dy.toInt()}').toSet();
+    final previewSet =
+        previewCells.map((c) => '${c.dx.toInt()}_${c.dy.toInt()}').toSet();
 
     // 阻拦的建筑：整体变红
     for (final pb in project.buildings) {
       final tempPb = PlacedBuilding(
-        id: '_temp', building: pb.building,
-        gridX: pb.gridX, gridY: pb.gridY, rotation: pb.rotation,
+        id: '_temp',
+        building: pb.building,
+        gridX: pb.gridX,
+        gridY: pb.gridY,
+        rotation: pb.rotation,
       );
       final bounds = tempPb.getBounds(cellSize);
       final testPb = PlacedBuilding(
-        id: '_preview', building: building,
-        gridX: gridX, gridY: gridY, rotation: rotation,
+        id: '_preview',
+        building: building,
+        gridX: gridX,
+        gridY: gridY,
+        rotation: rotation,
       );
       if (!testPb.overlaps(bounds, cellSize)) continue;
 
@@ -1992,7 +2119,11 @@ class _EditorPainter extends CustomPainter {
       }
       if (blockedKeys.isNotEmpty) {
         TransportBeltRenderer.renderBlockedBeltCells(
-          canvas, belt.path, cellSize, blockedKeys, project.buildings,
+          canvas,
+          belt.path,
+          cellSize,
+          blockedKeys,
+          project.buildings,
           incomingDirection: belt.incomingDirection,
         );
       }
@@ -2029,7 +2160,8 @@ class _EditorPainter extends CustomPainter {
   }
 
   /// 渲染设备的静态部分到指定 Canvas（用于预渲染缓存）
-  void _renderBuildingStatic(Canvas canvas, PlacedBuilding pb, double cellSize, int detailLevel, Map<String, int> portConnections) {
+  void _renderBuildingStatic(Canvas canvas, PlacedBuilding pb, double cellSize,
+      int detailLevel, Map<String, int> portConnections) {
     Recipe? recipe;
     if (pb.activeRecipeId != null && detailLevel >= 1) {
       recipe = dataLoader.getRecipe(pb.activeRecipeId!);
@@ -2044,9 +2176,15 @@ class _EditorPainter extends CustomPainter {
         portConnections: portConnections,
         detailLevel: detailLevel,
       );
-    } else if (pb.building.id == DepotLoaderConfig.id || pb.building.id == DepotUnloaderConfig.id) {
+    } else if (pb.building.id == DepotLoaderConfig.id ||
+        pb.building.id == DepotUnloaderConfig.id) {
       DepotAccessRenderer.render(
-        canvas, pb.building, 0, 0, cellSize, 0,
+        canvas,
+        pb.building,
+        0,
+        0,
+        cellSize,
+        0,
         activeRecipe: recipe,
         isBlocked: pb.isBlocked,
         productionProgress: 0,
@@ -2055,7 +2193,12 @@ class _EditorPainter extends CustomPainter {
       );
     } else {
       BuildingRenderer.renderBuilding(
-        canvas, pb.building, 0, 0, cellSize, 0,
+        canvas,
+        pb.building,
+        0,
+        0,
+        cellSize,
+        0,
         activeRecipe: recipe,
         isBlocked: pb.isBlocked,
         productionProgress: 0,
@@ -2066,7 +2209,8 @@ class _EditorPainter extends CustomPainter {
   }
 
   /// 绘制进度条（动态部分，不缓存）
-  void _drawProgressBar(Canvas canvas, double w, double h, double progress, Building building) {
+  void _drawProgressBar(
+      Canvas canvas, double w, double h, double progress, Building building) {
     const barHeight = 4.0;
     final barY = h - barHeight - 2;
     canvas.drawRect(
@@ -2094,9 +2238,11 @@ class _EditorPainter extends CustomPainter {
         conveyorForkCell != oldDelegate.conveyorForkCell ||
         conveyorIncomingDirection != oldDelegate.conveyorIncomingDirection ||
         previewContextExtension != oldDelegate.previewContextExtension ||
-        !_listEquals(conveyorConfirmedPath, oldDelegate.conveyorConfirmedPath) ||
+        !_listEquals(
+            conveyorConfirmedPath, oldDelegate.conveyorConfirmedPath) ||
         !_listEquals(conveyorPreviewPath, oldDelegate.conveyorPreviewPath) ||
-        !_setEquals(conveyorPreviewOccupied, oldDelegate.conveyorPreviewOccupied) ||
+        !_setEquals(
+            conveyorPreviewOccupied, oldDelegate.conveyorPreviewOccupied) ||
         displayScale != oldDelegate.displayScale ||
         displayOffsetX != oldDelegate.displayOffsetX ||
         displayOffsetY != oldDelegate.displayOffsetY ||

@@ -112,19 +112,15 @@ class _EditorPageState extends State<EditorPage> {
     });
   }
 
-  /// 将仓库取货口的输出物品写入连接的传送带
+  /// 更新仓库取货口的输出物品。
+  ///
+  /// 传送带上已有的物品状态不能在这里直接改写，否则更换输出物品时会把
+  /// 正在排队或已经停止的旧物品整段替换成新物品。真正的新物品注入由
+  /// SimulationEngine 根据 depotOutputItemId 和传送带空位来驱动。
   void _setDepotOutputItem(PlacedBuilding pb, String? itemId) {
-    const cellSize = 48.0;
-    const threshold = 30.0;
+    pb.depotOutputItemId = itemId;
     for (final port in pb.outputPorts) {
-      final portWorld = port.worldPosition(
-          pb.gridX, pb.gridY, cellSize, pb.building.gridWidth, pb.building.gridHeight,
-          rotation: pb.rotation);
-      for (final belt in _project.conveyors) {
-        if ((belt.start - portWorld).distance < threshold) {
-          belt.itemId = itemId ?? '';
-        }
-      }
+      port.linkedItemId = itemId;
     }
     widget.simulationEngine.attach(_project);
     setState(() {});
@@ -144,19 +140,31 @@ class _EditorPageState extends State<EditorPage> {
 
   void _exportProject() {
     final data = {
-      'buildings': _project.buildings.map((pb) => {
-            'building_id': pb.building.id,
-            'grid_x': pb.gridX,
-            'grid_y': pb.gridY,
-            'rotation': pb.rotation,
-            'recipe_id': pb.activeRecipeId,
-          }).toList(),
-      'conveyors': _project.conveyors.map((c) => {
-            'path': c.path
-                .map((p) => {'x': p.dx.toInt(), 'y': p.dy.toInt()})
-                .toList(),
-            'item_id': c.itemId,
-          }).toList(),
+      'buildings': _project.buildings
+          .map((pb) => {
+                'building_id': pb.building.id,
+                'grid_x': pb.gridX,
+                'grid_y': pb.gridY,
+                'rotation': pb.rotation,
+                'recipe_id': pb.activeRecipeId,
+              })
+          .toList(),
+      'conveyors': _project.conveyors
+          .map((c) => {
+                'path': c.path
+                    .map((p) => {'x': p.dx.toInt(), 'y': p.dy.toInt()})
+                    .toList(),
+                'item_id': c.itemId,
+                'item_segments': c.itemSegments
+                    .map((s) => {
+                          'item_id': s.itemId,
+                          'fill_count': s.fillCount,
+                          'drain_count': s.drainCount,
+                          'freeze_progress': s.freezeProgress,
+                        })
+                    .toList(),
+              })
+          .toList(),
     };
     final jsonStr = const JsonEncoder.withIndent('  ').convert(data);
     Clipboard.setData(ClipboardData(text: jsonStr));
@@ -175,35 +183,33 @@ class _EditorPageState extends State<EditorPage> {
         final controller = TextEditingController();
         return AlertDialog(
           backgroundColor: const Color(0xFF2A2A2A),
-          title: const Text('导入蓝图',
-              style: TextStyle(color: Color(0xFFCCCCCC))),
+          title: const Text('导入蓝图', style: TextStyle(color: Color(0xFFCCCCCC))),
           content: SizedBox(
             width: 400,
             child: TextField(
               controller: controller,
               maxLines: 10,
               style: const TextStyle(
-                  color: Color(0xFFCCCCCC), fontSize: 11, fontFamily: 'monospace'),
+                  color: Color(0xFFCCCCCC),
+                  fontSize: 11,
+                  fontFamily: 'monospace'),
               decoration: const InputDecoration(
                 hintText: '在此粘贴蓝图 JSON...',
                 hintStyle: TextStyle(color: Color(0xFF666666)),
                 border: OutlineInputBorder(
-                    borderSide:
-                        BorderSide(color: Color(0xFF555555))),
+                    borderSide: BorderSide(color: Color(0xFF555555))),
                 enabledBorder: OutlineInputBorder(
-                    borderSide:
-                        BorderSide(color: Color(0xFF555555))),
+                    borderSide: BorderSide(color: Color(0xFF555555))),
                 focusedBorder: OutlineInputBorder(
-                    borderSide:
-                        BorderSide(color: Color(0xFFFFCC00))),
+                    borderSide: BorderSide(color: Color(0xFFFFCC00))),
               ),
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('取消',
-                  style: TextStyle(color: Color(0xFF888888))),
+              child:
+                  const Text('取消', style: TextStyle(color: Color(0xFF888888))),
             ),
             TextButton(
               onPressed: () {
@@ -212,7 +218,8 @@ class _EditorPageState extends State<EditorPage> {
                   _applyImportData(data);
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('蓝图导入成功'),
+                    const SnackBar(
+                        content: Text('蓝图导入成功'),
                         duration: Duration(seconds: 2)),
                   );
                 } catch (e) {
@@ -221,8 +228,8 @@ class _EditorPageState extends State<EditorPage> {
                   );
                 }
               },
-              child: const Text('导入',
-                  style: TextStyle(color: Color(0xFFFFCC00))),
+              child:
+                  const Text('导入', style: TextStyle(color: Color(0xFFFFCC00))),
             ),
           ],
         );
@@ -287,6 +294,16 @@ class _EditorPageState extends State<EditorPage> {
             id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${newConveyors.length}',
             path: path,
             itemId: cd['item_id'] as String? ?? '',
+            itemSegments: ((cd['item_segments'] as List?) ?? const [])
+                .map((s) => s as Map<String, dynamic>)
+                .map((s) => ConveyorItemSegment(
+                      itemId: s['item_id'] as String? ?? '',
+                      fillCount: (s['fill_count'] as num?)?.toInt() ?? 0,
+                      drainCount: (s['drain_count'] as num?)?.toInt() ?? 0,
+                      freezeProgress:
+                          (s['freeze_progress'] as num?)?.toDouble(),
+                    ))
+                .toList(),
           ));
         }
       }
@@ -326,23 +343,29 @@ class _EditorPageState extends State<EditorPage> {
 
     // Ctrl+R: 旋转画布（必须在页面层处理，否则浏览器会拦截刷新）
     if (event.logicalKey == LogicalKeyboardKey.keyR &&
-        (HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) ||
-            HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.controlRight))) {
+        (HardwareKeyboard.instance
+                .isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) ||
+            HardwareKeyboard.instance
+                .isLogicalKeyPressed(LogicalKeyboardKey.controlRight))) {
       _rotateCanvas();
       return true;
     }
 
     // R: 旋转正在放置/移动的设备（非Ctrl+R时尝试）
     if (event.logicalKey == LogicalKeyboardKey.keyR &&
-        !(HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) ||
-            HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.controlRight))) {
+        !(HardwareKeyboard.instance
+                .isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) ||
+            HardwareKeyboard.instance
+                .isLogicalKeyPressed(LogicalKeyboardKey.controlRight))) {
       _canvasKey.currentState?.rotatePlacement();
       return true;
     }
 
     if (event.logicalKey == LogicalKeyboardKey.keyE &&
-        !HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) &&
-        !HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.controlRight)) {
+        !HardwareKeyboard.instance
+            .isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) &&
+        !HardwareKeyboard.instance
+            .isLogicalKeyPressed(LogicalKeyboardKey.controlRight)) {
       _toggleConveyorMode();
       return true;
     }
@@ -367,8 +390,7 @@ class _EditorPageState extends State<EditorPage> {
       keyIndex = 7;
     } else if (label == '9') {
       keyIndex = 8;
-    } else if (label == '0' ||
-        event.logicalKey == LogicalKeyboardKey.digit0) {
+    } else if (label == '0' || event.logicalKey == LogicalKeyboardKey.digit0) {
       keyIndex = 9;
     }
 
@@ -473,11 +495,11 @@ class _EditorPageState extends State<EditorPage> {
           const Spacer(),
           _speedControl(),
           const SizedBox(width: 8),
-          _toolbarButton('导出', Icons.file_upload_outlined, false,
-              _exportProject),
+          _toolbarButton(
+              '导出', Icons.file_upload_outlined, false, _exportProject),
           const SizedBox(width: 4),
-          _toolbarButton('导入', Icons.file_download_outlined, false,
-              _importProject),
+          _toolbarButton(
+              '导入', Icons.file_download_outlined, false, _importProject),
         ],
       ),
     );
@@ -490,13 +512,9 @@ class _EditorPageState extends State<EditorPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: isActive
-              ? const Color(0x40FFCC00)
-              : const Color(0xFF333333),
+          color: isActive ? const Color(0x40FFCC00) : const Color(0xFF333333),
           border: Border.all(
-            color: isActive
-                ? const Color(0xFFFFCC00)
-                : const Color(0xFF555555),
+            color: isActive ? const Color(0xFFFFCC00) : const Color(0xFF555555),
           ),
         ),
         child: Row(
@@ -504,7 +522,8 @@ class _EditorPageState extends State<EditorPage> {
           children: [
             Icon(icon, size: 14, color: const Color(0xFFCCCCCC)),
             const SizedBox(width: 4),
-            Text(label, style: const TextStyle(color: Color(0xFFCCCCCC), fontSize: 11)),
+            Text(label,
+                style: const TextStyle(color: Color(0xFFCCCCCC), fontSize: 11)),
           ],
         ),
       ),
@@ -528,15 +547,14 @@ class _EditorPageState extends State<EditorPage> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
               decoration: BoxDecoration(
-                color: isActive
-                    ? const Color(0x40FFCC00)
-                    : Colors.transparent,
+                color: isActive ? const Color(0x40FFCC00) : Colors.transparent,
               ),
               child: Text(
                 '${speed}x',
                 style: TextStyle(
-                  color:
-                      isActive ? const Color(0xFFFFCC00) : const Color(0xFF888888),
+                  color: isActive
+                      ? const Color(0xFFFFCC00)
+                      : const Color(0xFF888888),
                   fontSize: 10,
                 ),
               ),

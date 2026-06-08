@@ -29,6 +29,18 @@ class _SimWorker {
 
   _SimWorker(this._mainSendPort);
 
+  bool _hasStoppedLastItems(SimConveyorData belt) {
+    return belt.path.isNotEmpty &&
+        belt.lastItemFillCount >= belt.path.length &&
+        belt.lastItemFillCount > belt.lastItemDrainCount;
+  }
+
+  bool _hasOutputSpace(SimConveyorData belt) {
+    if (belt.itemId.isNotEmpty) return false;
+    if (!_hasStoppedLastItems(belt)) return true;
+    return belt.lastItemDrainCount > 0;
+  }
+
   void _init() {
     _receivePort = ReceivePort();
     // 发送 ReceivePort 给主 Isolate，建立双向通信
@@ -50,7 +62,8 @@ class _SimWorker {
           _onStop();
           break;
         case 'setSpeed':
-          _speedMultiplier = (message['data']['speedMultiplier'] as num).toDouble();
+          _speedMultiplier =
+              (message['data']['speedMultiplier'] as num).toDouble();
           break;
       }
     }
@@ -87,21 +100,27 @@ class _SimWorker {
 
     // 发送轻量结果回主 Isolate
     final result = SimTickResult(
-      buildings: _buildings.map((b) => SimBuildingResult(
-        id: b.id,
-        isBlocked: _buildingBlocked[b.id] ?? false,
-        productionProgress: _buildingProgress[b.id] ?? 0.0,
-      )).toList(),
-      conveyors: _conveyors.map((c) => SimConveyorResult(
-        id: c.id,
-        itemId: c.itemId,
-        flowProgress: c.flowProgress,
-        itemFillCount: c.itemFillCount,
-        itemDrainCount: c.itemDrainCount,
-        isBlocked: c.isBlocked,
-        lastItemFillCount: c.lastItemFillCount,
-        lastItemDrainCount: c.lastItemDrainCount,
-      )).toList(),
+      buildings: _buildings
+          .map((b) => SimBuildingResult(
+                id: b.id,
+                isBlocked: _buildingBlocked[b.id] ?? false,
+                productionProgress: _buildingProgress[b.id] ?? 0.0,
+              ))
+          .toList(),
+      conveyors: _conveyors
+          .map((c) => SimConveyorResult(
+                id: c.id,
+                itemId: c.itemId,
+                flowProgress: c.flowProgress,
+                itemFillCount: c.itemFillCount,
+                itemDrainCount: c.itemDrainCount,
+                isBlocked: c.isBlocked,
+                lastItemFillCount: c.lastItemFillCount,
+                lastItemDrainCount: c.lastItemDrainCount,
+                deadEndFreezeProgress: c.deadEndFreezeProgress,
+                lastItemFreezeProgress: c.lastItemFreezeProgress,
+              ))
+          .toList(),
     );
 
     _mainSendPort.send(result.toJson());
@@ -123,7 +142,8 @@ class _SimWorker {
       // 检查源设备是否阻塞
       final startPos = _beltStart(belt);
       final sourceBuilding = _findSourceBuilding(startPos);
-      final bool blocked = sourceBuilding != null && (_buildingBlocked[sourceBuilding.id] ?? false);
+      final bool blocked = sourceBuilding != null &&
+          (_buildingBlocked[sourceBuilding.id] ?? false);
 
       _conveyors[i] = SimConveyorData(
         id: belt.id,
@@ -135,6 +155,8 @@ class _SimWorker {
         isBlocked: blocked,
         lastItemFillCount: belt.lastItemFillCount,
         lastItemDrainCount: belt.lastItemDrainCount,
+        deadEndFreezeProgress: belt.deadEndFreezeProgress,
+        lastItemFreezeProgress: belt.lastItemFreezeProgress,
       );
     }
   }
@@ -148,7 +170,8 @@ class _SimWorker {
       }
 
       if (pb.activeRecipeId == null) continue;
-      final recipe = _recipes.where((r) => r.id == pb.activeRecipeId).firstOrNull;
+      final recipe =
+          _recipes.where((r) => r.id == pb.activeRecipeId).firstOrNull;
       if (recipe == null) continue;
 
       final hasInputs = _checkInputsAvailable(pb, recipe);
@@ -161,7 +184,8 @@ class _SimWorker {
       }
 
       _buildingBlocked[pb.id] = false;
-      _buildingProgress[pb.id] = (_buildingProgress[pb.id] ?? 0.0) + dt / recipe.processTimeSeconds;
+      _buildingProgress[pb.id] =
+          (_buildingProgress[pb.id] ?? 0.0) + dt / recipe.processTimeSeconds;
 
       if (_buildingProgress[pb.id]! >= 1.0) {
         _buildingProgress[pb.id] = 0.0;
@@ -179,8 +203,9 @@ class _SimWorker {
       final portWorld = _portWorldPosition(port, pb);
       for (int i = 0; i < _conveyors.length; i++) {
         final belt = _conveyors[i];
-        if ((_beltStart(belt) - portWorld).distance < _portConnectionThreshold) {
-          if (belt.itemId.isEmpty) {
+        if ((_beltStart(belt) - portWorld).distance <
+            _portConnectionThreshold) {
+          if (_hasOutputSpace(belt)) {
             _conveyors[i] = SimConveyorData(
               id: belt.id,
               path: belt.path,
@@ -191,6 +216,8 @@ class _SimWorker {
               isBlocked: belt.isBlocked,
               lastItemFillCount: belt.lastItemFillCount,
               lastItemDrainCount: belt.lastItemDrainCount,
+              deadEndFreezeProgress: belt.deadEndFreezeProgress,
+              lastItemFreezeProgress: belt.lastItemFreezeProgress,
             );
           }
         }
@@ -204,7 +231,8 @@ class _SimWorker {
       for (final belt in _conveyors) {
         for (final port in pb.inputPorts) {
           final portWorld = _portWorldPosition(port, pb);
-          if ((_beltEnd(belt) - portWorld).distance < _portConnectionThreshold) {
+          if ((_beltEnd(belt) - portWorld).distance <
+              _portConnectionThreshold) {
             if (belt.itemId == input.itemId) {
               found = true;
               break;
@@ -223,8 +251,9 @@ class _SimWorker {
     for (final port in pb.outputPorts) {
       final portWorld = _portWorldPosition(port, pb);
       for (final belt in _conveyors) {
-        if ((_beltStart(belt) - portWorld).distance < _portConnectionThreshold) {
-          if (belt.itemId.isEmpty) return true;
+        if ((_beltStart(belt) - portWorld).distance <
+            _portConnectionThreshold) {
+          if (_hasOutputSpace(belt)) return true;
         }
       }
     }
@@ -237,7 +266,8 @@ class _SimWorker {
         final portWorld = _portWorldPosition(port, pb);
         for (int i = 0; i < _conveyors.length; i++) {
           final belt = _conveyors[i];
-          if ((_beltEnd(belt) - portWorld).distance < _portConnectionThreshold) {
+          if ((_beltEnd(belt) - portWorld).distance <
+              _portConnectionThreshold) {
             if (belt.itemId == input.itemId) {
               _conveyors[i] = SimConveyorData(
                 id: belt.id,
@@ -249,6 +279,8 @@ class _SimWorker {
                 isBlocked: belt.isBlocked,
                 lastItemFillCount: belt.lastItemFillCount,
                 lastItemDrainCount: belt.lastItemDrainCount,
+                deadEndFreezeProgress: belt.deadEndFreezeProgress,
+                lastItemFreezeProgress: belt.lastItemFreezeProgress,
               );
               break;
             }
@@ -264,8 +296,9 @@ class _SimWorker {
         final portWorld = _portWorldPosition(port, pb);
         for (int i = 0; i < _conveyors.length; i++) {
           final belt = _conveyors[i];
-          if ((_beltStart(belt) - portWorld).distance < _portConnectionThreshold) {
-            if (belt.itemId.isEmpty) {
+          if ((_beltStart(belt) - portWorld).distance <
+              _portConnectionThreshold) {
+            if (_hasOutputSpace(belt)) {
               _conveyors[i] = SimConveyorData(
                 id: belt.id,
                 path: belt.path,
@@ -276,6 +309,8 @@ class _SimWorker {
                 isBlocked: belt.isBlocked,
                 lastItemFillCount: belt.lastItemFillCount,
                 lastItemDrainCount: belt.lastItemDrainCount,
+                deadEndFreezeProgress: belt.deadEndFreezeProgress,
+                lastItemFreezeProgress: belt.lastItemFreezeProgress,
               );
               break;
             }
@@ -303,8 +338,12 @@ class _SimWorker {
     double relativeX = port.relativeX;
     double relativeY = port.relativeY;
 
-    double localGridX = (relativeX == 1.0) ? (pb.gridWidth - 1).toDouble() : (relativeX * pb.gridWidth).floorToDouble();
-    double localGridY = (relativeY == 1.0) ? (pb.gridHeight - 1).toDouble() : (relativeY * pb.gridHeight).floorToDouble();
+    double localGridX = (relativeX == 1.0)
+        ? (pb.gridWidth - 1).toDouble()
+        : (relativeX * pb.gridWidth).floorToDouble();
+    double localGridY = (relativeY == 1.0)
+        ? (pb.gridHeight - 1).toDouble()
+        : (relativeY * pb.gridHeight).floorToDouble();
 
     double rx = localGridX + 0.5;
     double ry = localGridY + 0.5;
