@@ -491,9 +491,11 @@ class TransportBeltRenderer {
         final limit = i + 1 < renderSegments.length
             ? renderSegments[i + 1].drainCount.clamp(0, belt.path.length)
             : belt.path.length;
-        final shouldFreezeSegment = isDeadEnd && segment.fillCount >= limit;
         final sourceSegment =
             i < sourceSegments.length ? sourceSegments[i] : segment;
+        final shouldFreezeSegment =
+            sourceSegment.freezeProgress != null ||
+                (isDeadEnd && segment.fillCount >= limit);
         if (shouldFreezeSegment && sourceSegment.freezeProgress == null) {
           sourceSegment.freezeProgress = -1.0;
         }
@@ -502,7 +504,9 @@ class TransportBeltRenderer {
             sourceSegment.freezeProgress = 0.5;
           }
         }
-        if (!shouldFreezeSegment && sourceSegment.freezeProgress != null) {
+        if (!shouldFreezeSegment &&
+            isDeadEnd &&
+            sourceSegment.freezeProgress != null) {
           sourceSegment.freezeProgress = null;
         }
         segment.freezeProgress = sourceSegment.freezeProgress;

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui';
 import 'building.dart';
 
@@ -109,6 +110,8 @@ class PortState {
 }
 
 class PlacedBuilding {
+  static const int maxInputItemCount = 50;
+
   final String id;
   final Building building;
   double gridX;
@@ -116,6 +119,8 @@ class PlacedBuilding {
   int rotation;
   String? activeRecipeId;
   String? depotOutputItemId;
+  String? inputItemId;
+  int inputItemCount;
   List<PortState> inputPorts;
   List<PortState> outputPorts;
   bool isBlocked;
@@ -129,6 +134,8 @@ class PlacedBuilding {
     this.rotation = 0,
     this.activeRecipeId,
     this.depotOutputItemId,
+    this.inputItemId,
+    this.inputItemCount = 0,
     this.isBlocked = false,
     this.productionProgress = 0.0,
   })  : inputPorts = List.generate(
@@ -147,6 +154,32 @@ class PlacedBuilding {
             definition: building.ports.outputs[i],
           ),
         );
+
+  bool canAcceptInputItem(String itemId) {
+    if (itemId.isEmpty || inputItemCount >= maxInputItemCount) return false;
+    return inputItemCount == 0 || inputItemId == null || inputItemId == itemId;
+  }
+
+  bool acceptInputItem(String itemId) {
+    if (!canAcceptInputItem(itemId)) return false;
+    inputItemId = itemId;
+    inputItemCount++;
+    return true;
+  }
+
+  bool hasInputItems(String itemId, int amount) {
+    return inputItemId == itemId && inputItemCount >= amount;
+  }
+
+  bool consumeInputItems(String itemId, int amount) {
+    if (!hasInputItems(itemId, amount)) return false;
+    inputItemCount -= amount;
+    if (inputItemCount <= 0) {
+      inputItemCount = 0;
+      inputItemId = null;
+    }
+    return true;
+  }
 
   /// 旋转后的有效宽度（90°/270° 时宽高互换）
   int get effectiveWidth =>
@@ -207,16 +240,23 @@ class ConveyorItemSegment {
     );
   }
 
-  ConveyorItemSegment shifted(int offset) {
+  ConveyorItemSegment shifted(
+    int offset, {
+    bool clearFreezeProgress = false,
+  }) {
     return ConveyorItemSegment(
       itemId: itemId,
       fillCount: fillCount + offset,
       drainCount: drainCount + offset,
-      freezeProgress: freezeProgress,
+      freezeProgress: clearFreezeProgress ? null : freezeProgress,
     );
   }
 
-  ConveyorItemSegment? clipped(int start, int end) {
+  ConveyorItemSegment? clipped(
+    int start,
+    int end, {
+    bool clearFreezeProgress = false,
+  }) {
     final newDrain = drainCount < start ? start : drainCount;
     final newFill = fillCount > end ? end : fillCount;
     if (newFill <= newDrain) return null;
@@ -225,7 +265,8 @@ class ConveyorItemSegment {
       itemId: itemId,
       fillCount: newFill - start,
       drainCount: newDrain - start,
-      freezeProgress: newLength > 0 ? freezeProgress : null,
+      freezeProgress:
+          !clearFreezeProgress && newLength > 0 ? freezeProgress : null,
     );
   }
 }
@@ -346,19 +387,31 @@ class ConveyorBelt {
     _sortItemSegments();
   }
 
-  List<ConveyorItemSegment> shiftedItemSegments(int offset) {
+  List<ConveyorItemSegment> shiftedItemSegments(
+    int offset, {
+    bool clearFreezeProgress = false,
+  }) {
     ensureItemSegmentsFromLegacy();
     return itemSegments
-        .map((segment) => segment.shifted(offset))
+        .map((segment) =>
+            segment.shifted(offset, clearFreezeProgress: clearFreezeProgress))
         .where((segment) => segment.hasItems)
         .toList()
       ..sort((a, b) => a.drainCount.compareTo(b.drainCount));
   }
 
-  List<ConveyorItemSegment> clippedItemSegments(int start, int end) {
+  List<ConveyorItemSegment> clippedItemSegments(
+    int start,
+    int end, {
+    bool clearFreezeProgress = false,
+  }) {
     ensureItemSegmentsFromLegacy();
     return itemSegments
-        .map((segment) => segment.clipped(start, end))
+        .map((segment) => segment.clipped(
+              start,
+              end,
+              clearFreezeProgress: clearFreezeProgress,
+            ))
         .whereType<ConveyorItemSegment>()
         .where((segment) => segment.hasItems)
         .toList()
@@ -401,15 +454,18 @@ class ConveyorBelt {
     }
   }
 
-  bool pushSourceItem(String sourceItemId) {
+  bool pushSourceItem(String sourceItemId, {int? terminalLimit}) {
     if (sourceItemId.isEmpty || path.isEmpty) return false;
     ensureItemSegmentsFromLegacy();
     _sortItemSegments();
+    final endLimit =
+        terminalLimit?.clamp(0, path.length).toInt() ?? path.length;
+    if (endLimit <= 0) return false;
 
     if (itemSegments.isEmpty) {
       itemSegments.add(ConveyorItemSegment(
         itemId: sourceItemId,
-        fillCount: 1.clamp(0, path.length).toInt(),
+        fillCount: 1.clamp(0, endLimit).toInt(),
       ));
       syncLegacyFromSegments();
       return true;
@@ -419,9 +475,10 @@ class ConveyorBelt {
     if (first.drainCount == 0 && first.itemId == sourceItemId) {
       final limit = itemSegments.length > 1
           ? itemSegments[1].drainCount.clamp(0, path.length).toInt()
-          : path.length;
+          : endLimit;
       if (first.fillCount >= limit) return false;
       first.fillCount++;
+      first.freezeProgress = null;
       syncLegacyFromSegments();
       return true;
     }
@@ -431,9 +488,44 @@ class ConveyorBelt {
       0,
       ConveyorItemSegment(
         itemId: sourceItemId,
-        fillCount: 1.clamp(0, first.drainCount).toInt(),
+        fillCount: 1.clamp(0, math.min(first.drainCount, endLimit)).toInt(),
       ),
     );
+    syncLegacyFromSegments();
+    return true;
+  }
+
+  String? outputReadyItemId() {
+    ensureItemSegmentsFromLegacy();
+    if (itemSegments.isEmpty || path.isEmpty) return null;
+    _sortItemSegments();
+    final downstream = itemSegments.last;
+    if (!downstream.hasItems || downstream.fillCount < path.length) {
+      return null;
+    }
+    return downstream.itemId;
+  }
+
+  String? downstreamItemId() {
+    ensureItemSegmentsFromLegacy();
+    if (itemSegments.isEmpty) return null;
+    _sortItemSegments();
+    final downstream = itemSegments.last;
+    return downstream.hasItems ? downstream.itemId : null;
+  }
+
+  bool removeOutputReadyItem() {
+    ensureItemSegmentsFromLegacy();
+    if (itemSegments.isEmpty || path.isEmpty) return false;
+    _sortItemSegments();
+    final downstream = itemSegments.last;
+    if (!downstream.hasItems || downstream.fillCount < path.length) {
+      return false;
+    }
+    downstream.fillCount--;
+    if (downstream.fillCount < path.length) {
+      downstream.freezeProgress = null;
+    }
     syncLegacyFromSegments();
     return true;
   }
@@ -441,6 +533,7 @@ class ConveyorBelt {
   bool advanceItemSegments({
     required bool isDeadEnd,
     String? activeSourceItemId,
+    int? terminalLimit,
   }) {
     ensureItemSegmentsFromLegacy();
     if (itemSegments.isEmpty) {
@@ -450,13 +543,15 @@ class ConveyorBelt {
 
     bool changed = false;
     _sortItemSegments();
+    final endLimit =
+        terminalLimit?.clamp(0, path.length).toInt() ?? path.length;
 
     if (isDeadEnd) {
       for (int i = itemSegments.length - 1; i >= 0; i--) {
         final segment = itemSegments[i];
         final limit = i + 1 < itemSegments.length
             ? itemSegments[i + 1].drainCount.clamp(0, path.length).toInt()
-            : path.length;
+            : endLimit;
         final isFedBySource = i == 0 &&
             segment.drainCount == 0 &&
             activeSourceItemId != null &&

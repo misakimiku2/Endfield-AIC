@@ -232,6 +232,19 @@ class TransportBeltController {
 
       // 使用 anchors.first（用户实际点击的位置）作为分叉点
       final startCell = anchors.first;
+      ConveyorBelt? forkSourceBelt;
+      int forkSourceIndex = -1;
+      for (final oldBelt in project.conveyors) {
+        for (int i = 0; i < oldBelt.path.length; i++) {
+          if (oldBelt.path[i].dx == startCell.dx &&
+              oldBelt.path[i].dy == startCell.dy) {
+            forkSourceBelt = oldBelt;
+            forkSourceIndex = i;
+            break;
+          }
+        }
+        if (forkSourceBelt != null) break;
+      }
 
       // 查找 fullPath 首格来源的旧传送带，继承其 incomingDirection
       String? newBeltIncomingDir;
@@ -272,24 +285,48 @@ class TransportBeltController {
 
       // 继承源传送带的物品状态（加长断头传送带时）
       if (sourceBelt != null) {
-        newItemSegments.addAll(sourceBelt.shiftedItemSegments(0));
+        newItemSegments.addAll(
+          sourceBelt.shiftedItemSegments(0, clearFreezeProgress: true),
+        );
         newItemId = sourceBelt.itemId;
         newItemFillCount = sourceBelt.itemFillCount;
         newItemDrainCount = sourceBelt.itemDrainCount;
-        newDeadEndFreezeProgress = sourceBelt.deadEndFreezeProgress;
         // 源传送带的残留物品也继承
         if (sourceBelt.lastItemFillCount > 0) {
           newLastItemId = sourceBelt.lastItemId;
           newLastItemFillCount = sourceBelt.lastItemFillCount;
           newLastItemDrainCount = sourceBelt.lastItemDrainCount;
-          newLastItemFreezeProgress = sourceBelt.lastItemFreezeProgress;
+        }
+      } else if (forkSourceBelt != null && forkSourceIndex >= 0) {
+        newItemSegments.addAll(
+          forkSourceBelt.clippedItemSegments(
+            0,
+            forkSourceIndex + 1,
+            clearFreezeProgress: true,
+          ),
+        );
+        newItemId = forkSourceBelt.itemId;
+        newItemFillCount =
+            forkSourceBelt.itemFillCount.clamp(0, forkSourceIndex + 1).toInt();
+        newItemDrainCount =
+            forkSourceBelt.itemDrainCount.clamp(0, forkSourceIndex + 1).toInt();
+        if (forkSourceBelt.lastItemFillCount > 0) {
+          newLastItemId = forkSourceBelt.lastItemId;
+          newLastItemFillCount = forkSourceBelt.lastItemFillCount
+              .clamp(0, forkSourceIndex + 1)
+              .toInt();
+          newLastItemDrainCount = forkSourceBelt.lastItemDrainCount
+              .clamp(0, forkSourceIndex + 1)
+              .toInt();
         }
       }
 
       if (_mergeTarget != null) {
         final mergeBelt = _mergeTarget!;
         final offset = newSegmentLength - 1; // 合并目标首格已包含在 fullPath 中
-        newItemSegments.addAll(mergeBelt.shiftedItemSegments(offset));
+        newItemSegments.addAll(
+          mergeBelt.shiftedItemSegments(offset, clearFreezeProgress: true),
+        );
 
         if (mergeBelt.itemId.isNotEmpty) {
           if (mergeBelt.lastItemFillCount > 0) {
@@ -297,25 +334,21 @@ class TransportBeltController {
             newItemId = mergeBelt.itemId;
             newItemFillCount = mergeBelt.itemFillCount + offset;
             newItemDrainCount = mergeBelt.itemDrainCount + offset;
-            newDeadEndFreezeProgress = mergeBelt.deadEndFreezeProgress;
 
             newLastItemId = mergeBelt.lastItemId;
             newLastItemFillCount = mergeBelt.lastItemFillCount + offset;
             newLastItemDrainCount = mergeBelt.lastItemDrainCount + offset;
-            newLastItemFreezeProgress = mergeBelt.lastItemFreezeProgress;
           } else {
             // 合并目标有当前物品 → 转为残留物品
             newLastItemId = mergeBelt.itemId;
             newLastItemFillCount = mergeBelt.itemFillCount + offset;
             newLastItemDrainCount = mergeBelt.itemDrainCount + offset;
-            newLastItemFreezeProgress = mergeBelt.deadEndFreezeProgress;
           }
         } else if (mergeBelt.lastItemFillCount > 0) {
           // 合并目标已有残留物品 → 继承
           newLastItemId = mergeBelt.lastItemId;
           newLastItemFillCount = mergeBelt.lastItemFillCount + offset;
           newLastItemDrainCount = mergeBelt.lastItemDrainCount + offset;
-          newLastItemFreezeProgress = mergeBelt.lastItemFreezeProgress;
         }
       }
 
@@ -398,7 +431,10 @@ class TransportBeltController {
                 itemId: oldBelt.itemId,
                 lastItemId: oldBelt.lastItemId,
                 itemSegments: oldBelt.clippedItemSegments(
-                    forkIdx + 1, oldBelt.path.length),
+                  forkIdx + 1,
+                  oldBelt.path.length,
+                  clearFreezeProgress: true,
+                ),
                 isBlocked: oldBelt.isBlocked,
                 forcedDirection: forcedDir,
                 incomingDirection: incomingDir,
@@ -414,8 +450,6 @@ class TransportBeltController {
                     ? _clampDownstreamCount(
                         oldBelt.lastItemDrainCount, forkIdx + 1)
                     : 0,
-                deadEndFreezeProgress: oldBelt.deadEndFreezeProgress,
-                lastItemFreezeProgress: oldBelt.lastItemFreezeProgress,
               ));
             }
           }

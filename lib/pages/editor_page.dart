@@ -147,6 +147,8 @@ class _EditorPageState extends State<EditorPage> {
                 'grid_y': pb.gridY,
                 'rotation': pb.rotation,
                 'recipe_id': pb.activeRecipeId,
+                'input_item_id': pb.inputItemId,
+                'input_item_count': pb.inputItemCount,
               })
           .toList(),
       'conveyors': _project.conveyors
@@ -253,6 +255,8 @@ class _EditorPageState extends State<EditorPage> {
             gridY: (bd['grid_y'] as num).toDouble(),
             rotation: bd['rotation'] as int? ?? 0,
             activeRecipeId: bd['recipe_id'] as String?,
+            inputItemId: bd['input_item_id'] as String?,
+            inputItemCount: (bd['input_item_count'] as num?)?.toInt() ?? 0,
           ));
         }
       }

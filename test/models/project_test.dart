@@ -1,7 +1,67 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
+import 'package:endfield_aic_planner/models/building.dart';
 import 'package:endfield_aic_planner/models/project.dart';
 
 void main() {
+  const testBuilding = Building(
+    id: 'test_processor',
+    name: 'Test Processor',
+    gridWidth: 1,
+    gridHeight: 1,
+    color: Colors.orange,
+    category: 'test',
+    maxInputs: 1,
+    maxOutputs: 1,
+    ports: PortsLayout(
+      inputs: [
+        PortDefinition(relativeX: 0.5, relativeY: 1.0, direction: 'down'),
+      ],
+      outputs: [
+        PortDefinition(relativeX: 0.5, relativeY: 0.0, direction: 'up'),
+      ],
+    ),
+  );
+
+  group('PlacedBuilding input inventory', () {
+    test('accepts only one item type up to 50 items', () {
+      final building = PlacedBuilding(
+        id: 'processor',
+        building: testBuilding,
+        gridX: 0,
+        gridY: 0,
+      );
+
+      for (int i = 0; i < PlacedBuilding.maxInputItemCount; i++) {
+        expect(building.acceptInputItem('item_a'), true);
+      }
+
+      expect(building.inputItemId, 'item_a');
+      expect(building.inputItemCount, 50);
+      expect(building.acceptInputItem('item_a'), false);
+      expect(building.acceptInputItem('item_b'), false);
+    });
+
+    test('consumes input items and clears the slot when empty', () {
+      final building = PlacedBuilding(
+        id: 'processor',
+        building: testBuilding,
+        gridX: 0,
+        gridY: 0,
+        inputItemId: 'item_a',
+        inputItemCount: 2,
+      );
+
+      expect(building.consumeInputItems('item_a', 1), true);
+      expect(building.inputItemId, 'item_a');
+      expect(building.inputItemCount, 1);
+
+      expect(building.consumeInputItems('item_a', 1), true);
+      expect(building.inputItemId, isNull);
+      expect(building.inputItemCount, 0);
+    });
+  });
+
   group('ConveyorBelt', () {
     test('start and end positions are calculated correctly', () {
       final belt = ConveyorBelt(
@@ -115,6 +175,135 @@ void main() {
       expect(belt.itemSegments[0].drainCount, 1);
       expect(belt.itemSegments[1].fillCount, 6);
       expect(belt.itemSegments[1].drainCount, 4);
+    });
+
+    test('queued segments stop before a blocked terminal limit', () {
+      final belt = ConveyorBelt(
+        id: 'blocked_input_belt',
+        path: const [
+          Offset(0, 1),
+          Offset(0, 0),
+        ],
+        itemId: '',
+        itemSegments: [
+          ConveyorItemSegment(itemId: 'item_b', fillCount: 1, drainCount: 0),
+        ],
+      );
+
+      expect(
+        belt.advanceItemSegments(
+          isDeadEnd: true,
+          activeSourceItemId: null,
+          terminalLimit: 1,
+        ),
+        false,
+      );
+      expect(belt.itemSegments.single.fillCount, 1);
+      expect(belt.itemSegments.single.drainCount, 0);
+      expect(belt.outputReadyItemId(), isNull);
+    });
+
+    test('clipped segments include item on fork cell for new belt ownership',
+        () {
+      final belt = ConveyorBelt(
+        id: 'forked_belt',
+        path: const [
+          Offset(0, 0),
+          Offset(1, 0),
+          Offset(2, 0),
+          Offset(3, 0),
+        ],
+        itemId: '',
+        itemSegments: [
+          ConveyorItemSegment(itemId: 'item_a', fillCount: 2, drainCount: 1),
+          ConveyorItemSegment(itemId: 'item_b', fillCount: 4, drainCount: 3),
+        ],
+      );
+
+      final newBeltSegments = belt.clippedItemSegments(0, 2);
+      final downstreamSegments = belt.clippedItemSegments(2, belt.path.length);
+
+      expect(newBeltSegments.map((s) => s.itemId), ['item_a']);
+      expect(newBeltSegments.single.fillCount, 2);
+      expect(newBeltSegments.single.drainCount, 1);
+
+      expect(downstreamSegments.map((s) => s.itemId), ['item_b']);
+      expect(downstreamSegments.single.fillCount, 2);
+      expect(downstreamSegments.single.drainCount, 1);
+    });
+
+    test('clipped segments can clear stale freeze when reassigned', () {
+      final belt = ConveyorBelt(
+        id: 'stopped_belt',
+        path: const [
+          Offset(0, 0),
+          Offset(1, 0),
+          Offset(2, 0),
+        ],
+        itemId: '',
+        itemSegments: [
+          ConveyorItemSegment(
+            itemId: 'item_a',
+            fillCount: 3,
+            drainCount: 0,
+            freezeProgress: 0.5,
+          ),
+        ],
+      );
+
+      final reassignedSegments = belt.clippedItemSegments(
+        0,
+        2,
+        clearFreezeProgress: true,
+      );
+
+      expect(reassignedSegments.single.freezeProgress, isNull);
+    });
+
+    test('continuing a frozen source stack clears stale freeze', () {
+      final belt = ConveyorBelt(
+        id: 'extended_belt',
+        path: const [
+          Offset(0, 0),
+          Offset(1, 0),
+          Offset(2, 0),
+        ],
+        itemId: '',
+        itemSegments: [
+          ConveyorItemSegment(
+            itemId: 'item_a',
+            fillCount: 1,
+            drainCount: 0,
+            freezeProgress: 0.5,
+          ),
+        ],
+      );
+
+      expect(belt.pushSourceItem('item_a'), true);
+      expect(belt.itemSegments.single.fillCount, 2);
+      expect(belt.itemSegments.single.freezeProgress, isNull);
+    });
+
+    test('removes one ready output item while preserving queued items', () {
+      final belt = ConveyorBelt(
+        id: 'queued_belt',
+        path: const [
+          Offset(0, 0),
+          Offset(1, 0),
+          Offset(2, 0),
+        ],
+        itemId: '',
+        itemSegments: [
+          ConveyorItemSegment(itemId: 'item_b', fillCount: 2, drainCount: 0),
+          ConveyorItemSegment(itemId: 'item_a', fillCount: 3, drainCount: 2),
+        ],
+      );
+
+      expect(belt.outputReadyItemId(), 'item_a');
+      expect(belt.removeOutputReadyItem(), true);
+      expect(belt.itemSegments.map((s) => s.itemId), ['item_b']);
+      expect(belt.itemSegments.single.fillCount, 2);
+      expect(belt.itemSegments.single.drainCount, 0);
     });
   });
 }

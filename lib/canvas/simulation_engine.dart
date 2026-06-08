@@ -100,6 +100,8 @@ class SimulationEngine extends ChangeNotifier {
       if (pb != null) {
         pb.isBlocked = br.isBlocked;
         pb.productionProgress = br.productionProgress;
+        pb.inputItemId = br.inputItemId.isEmpty ? null : br.inputItemId;
+        pb.inputItemCount = br.inputItemCount;
       }
     }
 
@@ -192,6 +194,8 @@ class SimulationEngine extends ChangeNotifier {
                 rotation: pb.rotation,
                 activeRecipeId: pb.activeRecipeId,
                 depotOutputItemId: pb.depotOutputItemId ?? '',
+                inputItemId: pb.inputItemId ?? '',
+                inputItemCount: pb.inputItemCount,
                 gridWidth: pb.building.gridWidth,
                 gridHeight: pb.building.gridHeight,
                 inputPorts: pb.inputPorts
@@ -403,22 +407,7 @@ class SimulationEngine extends ChangeNotifier {
 
   bool _fallbackCheckInputsAvailable(PlacedBuilding pb, Recipe recipe) {
     for (final input in recipe.inputs) {
-      bool found = false;
-      for (final belt in _project!.conveyors) {
-        for (final port in pb.inputPorts) {
-          final portWorld = port.worldPosition(pb.gridX, pb.gridY, _cellSize,
-              pb.building.gridWidth, pb.building.gridHeight,
-              rotation: pb.rotation);
-          if ((belt.end - portWorld).distance < _portConnectionThreshold) {
-            if (belt.itemId == input.itemId) {
-              found = true;
-              break;
-            }
-          }
-        }
-        if (found) break;
-      }
-      if (!found) return false;
+      if (!pb.hasInputItems(input.itemId, input.amount)) return false;
     }
     return true;
   }
@@ -440,20 +429,7 @@ class SimulationEngine extends ChangeNotifier {
 
   void _fallbackConsumeInputs(PlacedBuilding pb, Recipe recipe) {
     for (final input in recipe.inputs) {
-      for (final port in pb.inputPorts) {
-        final portWorld = port.worldPosition(pb.gridX, pb.gridY, _cellSize,
-            pb.building.gridWidth, pb.building.gridHeight,
-            rotation: pb.rotation);
-        for (final belt in _project!.conveyors) {
-          if ((belt.end - portWorld).distance < _portConnectionThreshold) {
-            if (belt.itemId == input.itemId) {
-              belt.itemSegments.clear();
-              belt.syncLegacyFromSegments();
-              break;
-            }
-          }
-        }
-      }
+      pb.consumeInputItems(input.itemId, input.amount);
     }
   }
 

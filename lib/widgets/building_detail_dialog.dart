@@ -107,7 +107,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
 
   Future<void> _loadLiquidSwitch() async {
     try {
-      final raw = await rootBundle.loadString('assets/svg/liquid_icon_switch.svg');
+      final raw =
+          await rootBundle.loadString('assets/svg/liquid_icon_switch.svg');
       final off = raw.replaceAll('#03a9ff', '#b2b2b2');
       if (mounted) {
         setState(() {
@@ -188,8 +189,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   @override
   Widget build(BuildContext context) {
     final pb = widget.placedBuilding;
-    final recipes =
-        widget.dataLoader.getRecipesForBuilding(pb.building.id);
+    final recipes = widget.dataLoader.getRecipesForBuilding(pb.building.id);
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -202,36 +202,36 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
           return Container(
             width: dialogWidth,
             height: 720,
-        decoration: BoxDecoration(
-          color: const Color(0xFF252525),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFF444444)),
-        ),
-        child: Column(
-          children: [
-            _buildWindowInfoBar(),
-            _buildSeparator(),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildResourcePanel(),
-                    const SizedBox(width: 20),
-                    Expanded(
-                      child: _buildSynthesisPanel(recipes),
-                    ),
-                  ],
-                ),
-              ),
+            decoration: BoxDecoration(
+              color: const Color(0xFF252525),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFF444444)),
             ),
-          ],
-        ),
-      );
-    },
-  ),
-);
+            child: Column(
+              children: [
+                _buildWindowInfoBar(),
+                _buildSeparator(),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildResourcePanel(),
+                        const SizedBox(width: 20),
+                        Expanded(
+                          child: _buildSynthesisPanel(recipes),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Widget _buildWindowInfoBar() {
@@ -440,7 +440,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                             decoration: BoxDecoration(
                               color: const Color(0xFF1E1E1E),
                               borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: const Color(0xFF444444), width: 1),
+                              border: Border.all(
+                                  color: const Color(0xFF444444), width: 1),
                             ),
                             textStyle: const TextStyle(
                               color: Colors.white,
@@ -474,8 +475,9 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
         onPointerSignal: (event) {
           if (event is PointerScrollEvent && _gridScrollController.hasClients) {
             final maxExtent = _gridScrollController.position.maxScrollExtent;
-            final target = (_gridScrollController.offset + event.scrollDelta.dy * 1.5)
-                .clamp(0.0, maxExtent);
+            final target =
+                (_gridScrollController.offset + event.scrollDelta.dy * 1.5)
+                    .clamp(0.0, maxExtent);
             _gridScrollController.animateTo(
               target,
               duration: const Duration(milliseconds: 150),
@@ -493,7 +495,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
           ),
           clipBehavior: Clip.antiAlias,
           child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+            behavior:
+                ScrollConfiguration.of(context).copyWith(scrollbars: false),
             child: GridView.builder(
               controller: _gridScrollController,
               padding: EdgeInsets.zero,
@@ -540,14 +543,16 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
         child: ListenableBuilder(
           listenable: _gridScrollController,
           builder: (context, _) {
-            if (!_gridScrollController.hasClients) return const SizedBox.shrink();
+            if (!_gridScrollController.hasClients)
+              return const SizedBox.shrink();
             final position = _gridScrollController.position;
             final maxExtent = position.maxScrollExtent;
             if (maxExtent <= 0) return const SizedBox.shrink();
 
             const trackHeight = 438.0;
             final thumbHeight =
-                (trackHeight * trackHeight / (trackHeight + maxExtent)).clamp(30.0, trackHeight);
+                (trackHeight * trackHeight / (trackHeight + maxExtent))
+                    .clamp(30.0, trackHeight);
             final scrollFraction = position.pixels / maxExtent;
             final thumbTop = scrollFraction * (trackHeight - thumbHeight);
 
@@ -569,8 +574,10 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                     },
                     onVerticalDragUpdate: (details) {
                       final delta = details.globalPosition.dy - _dragStartY;
-                      final scrollDelta = delta * (maxExtent / (trackHeight - thumbHeight));
-                      final target = (_dragStartOffset + scrollDelta).clamp(0.0, maxExtent);
+                      final scrollDelta =
+                          delta * (maxExtent / (trackHeight - thumbHeight));
+                      final target = (_dragStartOffset + scrollDelta)
+                          .clamp(0.0, maxExtent);
                       _gridScrollController.jumpTo(target);
                     },
                     onVerticalDragEnd: (_) {
@@ -581,7 +588,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                       cursor: SystemMouseCursors.click,
                       child: Container(
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: _isDraggingScrollbar ? 0.7 : 0.5),
+                          color: Colors.white.withValues(
+                              alpha: _isDraggingScrollbar ? 0.7 : 0.5),
                           borderRadius: BorderRadius.circular(5),
                         ),
                       ),
@@ -797,12 +805,18 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   }
 
   Widget _buildDefaultSynthesisPanel(List<Recipe> recipes) {
-    final solidInputPorts = widget.placedBuilding.inputPorts.where((p) => p.definition.portType == 'solid').toList();
-    final solidOutputPorts = widget.placedBuilding.outputPorts.where((p) => p.definition.portType == 'solid').toList();
-    final int maxPorts = math.max(solidInputPorts.length, solidOutputPorts.length);
+    final solidInputPorts = widget.placedBuilding.inputPorts
+        .where((p) => p.definition.portType == 'solid')
+        .toList();
+    final solidOutputPorts = widget.placedBuilding.outputPorts
+        .where((p) => p.definition.portType == 'solid')
+        .toList();
+    final int maxPorts =
+        math.max(solidInputPorts.length, solidOutputPorts.length);
     final double connectorHeight = maxPorts > 0 ? (maxPorts * 62.0) : 0.0;
     final double defaultGridBoxH = 128.0;
-    final double defaultRowH = connectorHeight > defaultGridBoxH ? connectorHeight : defaultGridBoxH;
+    final double defaultRowH =
+        connectorHeight > defaultGridBoxH ? connectorHeight : defaultGridBoxH;
 
     return Column(
       children: [
@@ -869,7 +883,10 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                           Container(
                             height: defaultRowH,
                             alignment: Alignment.center,
-                            child: _ProcessingIndicator(isRunning: widget.placedBuilding.productionProgress > 0),
+                            child: _ProcessingIndicator(
+                                isRunning:
+                                    widget.placedBuilding.productionProgress >
+                                        0),
                           ),
                           const SizedBox(width: 11),
                           _SynthesisGrid(
@@ -892,7 +909,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
         const SizedBox(height: 14),
         Builder(
           builder: (context) {
-            final isProducing = _activeRecipe != null && widget.placedBuilding.productionProgress > 0;
+            final isProducing = _activeRecipe != null &&
+                widget.placedBuilding.productionProgress > 0;
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -925,7 +943,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                             width: 348.16,
                             height: 76.8,
                             child: GestureDetector(
-                              onTap: () => _showRecipeListDialog(context, recipes),
+                              onTap: () =>
+                                  _showRecipeListDialog(context, recipes),
                               child: SvgPicture.asset(
                                 'assets/svg/information_BG.svg',
                                 width: 348.16,
@@ -943,46 +962,68 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                               child: Center(
                                 child: isProducing
                                     ? Column(
-                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
                                         children: [
                                           Row(
-                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
                                             children: [
-                                              ...(_activeRecipe?.inputs.map((inp) {
-                                                final item = widget.dataLoader.getItem(inp.itemId);
-                                                if (item == null) return const SizedBox.shrink();
-                                                return Padding(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                                                  child: Image.asset(
-                                                    item.imageAssetPath,
-                                                    width: 24,
-                                                    height: 24,
-                                                    cacheWidth: 72,
-                                                    cacheHeight: 72,
-                                                    fit: BoxFit.contain,
-                                                    filterQuality: FilterQuality.medium,
-                                                    isAntiAlias: true,
-                                                  ),
-                                                );
-                                              }) ?? []),
+                                              ...(_activeRecipe?.inputs
+                                                      .map((inp) {
+                                                    final item = widget
+                                                        .dataLoader
+                                                        .getItem(inp.itemId);
+                                                    if (item == null)
+                                                      return const SizedBox
+                                                          .shrink();
+                                                    return Padding(
+                                                      padding: const EdgeInsets
+                                                          .symmetric(
+                                                          horizontal: 4),
+                                                      child: Image.asset(
+                                                        item.imageAssetPath,
+                                                        width: 24,
+                                                        height: 24,
+                                                        cacheWidth: 72,
+                                                        cacheHeight: 72,
+                                                        fit: BoxFit.contain,
+                                                        filterQuality:
+                                                            FilterQuality
+                                                                .medium,
+                                                        isAntiAlias: true,
+                                                      ),
+                                                    );
+                                                  }) ??
+                                                  []),
                                               const SizedBox(width: 48),
-                                              ...(_activeRecipe?.outputs.map((out) {
-                                                final item = widget.dataLoader.getItem(out.itemId);
-                                                if (item == null) return const SizedBox.shrink();
-                                                return Padding(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                                                  child: Image.asset(
-                                                    item.imageAssetPath,
-                                                    width: 24,
-                                                    height: 24,
-                                                    cacheWidth: 72,
-                                                    cacheHeight: 72,
-                                                    fit: BoxFit.contain,
-                                                    filterQuality: FilterQuality.medium,
-                                                    isAntiAlias: true,
-                                                  ),
-                                                );
-                                              }) ?? []),
+                                              ...(_activeRecipe?.outputs
+                                                      .map((out) {
+                                                    final item = widget
+                                                        .dataLoader
+                                                        .getItem(out.itemId);
+                                                    if (item == null)
+                                                      return const SizedBox
+                                                          .shrink();
+                                                    return Padding(
+                                                      padding: const EdgeInsets
+                                                          .symmetric(
+                                                          horizontal: 4),
+                                                      child: Image.asset(
+                                                        item.imageAssetPath,
+                                                        width: 24,
+                                                        height: 24,
+                                                        cacheWidth: 72,
+                                                        cacheHeight: 72,
+                                                        fit: BoxFit.contain,
+                                                        filterQuality:
+                                                            FilterQuality
+                                                                .medium,
+                                                        isAntiAlias: true,
+                                                      ),
+                                                    );
+                                                  }) ??
+                                                  []),
                                             ],
                                           ),
                                           const SizedBox(height: 6),
@@ -990,7 +1031,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                                         ],
                                       )
                                     : Row(
-                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
                                         children: [
                                           const Icon(
                                             Icons.list_alt_outlined,
@@ -1018,7 +1060,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                               svgPath: 'assets/svg/Recipe_button.svg',
                               width: 43.52002,
                               height: 43.52002,
-                              onTap: () => _showRecipeListDialog(context, recipes),
+                              onTap: () =>
+                                  _showRecipeListDialog(context, recipes),
                             ),
                           ),
                         ],
@@ -1130,10 +1173,13 @@ class _RecipeListDialogState extends State<_RecipeListDialog> {
             Expanded(
               child: Listener(
                 onPointerSignal: (event) {
-                  if (event is PointerScrollEvent && _scrollController.hasClients) {
-                    final maxExtent = _scrollController.position.maxScrollExtent;
-                    final target = (_scrollController.offset + event.scrollDelta.dy * 1.5)
-                        .clamp(0.0, maxExtent);
+                  if (event is PointerScrollEvent &&
+                      _scrollController.hasClients) {
+                    final maxExtent =
+                        _scrollController.position.maxScrollExtent;
+                    final target =
+                        (_scrollController.offset + event.scrollDelta.dy * 1.5)
+                            .clamp(0.0, maxExtent);
                     _scrollController.animateTo(
                       target,
                       duration: const Duration(milliseconds: 200),
@@ -1142,12 +1188,14 @@ class _RecipeListDialogState extends State<_RecipeListDialog> {
                   }
                 },
                 child: ScrollConfiguration(
-                  behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                  behavior: ScrollConfiguration.of(context)
+                      .copyWith(scrollbars: false),
                   child: GridView.builder(
                     controller: _scrollController,
                     physics: const NeverScrollableScrollPhysics(),
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
                       mainAxisSpacing: 16,
                       crossAxisSpacing: 16,
@@ -1156,7 +1204,8 @@ class _RecipeListDialogState extends State<_RecipeListDialog> {
                     itemCount: widget.recipes.length,
                     itemBuilder: (context, index) {
                       final recipe = widget.recipes[index];
-                      final isPinned = widget.placedBuilding.activeRecipeId == recipe.id;
+                      final isPinned =
+                          widget.placedBuilding.activeRecipeId == recipe.id;
                       return _RecipeListItem(
                         recipe: recipe,
                         dataLoader: widget.dataLoader,
@@ -1255,8 +1304,8 @@ class _ResourceGridTileState extends State<_ResourceGridTile> {
     double bottomOffset = 8.0;
 
     final tileBox = context.findRenderObject() as RenderBox;
-    final gridBox =
-        widget.gridContainerKey.currentContext?.findRenderObject() as RenderBox?;
+    final gridBox = widget.gridContainerKey.currentContext?.findRenderObject()
+        as RenderBox?;
 
     if (gridBox != null) {
       final tilePos = tileBox.localToGlobal(Offset.zero, ancestor: gridBox);
@@ -1266,8 +1315,8 @@ class _ResourceGridTileState extends State<_ResourceGridTile> {
       final tooltipBottomInGrid = tilePos.dy + tileSize.height - 8.0;
 
       if (tooltipBottomInGrid > gridSize.height) {
-        bottomOffset =
-            (tileSize.height - (gridSize.height - tilePos.dy)).clamp(0.0, tileSize.height);
+        bottomOffset = (tileSize.height - (gridSize.height - tilePos.dy))
+            .clamp(0.0, tileSize.height);
       }
     }
 
@@ -1293,18 +1342,30 @@ class _ResourceGridTileState extends State<_ResourceGridTile> {
               _gridTileSvg(widget.item.level, isHovered: _hovering),
               fit: BoxFit.fill,
             ),
-          Center(
-            child: widget.item.imageAssetPath.isNotEmpty
-                ? Image.asset(
-                    widget.item.imageAssetPath,
-                    width: 93,
-                    height: 93,
-                    cacheWidth: 279,
-                    cacheHeight: 279,
-                    fit: BoxFit.contain,
-                    filterQuality: FilterQuality.medium,
-                    isAntiAlias: true,
-                    errorBuilder: (_, __, ___) => Container(
+            Center(
+              child: widget.item.imageAssetPath.isNotEmpty
+                  ? Image.asset(
+                      widget.item.imageAssetPath,
+                      width: 93,
+                      height: 93,
+                      cacheWidth: 279,
+                      cacheHeight: 279,
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.medium,
+                      isAntiAlias: true,
+                      errorBuilder: (_, __, ___) => Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: widget.item.color.withValues(alpha: 0.2),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: widget.item.color.withValues(alpha: 0.5),
+                          ),
+                        ),
+                      ),
+                    )
+                  : Container(
                       width: 40,
                       height: 40,
                       decoration: BoxDecoration(
@@ -1315,84 +1376,73 @@ class _ResourceGridTileState extends State<_ResourceGridTile> {
                         ),
                       ),
                     ),
-                  )
-                : Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: widget.item.color.withValues(alpha: 0.2),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: widget.item.color.withValues(alpha: 0.5),
-                      ),
-                    ),
-                  ),
-          ),
-          if (widget.showAddIcon)
-            Positioned(
-              right: 4,
-              top: 4,
-              child: GestureDetector(
-                onTap: widget.onAddItem,
-                child: Container(
-                  width: 21.9,
-                  height: 21.9,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.3),
-                        blurRadius: 3,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: SvgPicture.asset(
-                      'assets/svg/add.svg',
-                      width: 12,
-                      height: 12,
-                      colorFilter: const ColorFilter.mode(
-                        Color(0xFF212121),
-                        BlendMode.srcIn,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
             ),
-          if (_hovering)
-            Positioned(
-              bottom: _tooltipBottomOffset,
-              left: 0,
-              right: 0,
-              child: IgnorePointer(
-                child: Center(
+            if (widget.showAddIcon)
+              Positioned(
+                right: 4,
+                top: 4,
+                child: GestureDetector(
+                  onTap: widget.onAddItem,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    width: 21.9,
+                    height: 21.9,
                     decoration: BoxDecoration(
-                      color: Colors.grey[900]?.withValues(alpha: 0.9),
-                      borderRadius: BorderRadius.circular(4),
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.3),
+                          blurRadius: 3,
+                          offset: const Offset(0, 1),
+                        ),
+                      ],
                     ),
-                    child: Text(
-                      widget.item.name,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
+                    child: Center(
+                      child: SvgPicture.asset(
+                        'assets/svg/add.svg',
+                        width: 12,
+                        height: 12,
+                        colorFilter: const ColorFilter.mode(
+                          Color(0xFF212121),
+                          BlendMode.srcIn,
+                        ),
                       ),
-                      textAlign: TextAlign.center,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ),
               ),
-            ),
-        ],
+            if (_hovering)
+              Positioned(
+                bottom: _tooltipBottomOffset,
+                left: 0,
+                right: 0,
+                child: IgnorePointer(
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[900]?.withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        widget.item.name,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                        ),
+                        textAlign: TextAlign.center,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 }
 
 class _SynthesisGrid extends StatefulWidget {
@@ -1416,7 +1466,8 @@ class _SynthesisGrid extends StatefulWidget {
   State<_SynthesisGrid> createState() => _SynthesisGridState();
 }
 
-class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderStateMixin {
+class _SynthesisGridState extends State<_SynthesisGrid>
+    with TickerProviderStateMixin {
   late AnimationController _animationController;
 
   @override
@@ -1448,7 +1499,7 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
     final endColor = gradientEndColors[level] ?? '#dddddd';
     final tagColor = tagColors[level] ?? '#ebebeb';
     final hasItem = level != null;
-    
+
     return '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">'
         '<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">'
         '<stop offset="0" stop-color="#696969"/>'
@@ -1500,7 +1551,8 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
                       fit: BoxFit.contain,
                       filterQuality: FilterQuality.medium,
                       isAntiAlias: true,
-                      errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
+                      errorBuilder: (_, __, ___) =>
+                          _buildItemPlaceholder(dataItem),
                     )
                   : _buildItemPlaceholder(dataItem),
             ),
@@ -1511,13 +1563,21 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
 
   @override
   Widget build(BuildContext context) {
+    final inventoryItemId =
+        widget.isInput ? widget.placedBuilding.inputItemId : null;
+    final inventoryCount =
+        widget.isInput ? widget.placedBuilding.inputItemCount : 0;
     final item = widget.items.isNotEmpty ? widget.items.first : null;
-    final dataItem = item != null ? widget.dataLoader.getItem(item.itemId) : null;
+    final dataItem = inventoryItemId != null && inventoryItemId.isNotEmpty
+        ? widget.dataLoader.getItem(inventoryItemId)
+        : (item != null ? widget.dataLoader.getItem(item.itemId) : null);
     final level = dataItem?.level;
-    final totalAmount = widget.items.fold<int>(0, (sum, io) => sum + io.amount);
+    final totalAmount = inventoryCount > 0
+        ? inventoryCount
+        : widget.items.fold<int>(0, (sum, io) => sum + io.amount);
 
-    final solidPorts = (widget.isInput 
-            ? widget.placedBuilding.inputPorts 
+    final solidPorts = (widget.isInput
+            ? widget.placedBuilding.inputPorts
             : widget.placedBuilding.outputPorts)
         .where((p) => p.definition.portType == 'solid')
         .toList();
@@ -1552,10 +1612,12 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
       ),
     );
 
-    final double connectorHeight = solidPorts.isNotEmpty ? (solidPorts.length * 62.0) : 0.0;
-    
+    final double connectorHeight =
+        solidPorts.isNotEmpty ? (solidPorts.length * 62.0) : 0.0;
+
     final double defaultGridBoxH = 128.0;
-    final double defaultRowH = connectorHeight > defaultGridBoxH ? connectorHeight : defaultGridBoxH;
+    final double defaultRowH =
+        connectorHeight > defaultGridBoxH ? connectorHeight : defaultGridBoxH;
     final double originalGridBoxY = (defaultRowH - defaultGridBoxH) / 2.0;
 
     final double liquidScale = 1.10;
@@ -1567,14 +1629,17 @@ class _SynthesisGridState extends State<_SynthesisGrid> with TickerProviderState
     final double finalLiquidY = originalGridBoxY - upwardOffset;
     final double finalGridBoxY = originalGridBoxY + downShift - upwardOffset;
     final double finalOffsetY = downShift - upwardOffset;
-    
+
     final double newRowH = finalGridBoxY + defaultGridBoxH;
     final double finalHeight = newRowH > defaultRowH ? newRowH : defaultRowH;
 
-    final double leftSizedBoxWidth = (widget.isInput && solidPorts.isNotEmpty) ? 288.0 : 0.0;
-    final double rightSizedBoxWidth = (!widget.isInput && solidPorts.isNotEmpty) ? 288.0 : 0.0;
+    final double leftSizedBoxWidth =
+        (widget.isInput && solidPorts.isNotEmpty) ? 288.0 : 0.0;
+    final double rightSizedBoxWidth =
+        (!widget.isInput && solidPorts.isNotEmpty) ? 288.0 : 0.0;
     final double gridBoxWidth = 128.0;
-    final double totalWidth = leftSizedBoxWidth + gridBoxWidth + rightSizedBoxWidth;
+    final double totalWidth =
+        leftSizedBoxWidth + gridBoxWidth + rightSizedBoxWidth;
 
     // Center of the gridBox horizontally
     final double gridBoxX = leftSizedBoxWidth;
@@ -1793,42 +1858,52 @@ class _TrackJointsPainter extends CustomPainter {
     // ────────────────────────────────────────────────────────
     if (isInput) {
       final double devCenterY = N * blockHeight / 2.0 + offsetY;
-      final double backboneBottom = N * blockHeight > (devCenterY + 3.3) 
-          ? N * blockHeight 
+      final double backboneBottom = N * blockHeight > (devCenterY + 3.3)
+          ? N * blockHeight
           : (devCenterY + 3.3);
 
       // Draw concatenated 'interface_link_separate' (vertical backbone)
-      canvas.drawRect(Rect.fromLTRB(207.5, 0, 212.5, backboneBottom), linkPaint);
+      canvas.drawRect(
+          Rect.fromLTRB(207.5, 0, 212.5, backboneBottom), linkPaint);
 
       // Draw consolidated 'window_link' running from backbone to grid-box
-      canvas.drawRect(Rect.fromLTRB(211.5, devCenterY - 3.3, size.width, devCenterY + 3.3), linkPaint);
+      canvas.drawRect(
+          Rect.fromLTRB(211.5, devCenterY - 3.3, size.width, devCenterY + 3.3),
+          linkPaint);
 
       // Draw junction circle near grid-box
       canvas.drawCircle(Offset(size.width, devCenterY), 6.0, inputCirclePaint);
 
       for (int i = 0; i < N; i++) {
         final double centerY = i * blockHeight + blockHeight / 2.0;
-        
+
         // Draw 'interface_link' block (overlaps to 174 and 209 to prevent anti-alias black line)
         canvas.drawRect(Rect.fromLTWH(174, centerY - 3.3, 35, 6.6), linkPaint);
 
         // Draw 'interface' block on top
-        canvas.drawRect(Rect.fromLTWH(168, centerY - 27, 7, 54), interfacePaint);
+        canvas.drawRect(
+            Rect.fromLTWH(168, centerY - 27, 7, 54), interfacePaint);
 
         // Draw junction circle at interface link
         canvas.drawCircle(Offset(175, centerY), 6.0, inputCirclePaint);
       }
     } else {
       final double devCenterY = N * blockHeight / 2.0 + offsetY;
-      final double backboneBottom = N * blockHeight > (devCenterY + 3.3) 
-          ? N * blockHeight 
+      final double backboneBottom = N * blockHeight > (devCenterY + 3.3)
+          ? N * blockHeight
           : (devCenterY + 3.3);
 
       // Draw concatenated 'interface_link_separate' (vertical backbone)
-      canvas.drawRect(Rect.fromLTRB(size.width - 212.5, 0, size.width - 207.5, backboneBottom), linkPaint);
+      canvas.drawRect(
+          Rect.fromLTRB(
+              size.width - 212.5, 0, size.width - 207.5, backboneBottom),
+          linkPaint);
 
       // Draw consolidated 'window_link' running from grid-box to backbone
-      canvas.drawRect(Rect.fromLTRB(0, devCenterY - 3.3, size.width - 211.5, devCenterY + 3.3), linkPaint);
+      canvas.drawRect(
+          Rect.fromLTRB(
+              0, devCenterY - 3.3, size.width - 211.5, devCenterY + 3.3),
+          linkPaint);
 
       // Draw junction circle near grid-box
       canvas.drawCircle(Offset(0, devCenterY), 6.0, outputCirclePaint);
@@ -1837,13 +1912,16 @@ class _TrackJointsPainter extends CustomPainter {
         final double centerY = i * blockHeight + blockHeight / 2.0;
 
         // Draw 'interface_link' block
-        canvas.drawRect(Rect.fromLTWH(size.width - 209, centerY - 3.3, 35, 6.6), linkPaint);
+        canvas.drawRect(
+            Rect.fromLTWH(size.width - 209, centerY - 3.3, 35, 6.6), linkPaint);
 
         // Draw 'interface' block
-        canvas.drawRect(Rect.fromLTWH(size.width - 175, centerY - 27, 7, 54), interfacePaint);
+        canvas.drawRect(Rect.fromLTWH(size.width - 175, centerY - 27, 7, 54),
+            interfacePaint);
 
         // Draw junction circle at interface link
-        canvas.drawCircle(Offset(size.width - 175, centerY), 6.0, outputCirclePaint);
+        canvas.drawCircle(
+            Offset(size.width - 175, centerY), 6.0, outputCirclePaint);
       }
     }
 
@@ -1887,7 +1965,7 @@ class _TrackJointsPainter extends CustomPainter {
         final double strokeHalf = 1.6 / 2;
         // height = 54, so +/- 27. Draw rect inside.
         final rect = Rect.fromLTRB(0, centerY - 27, 168, centerY + 27);
-        
+
         final gradient = const LinearGradient(
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
@@ -1909,8 +1987,10 @@ class _TrackJointsPainter extends CustomPainter {
         );
         borderPaint.shader = borderGradient.createShader(rect);
         // Offset lines inwards by half a stroke width to avoid protruding above/below 54 block height
-        canvas.drawLine(Offset(0, centerY - 27 + strokeHalf), Offset(168, centerY - 27 + strokeHalf), borderPaint);
-        canvas.drawLine(Offset(0, centerY + 27 - strokeHalf), Offset(168, centerY + 27 - strokeHalf), borderPaint);
+        canvas.drawLine(Offset(0, centerY - 27 + strokeHalf),
+            Offset(168, centerY - 27 + strokeHalf), borderPaint);
+        canvas.drawLine(Offset(0, centerY + 27 - strokeHalf),
+            Offset(168, centerY + 27 - strokeHalf), borderPaint);
 
         canvas.save();
         canvas.clipRect(rect);
@@ -1945,7 +2025,8 @@ class _TrackJointsPainter extends CustomPainter {
         // Active outgoing conveyor belt track overlay
         final double startX = size.width - 168;
         final double strokeHalf = 1.6 / 2;
-        final rect = Rect.fromLTRB(startX, centerY - 27, size.width, centerY + 27);
+        final rect =
+            Rect.fromLTRB(startX, centerY - 27, size.width, centerY + 27);
 
         final gradient = const LinearGradient(
           begin: Alignment.centerLeft,
@@ -1968,8 +2049,10 @@ class _TrackJointsPainter extends CustomPainter {
         );
         borderPaint.shader = borderGradient.createShader(rect);
         // Offset lines inwards by half a stroke width
-        canvas.drawLine(Offset(startX, centerY - 27 + strokeHalf), Offset(size.width, centerY - 27 + strokeHalf), borderPaint);
-        canvas.drawLine(Offset(startX, centerY + 27 - strokeHalf), Offset(size.width, centerY + 27 - strokeHalf), borderPaint);
+        canvas.drawLine(Offset(startX, centerY - 27 + strokeHalf),
+            Offset(size.width, centerY - 27 + strokeHalf), borderPaint);
+        canvas.drawLine(Offset(startX, centerY + 27 - strokeHalf),
+            Offset(size.width, centerY + 27 - strokeHalf), borderPaint);
 
         canvas.save();
         canvas.clipRect(rect);
@@ -2011,7 +2094,8 @@ class _ProcessingIndicator extends StatefulWidget {
   State<_ProcessingIndicator> createState() => _ProcessingIndicatorState();
 }
 
-class _ProcessingIndicatorState extends State<_ProcessingIndicator> with TickerProviderStateMixin {
+class _ProcessingIndicatorState extends State<_ProcessingIndicator>
+    with TickerProviderStateMixin {
   late List<AnimationController> _controllers;
 
   @override
@@ -2023,7 +2107,7 @@ class _ProcessingIndicatorState extends State<_ProcessingIndicator> with TickerP
         duration: const Duration(milliseconds: 1200),
       );
     });
-    
+
     // 启动动画
     if (widget.isRunning) {
       _startAnimations();
@@ -2073,7 +2157,8 @@ class _ProcessingIndicatorState extends State<_ProcessingIndicator> with TickerP
             builder: (context, child) {
               final value = _controllers[index].value;
               // 使用正弦波实现闪烁效果：20% → 100% → 20% 循环
-              final opacity = 0.2 + 0.8 * (0.5 + 0.5 * math.sin(value * 2 * math.pi));
+              final opacity =
+                  0.2 + 0.8 * (0.5 + 0.5 * math.sin(value * 2 * math.pi));
               return Opacity(
                 opacity: widget.isRunning ? opacity : 0.2,
                 child: child,
@@ -2092,7 +2177,8 @@ class _ProcessingIndicatorState extends State<_ProcessingIndicator> with TickerP
               ),
             ),
           );
-        }).expand((widget) => [widget, const SizedBox(width: 4)]).toList()..removeLast(),
+        }).expand((widget) => [widget, const SizedBox(width: 4)]).toList()
+          ..removeLast(),
       ],
     );
   }
@@ -2133,7 +2219,8 @@ class _ActionButtonState extends State<_ActionButton> {
 
   Future<void> _loadSvg() async {
     try {
-      final data = await DefaultAssetBundle.of(context).loadString(widget.svgPath);
+      final data =
+          await DefaultAssetBundle.of(context).loadString(widget.svgPath);
       if (mounted) {
         setState(() {
           _svgString = data;
@@ -2390,7 +2477,7 @@ class _DepotTrackPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final Rect rect = Offset.zero & size;
-    
+
     final Paint activeTrackPaint = Paint()..style = PaintingStyle.fill;
     final Paint borderPaint = Paint()
       ..style = PaintingStyle.stroke
@@ -2416,27 +2503,29 @@ class _DepotTrackPainter extends CustomPainter {
       ],
     );
     borderPaint.shader = borderGradient.createShader(rect);
-    
+
     final double strokeHalf = 1.6 / 2;
-    canvas.drawLine(Offset(0, strokeHalf), Offset(size.width, strokeHalf), borderPaint);
-    canvas.drawLine(Offset(0, size.height - strokeHalf), Offset(size.width, size.height - strokeHalf), borderPaint);
+    canvas.drawLine(
+        Offset(0, strokeHalf), Offset(size.width, strokeHalf), borderPaint);
+    canvas.drawLine(Offset(0, size.height - strokeHalf),
+        Offset(size.width, size.height - strokeHalf), borderPaint);
 
     canvas.save();
     canvas.clipRect(rect);
     final double centerY = size.height / 2;
-    
+
     for (int anim = 0; anim < 2; anim++) {
       final double t = (animationValue + anim / 2.0) % 1.0;
-      final double arrowX = isInput 
-          ? size.width - (t * size.width) 
-          : t * size.width;
-      
-      final double opacity = (1.0 - (arrowX / size.width)).clamp(0.0, 1.0) * 0.9;
-      
+      final double arrowX =
+          isInput ? size.width - (t * size.width) : t * size.width;
+
+      final double opacity =
+          (1.0 - (arrowX / size.width)).clamp(0.0, 1.0) * 0.9;
+
       final Paint arrowPaint = Paint()
         ..color = Colors.white.withValues(alpha: opacity)
         ..style = PaintingStyle.fill;
-      
+
       final path = Path();
       if (isInput) {
         path.moveTo(arrowX + 4, centerY - 6);
@@ -2448,16 +2537,17 @@ class _DepotTrackPainter extends CustomPainter {
         path.lineTo(arrowX - 4, centerY + 6);
       }
       path.close();
-      
+
       canvas.drawPath(path, arrowPaint);
     }
-    
+
     canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant _DepotTrackPainter oldDelegate) {
-    return oldDelegate.animationValue != animationValue || oldDelegate.isInput != isInput;
+    return oldDelegate.animationValue != animationValue ||
+        oldDelegate.isInput != isInput;
   }
 }
 
@@ -2572,15 +2662,19 @@ class _RecipeListItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final inputs = recipe.inputs;
-    final input1 = inputs.isNotEmpty ? dataLoader.getItem(inputs[0].itemId) : null;
+    final input1 =
+        inputs.isNotEmpty ? dataLoader.getItem(inputs[0].itemId) : null;
     final amount1 = inputs.isNotEmpty ? inputs[0].amount : 1;
-    final input2 = inputs.length > 1 ? dataLoader.getItem(inputs[1].itemId) : null;
+    final input2 =
+        inputs.length > 1 ? dataLoader.getItem(inputs[1].itemId) : null;
     final amount2 = inputs.length > 1 ? inputs[1].amount : 1;
 
     final outputs = recipe.outputs;
-    final output1 = outputs.isNotEmpty ? dataLoader.getItem(outputs[0].itemId) : null;
+    final output1 =
+        outputs.isNotEmpty ? dataLoader.getItem(outputs[0].itemId) : null;
     final outAmount1 = outputs.isNotEmpty ? outputs[0].amount : 1;
-    final output2 = outputs.length > 1 ? dataLoader.getItem(outputs[1].itemId) : null;
+    final output2 =
+        outputs.length > 1 ? dataLoader.getItem(outputs[1].itemId) : null;
     final outAmount2 = outputs.length > 1 ? outputs[1].amount : 1;
 
     return Column(
@@ -2628,9 +2722,12 @@ class _RecipeListItem extends StatelessWidget {
                   const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.chevron_right_rounded, size: 14, color: Color(0xFF666666)),
-                      Icon(Icons.chevron_right_rounded, size: 14, color: Color(0xFF666666)),
-                      Icon(Icons.chevron_right_rounded, size: 14, color: Color(0xFF666666)),
+                      Icon(Icons.chevron_right_rounded,
+                          size: 14, color: Color(0xFF666666)),
+                      Icon(Icons.chevron_right_rounded,
+                          size: 14, color: Color(0xFF666666)),
+                      Icon(Icons.chevron_right_rounded,
+                          size: 14, color: Color(0xFF666666)),
                     ],
                   ),
                   const SizedBox(height: 2),
@@ -2714,7 +2811,9 @@ class _RecipePinButtonState extends State<_RecipePinButton> {
           width: 36,
           height: 36,
           decoration: BoxDecoration(
-            color: widget.isPinned ? mainColor.withValues(alpha: 0.15) : Colors.transparent,
+            color: widget.isPinned
+                ? mainColor.withValues(alpha: 0.15)
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(4),
             border: Border.all(
               color: borderColor,
@@ -2843,7 +2942,8 @@ class _RecipeRunIndicator extends StatefulWidget {
   State<_RecipeRunIndicator> createState() => _RecipeRunIndicatorState();
 }
 
-class _RecipeRunIndicatorState extends State<_RecipeRunIndicator> with SingleTickerProviderStateMixin {
+class _RecipeRunIndicatorState extends State<_RecipeRunIndicator>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
 
   @override
@@ -2994,7 +3094,8 @@ class _HoverSvgButtonState extends State<HoverSvgButton> {
 
   Future<void> _loadSvg() async {
     try {
-      final data = await DefaultAssetBundle.of(context).loadString(widget.svgPath);
+      final data =
+          await DefaultAssetBundle.of(context).loadString(widget.svgPath);
       if (mounted) {
         setState(() {
           _svgString = data;

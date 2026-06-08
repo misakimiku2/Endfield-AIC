@@ -105,6 +105,8 @@ class _SimWorker {
                 id: b.id,
                 isBlocked: _buildingBlocked[b.id] ?? false,
                 productionProgress: _buildingProgress[b.id] ?? 0.0,
+                inputItemId: b.inputItemId,
+                inputItemCount: b.inputItemCount,
               ))
           .toList(),
       conveyors: _conveyors
@@ -227,21 +229,9 @@ class _SimWorker {
 
   bool _checkInputsAvailable(SimBuildingData pb, SimRecipeData recipe) {
     for (final input in recipe.inputs) {
-      bool found = false;
-      for (final belt in _conveyors) {
-        for (final port in pb.inputPorts) {
-          final portWorld = _portWorldPosition(port, pb);
-          if ((_beltEnd(belt) - portWorld).distance <
-              _portConnectionThreshold) {
-            if (belt.itemId == input.itemId) {
-              found = true;
-              break;
-            }
-          }
-        }
-        if (found) break;
+      if (pb.inputItemId != input.itemId || pb.inputItemCount < input.amount) {
+        return false;
       }
-      if (!found) return false;
     }
     return true;
   }
@@ -261,33 +251,37 @@ class _SimWorker {
   }
 
   void _consumeInputs(SimBuildingData pb, SimRecipeData recipe) {
+    var nextInputItemId = pb.inputItemId;
+    var nextInputItemCount = pb.inputItemCount;
     for (final input in recipe.inputs) {
-      for (final port in pb.inputPorts) {
-        final portWorld = _portWorldPosition(port, pb);
-        for (int i = 0; i < _conveyors.length; i++) {
-          final belt = _conveyors[i];
-          if ((_beltEnd(belt) - portWorld).distance <
-              _portConnectionThreshold) {
-            if (belt.itemId == input.itemId) {
-              _conveyors[i] = SimConveyorData(
-                id: belt.id,
-                path: belt.path,
-                itemId: '',
-                flowProgress: belt.flowProgress,
-                itemFillCount: belt.itemFillCount,
-                itemDrainCount: belt.itemDrainCount,
-                isBlocked: belt.isBlocked,
-                lastItemFillCount: belt.lastItemFillCount,
-                lastItemDrainCount: belt.lastItemDrainCount,
-                deadEndFreezeProgress: belt.deadEndFreezeProgress,
-                lastItemFreezeProgress: belt.lastItemFreezeProgress,
-              );
-              break;
-            }
-          }
-        }
+      if (nextInputItemId != input.itemId ||
+          nextInputItemCount < input.amount) {
+        return;
       }
+      nextInputItemCount -= input.amount;
     }
+    if (nextInputItemCount <= 0) {
+      nextInputItemCount = 0;
+      nextInputItemId = '';
+    }
+
+    final index = _buildings.indexWhere((b) => b.id == pb.id);
+    if (index < 0) return;
+    _buildings[index] = SimBuildingData(
+      id: pb.id,
+      buildingId: pb.buildingId,
+      gridX: pb.gridX,
+      gridY: pb.gridY,
+      rotation: pb.rotation,
+      activeRecipeId: pb.activeRecipeId,
+      depotOutputItemId: pb.depotOutputItemId,
+      inputItemId: nextInputItemId,
+      inputItemCount: nextInputItemCount,
+      gridWidth: pb.gridWidth,
+      gridHeight: pb.gridHeight,
+      inputPorts: pb.inputPorts,
+      outputPorts: pb.outputPorts,
+    );
   }
 
   void _produceOutputs(SimBuildingData pb, SimRecipeData recipe) {

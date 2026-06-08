@@ -281,6 +281,7 @@ class CanvasEditorState extends State<CanvasEditor>
     print(
         '[BeltTick] _onBeltTick called, conveyors: ${_project.conveyors.length}');
 
+    var inventoryChanged = false;
     for (final belt in _project.conveyors) {
       if (belt.isBlocked) continue;
       if (belt.path.isEmpty) continue;
@@ -288,6 +289,14 @@ class CanvasEditorState extends State<CanvasEditor>
       // 检测是否是断头传送带（终点未连接设备输入端口）
       final isDeadEnd =
           !TransportBeltRenderer.isInputPort(belt.path.last, buildings);
+      final inputBuilding =
+          isDeadEnd ? null : _findInputBuildingAtCell(belt.path.last);
+      final pendingOutputItemId =
+          inputBuilding == null ? null : belt.downstreamItemId();
+      final inputBlocked = inputBuilding != null &&
+          pendingOutputItemId != null &&
+          !inputBuilding.canAcceptInputItem(pendingOutputItemId);
+      final terminalLimit = inputBlocked ? belt.path.length - 1 : null;
       final sourceItemId = _getOutputItemIdForBeltStart(belt);
       final isProducing = sourceItemId != null && sourceItemId.isNotEmpty;
 
@@ -301,19 +310,77 @@ class CanvasEditorState extends State<CanvasEditor>
 
       belt.ensureItemSegmentsFromLegacy();
       if (isProducing) {
-        belt.pushSourceItem(sourceItemId);
+        belt.pushSourceItem(sourceItemId, terminalLimit: terminalLimit);
       }
       belt.advanceItemSegments(
-        isDeadEnd: isDeadEnd,
+        isDeadEnd: isDeadEnd || inputBuilding != null || inputBlocked,
         activeSourceItemId: isProducing ? sourceItemId : null,
+        terminalLimit: terminalLimit,
       );
+      if (inputBuilding != null) {
+        inventoryChanged = _transferBeltOutputToBuilding(belt, inputBuilding) ||
+            inventoryChanged;
+        _freezeReadyOutputSegments(
+          belt,
+          limit: terminalLimit ?? belt.path.length,
+        );
+      }
       _prevBeltItemIds[belt.id] = belt.itemId;
       _prevBeltLastItemIds[belt.id] = belt.lastItemId;
     }
     // 确保重绘（当从 AnimationController listener 触发时，ticker 可能已暂停）
     if (mounted) {
+      if (inventoryChanged) {
+        widget.onProjectChanged(_project);
+      }
       setState(() {});
     }
+  }
+
+  PlacedBuilding? _findInputBuildingAtCell(Offset cell) {
+    final gx = cell.dx.round();
+    final gy = cell.dy.round();
+    for (final pb in _project.buildings) {
+      final rot = pb.rotation;
+      final gw = pb.building.gridWidth;
+      final gh = pb.building.gridHeight;
+      for (final port in pb.inputPorts) {
+        final portCell = port.gridPosition(
+          pb.gridX,
+          pb.gridY,
+          gw,
+          gh,
+          rotation: rot,
+        );
+        if (portCell.dx.round() == gx && portCell.dy.round() == gy) {
+          return pb;
+        }
+      }
+    }
+    return null;
+  }
+
+  bool _transferBeltOutputToBuilding(
+      ConveyorBelt belt, PlacedBuilding building) {
+    if (building.building.maxInputs <= 0) return false;
+    final itemId = belt.outputReadyItemId();
+    if (itemId == null) return false;
+    if (!building.acceptInputItem(itemId)) return false;
+    belt.removeOutputReadyItem();
+    return true;
+  }
+
+  void _freezeReadyOutputSegments(ConveyorBelt belt, {required int limit}) {
+    belt.ensureItemSegmentsFromLegacy();
+    final freezeLimit = limit.clamp(0, belt.path.length).toInt();
+    for (final segment in belt.itemSegments) {
+      if (segment.hasItems &&
+          segment.fillCount >= freezeLimit &&
+          segment.freezeProgress == null) {
+        segment.freezeProgress = -1.0;
+      }
+    }
+    belt.syncLegacyFromSegments();
   }
 
   String? _getOutputItemIdForBeltStart(ConveyorBelt belt) {
