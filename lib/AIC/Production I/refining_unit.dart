@@ -89,7 +89,6 @@ class RefiningUnitRenderer {
   // 颜色常量
   static const Color _frameColor = Color(0xFF333333);
   static const Color _cellBorderColor = Color(0xFF555555);
-  static const Color _blockedOverlayColor = Color(0x40FF0000);
   static const Color _bodyColor = Color(0xFFE8751A);
 
   // 尺寸常量
@@ -269,26 +268,6 @@ class RefiningUnitRenderer {
       _drawSvgBody(canvas, w, h, portConnections: portConnections);
     } else {
       _drawBodyFallback(canvas, w, h);
-    }
-
-    // 2. 阻塞遮罩
-    if (isBlocked) {
-      canvas.drawRect(
-        Rect.fromLTWH(0, 0, w, h),
-        Paint()..color = _blockedOverlayColor,
-      );
-    }
-
-    // 3. LOD 1+: 进度条
-    if (detailLevel >= 1 &&
-        productionProgress > 0 &&
-        productionProgress < 1.0) {
-      _drawProgressBar(canvas, w, h, productionProgress);
-    }
-
-    // 4. LOD 2: 配方标签
-    if (detailLevel >= 2 && activeRecipe != null) {
-      _drawRecipeLabel(canvas, activeRecipe.name, w);
     }
 
     canvas.restore();
@@ -764,36 +743,5 @@ class RefiningUnitRenderer {
       final y = row * cellSize;
       canvas.drawLine(Offset(0, y), Offset(w, y), gridPaint);
     }
-  }
-
-  static void _drawProgressBar(
-      Canvas canvas, double w, double h, double progress) {
-    const barHeight = 4.0;
-    final barY = h - barHeight - 2;
-
-    final bgPaint = Paint()..color = const Color(0x40000000);
-    canvas.drawRect(Rect.fromLTWH(2, barY, w - 4, barHeight), bgPaint);
-
-    final progressPaint = Paint()..color = const Color(0xFF00FF66);
-    canvas.drawRect(
-      Rect.fromLTWH(2, barY, (w - 4) * progress, barHeight),
-      progressPaint,
-    );
-  }
-
-  static void _drawRecipeLabel(Canvas canvas, String recipeName, double w) {
-    final textPainter = TextPainter(
-      text: TextSpan(
-        text: recipeName,
-        style: const TextStyle(
-          color: Color(0xFF888888),
-          fontSize: 8,
-          fontWeight: FontWeight.w400,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    textPainter.layout(maxWidth: w - 4);
-    textPainter.paint(canvas, const Offset(2, 14));
   }
 }

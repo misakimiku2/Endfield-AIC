@@ -50,6 +50,7 @@ class SimBuildingData {
   final String depotOutputItemId;
   final String inputItemId;
   final int inputItemCount;
+  final Map<String, int> outputItems;
   final int gridWidth;
   final int gridHeight;
   final List<SimPortData> inputPorts;
@@ -65,6 +66,7 @@ class SimBuildingData {
     this.depotOutputItemId = '',
     this.inputItemId = '',
     this.inputItemCount = 0,
+    this.outputItems = const {},
     required this.gridWidth,
     required this.gridHeight,
     required this.inputPorts,
@@ -81,6 +83,7 @@ class SimBuildingData {
         'depotOutputItemId': depotOutputItemId,
         'inputItemId': inputItemId,
         'inputItemCount': inputItemCount,
+        'outputItems': outputItems.map((k, v) => MapEntry(k, v)),
         'gridWidth': gridWidth,
         'gridHeight': gridHeight,
         'inputPorts': inputPorts.map((e) => e.toJson()).toList(),
@@ -98,6 +101,9 @@ class SimBuildingData {
         depotOutputItemId: (json['depotOutputItemId'] as String?) ?? '',
         inputItemId: (json['inputItemId'] as String?) ?? '',
         inputItemCount: (json['inputItemCount'] as num?)?.toInt() ?? 0,
+        outputItems: (json['outputItems'] as Map<String, dynamic>?)
+                ?.map((k, v) => MapEntry(k, v as int)) ??
+            {},
         gridWidth: json['gridWidth'] as int,
         gridHeight: json['gridHeight'] as int,
         inputPorts: (json['inputPorts'] as List)
@@ -223,12 +229,14 @@ class SimRecipeData {
   final double processTimeSeconds;
   final List<SimRecipeIOData> inputs;
   final List<SimRecipeIOData> outputs;
+  final List<String> allowedBuildings;
 
   const SimRecipeData({
     required this.id,
     required this.processTimeSeconds,
     required this.inputs,
     required this.outputs,
+    this.allowedBuildings = const [],
   });
 
   Map<String, dynamic> toJson() => {
@@ -236,6 +244,7 @@ class SimRecipeData {
         'processTimeSeconds': processTimeSeconds,
         'inputs': inputs.map((e) => e.toJson()).toList(),
         'outputs': outputs.map((e) => e.toJson()).toList(),
+        'allowedBuildings': allowedBuildings,
       };
 
   factory SimRecipeData.fromJson(Map<String, dynamic> json) => SimRecipeData(
@@ -247,6 +256,10 @@ class SimRecipeData {
         outputs: (json['outputs'] as List)
             .map((e) => SimRecipeIOData.fromJson(e as Map<String, dynamic>))
             .toList(),
+        allowedBuildings: (json['allowedBuildings'] as List?)
+                ?.map((e) => e as String)
+                .toList() ??
+            [],
       );
 }
 
@@ -299,6 +312,8 @@ class SimBuildingResult {
   final double productionProgress;
   final String inputItemId;
   final int inputItemCount;
+  final String? activeRecipeId;
+  final Map<String, int> outputItems;
 
   const SimBuildingResult({
     required this.id,
@@ -306,6 +321,8 @@ class SimBuildingResult {
     required this.productionProgress,
     this.inputItemId = '',
     this.inputItemCount = 0,
+    this.activeRecipeId,
+    this.outputItems = const {},
   });
 
   Map<String, dynamic> toJson() => {
@@ -314,6 +331,8 @@ class SimBuildingResult {
         'productionProgress': productionProgress,
         'inputItemId': inputItemId,
         'inputItemCount': inputItemCount,
+        'activeRecipeId': activeRecipeId,
+        'outputItems': outputItems.map((k, v) => MapEntry(k, v)),
       };
 
   factory SimBuildingResult.fromJson(Map<String, dynamic> json) =>
@@ -323,6 +342,10 @@ class SimBuildingResult {
         productionProgress: (json['productionProgress'] as num).toDouble(),
         inputItemId: (json['inputItemId'] as String?) ?? '',
         inputItemCount: (json['inputItemCount'] as num?)?.toInt() ?? 0,
+        activeRecipeId: json['activeRecipeId'] as String?,
+        outputItems: (json['outputItems'] as Map<String, dynamic>?)
+                ?.map((k, v) => MapEntry(k, v as int)) ??
+            {},
       );
 }
 

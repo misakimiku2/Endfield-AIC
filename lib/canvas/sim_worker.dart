@@ -36,7 +36,10 @@ class _SimWorker {
   }
 
   bool _hasOutputSpace(SimConveyorData belt) {
-    if (belt.itemId.isNotEmpty) return false;
+    if (belt.itemId.isNotEmpty) {
+      return belt.itemDrainCount > 0 ||
+          belt.itemFillCount < belt.path.length;
+    }
     if (!_hasStoppedLastItems(belt)) return true;
     return belt.lastItemDrainCount > 0;
   }
@@ -107,6 +110,8 @@ class _SimWorker {
                 productionProgress: _buildingProgress[b.id] ?? 0.0,
                 inputItemId: b.inputItemId,
                 inputItemCount: b.inputItemCount,
+                activeRecipeId: b.activeRecipeId,
+                outputItems: b.outputItems,
               ))
           .toList(),
       conveyors: _conveyors
@@ -164,11 +169,39 @@ class _SimWorker {
   }
 
   void _updateBuildings(double dt) {
-    for (final pb in _buildings) {
+    for (int i = 0; i < _buildings.length; i++) {
+      var pb = _buildings[i];
+
       // 仓库取货口：不需要配方，直接将 depotOutputItemId 推送到连接的传送带
       if (pb.buildingId == 'depot_unloader_3x1') {
         _produceDepotOutput(pb);
         continue;
+      }
+
+      // 自动匹配配方：当建筑没有激活配方但有输入物品时，自动选择匹配的配方
+      if (pb.activeRecipeId == null &&
+          pb.inputItemId.isNotEmpty &&
+          pb.inputItemCount > 0) {
+        final recipeId = _findMatchingRecipe(pb.buildingId, pb.inputItemId);
+        if (recipeId != null) {
+          pb = SimBuildingData(
+            id: pb.id,
+            buildingId: pb.buildingId,
+            gridX: pb.gridX,
+            gridY: pb.gridY,
+            rotation: pb.rotation,
+            activeRecipeId: recipeId,
+            depotOutputItemId: pb.depotOutputItemId,
+            inputItemId: pb.inputItemId,
+            inputItemCount: pb.inputItemCount,
+            outputItems: pb.outputItems,
+            gridWidth: pb.gridWidth,
+            gridHeight: pb.gridHeight,
+            inputPorts: pb.inputPorts,
+            outputPorts: pb.outputPorts,
+          );
+          _buildings[i] = pb;
+        }
       }
 
       if (pb.activeRecipeId == null) continue;
@@ -176,8 +209,13 @@ class _SimWorker {
           _recipes.where((r) => r.id == pb.activeRecipeId).firstOrNull;
       if (recipe == null) continue;
 
+      // 尝试将输出库存推送到传送带
+      _pushOutputToBelts(pb, i);
+
       final hasInputs = _checkInputsAvailable(pb, recipe);
-      final hasOutputSpace = _checkOutputSpace(pb);
+      final totalOutputCount =
+          pb.outputItems.values.fold<int>(0, (sum, c) => sum + c);
+      final hasOutputSpace = totalOutputCount < 50;
 
       if (!hasInputs || !hasOutputSpace) {
         _buildingBlocked[pb.id] = true;
@@ -192,9 +230,41 @@ class _SimWorker {
       if (_buildingProgress[pb.id]! >= 1.0) {
         _buildingProgress[pb.id] = 0.0;
         _consumeInputs(pb, recipe);
-        _produceOutputs(pb, recipe);
+        // 产出物品放入输出库存
+        final newOutputItems = Map<String, int>.from(pb.outputItems);
+        for (final output in recipe.outputs) {
+          newOutputItems[output.itemId] =
+              (newOutputItems[output.itemId] ?? 0) + output.amount;
+        }
+        _buildings[i] = SimBuildingData(
+          id: pb.id,
+          buildingId: pb.buildingId,
+          gridX: pb.gridX,
+          gridY: pb.gridY,
+          rotation: pb.rotation,
+          activeRecipeId: pb.activeRecipeId,
+          depotOutputItemId: pb.depotOutputItemId,
+          inputItemId: pb.inputItemId,
+          inputItemCount: pb.inputItemCount,
+          outputItems: newOutputItems,
+          gridWidth: pb.gridWidth,
+          gridHeight: pb.gridHeight,
+          inputPorts: pb.inputPorts,
+          outputPorts: pb.outputPorts,
+        );
       }
     }
+  }
+
+  /// 根据建筑类型和输入物品查找匹配的配方ID
+  String? _findMatchingRecipe(String buildingId, String inputItemId) {
+    for (final recipe in _recipes) {
+      if (!recipe.allowedBuildings.contains(buildingId)) continue;
+      if (recipe.inputs.any((input) => input.itemId == inputItemId)) {
+        return recipe.id;
+      }
+    }
+    return null;
   }
 
   /// 仓库取货口：将 depotOutputItemId 推送到连接的空传送带
@@ -236,20 +306,6 @@ class _SimWorker {
     return true;
   }
 
-  bool _checkOutputSpace(SimBuildingData pb) {
-    if (_buildingBlocked[pb.id] ?? false) return false;
-    for (final port in pb.outputPorts) {
-      final portWorld = _portWorldPosition(port, pb);
-      for (final belt in _conveyors) {
-        if ((_beltStart(belt) - portWorld).distance <
-            _portConnectionThreshold) {
-          if (_hasOutputSpace(belt)) return true;
-        }
-      }
-    }
-    return false;
-  }
-
   void _consumeInputs(SimBuildingData pb, SimRecipeData recipe) {
     var nextInputItemId = pb.inputItemId;
     var nextInputItemCount = pb.inputItemCount;
@@ -277,6 +333,7 @@ class _SimWorker {
       depotOutputItemId: pb.depotOutputItemId,
       inputItemId: nextInputItemId,
       inputItemCount: nextInputItemCount,
+      outputItems: pb.outputItems,
       gridWidth: pb.gridWidth,
       gridHeight: pb.gridHeight,
       inputPorts: pb.inputPorts,
@@ -284,34 +341,71 @@ class _SimWorker {
     );
   }
 
-  void _produceOutputs(SimBuildingData pb, SimRecipeData recipe) {
-    for (final output in recipe.outputs) {
-      for (final port in pb.outputPorts) {
-        final portWorld = _portWorldPosition(port, pb);
-        for (int i = 0; i < _conveyors.length; i++) {
-          final belt = _conveyors[i];
-          if ((_beltStart(belt) - portWorld).distance <
-              _portConnectionThreshold) {
-            if (_hasOutputSpace(belt)) {
-              _conveyors[i] = SimConveyorData(
-                id: belt.id,
-                path: belt.path,
-                itemId: output.itemId,
-                flowProgress: belt.flowProgress,
-                itemFillCount: belt.itemFillCount,
-                itemDrainCount: belt.itemDrainCount,
-                isBlocked: belt.isBlocked,
-                lastItemFillCount: belt.lastItemFillCount,
-                lastItemDrainCount: belt.lastItemDrainCount,
-                deadEndFreezeProgress: belt.deadEndFreezeProgress,
-                lastItemFreezeProgress: belt.lastItemFreezeProgress,
-              );
-              break;
-            }
+  /// 将输出库存中的物品推送到连接的传送带
+  void _pushOutputToBelts(SimBuildingData pb, int buildingIndex) {
+    if (pb.outputItems.isEmpty) return;
+    final recipe =
+        _recipes.where((r) => r.id == pb.activeRecipeId).firstOrNull;
+    if (recipe == null) return;
+
+    var remainingItems = Map<String, int>.from(pb.outputItems);
+
+    for (final port in pb.outputPorts) {
+      if (remainingItems.isEmpty) break;
+      final portWorld = _portWorldPosition(port, pb);
+      for (int ci = 0; ci < _conveyors.length; ci++) {
+        if (remainingItems.isEmpty) break;
+        final belt = _conveyors[ci];
+        if ((_beltStart(belt) - portWorld).distance <
+            _portConnectionThreshold) {
+          if (!_hasOutputSpace(belt)) continue;
+          // 按配方输出顺序确定该端口应推送的物品
+          final outputIndex = port.index;
+          final output = outputIndex < recipe.outputs.length
+              ? recipe.outputs[outputIndex]
+              : recipe.outputs.first;
+          if (remainingItems[output.itemId] == null ||
+              remainingItems[output.itemId]! <= 0) continue;
+          // 推送物品：保留传送带现有状态，只更新 itemId
+          _conveyors[ci] = SimConveyorData(
+            id: belt.id,
+            path: belt.path,
+            itemId: belt.itemId.isNotEmpty ? belt.itemId : output.itemId,
+            flowProgress: belt.flowProgress,
+            itemFillCount: belt.itemFillCount,
+            itemDrainCount: belt.itemDrainCount,
+            isBlocked: belt.isBlocked,
+            lastItemFillCount: belt.lastItemFillCount,
+            lastItemDrainCount: belt.lastItemDrainCount,
+            deadEndFreezeProgress: belt.deadEndFreezeProgress,
+            lastItemFreezeProgress: belt.lastItemFreezeProgress,
+          );
+          remainingItems[output.itemId] = remainingItems[output.itemId]! - 1;
+          if (remainingItems[output.itemId]! <= 0) {
+            remainingItems.remove(output.itemId);
           }
+          break;
         }
       }
     }
+
+    // 更新建筑的输出库存
+    _buildings[buildingIndex] = SimBuildingData(
+      id: pb.id,
+      buildingId: pb.buildingId,
+      gridX: pb.gridX,
+      gridY: pb.gridY,
+      rotation: pb.rotation,
+      activeRecipeId: pb.activeRecipeId,
+      depotOutputItemId: pb.depotOutputItemId,
+      inputItemId: pb.inputItemId,
+      inputItemCount: pb.inputItemCount,
+      outputItems: remainingItems,
+      gridWidth: pb.gridWidth,
+      gridHeight: pb.gridHeight,
+      inputPorts: pb.inputPorts,
+      outputPorts: pb.outputPorts,
+    );
   }
 
   // === 辅助方法 ===

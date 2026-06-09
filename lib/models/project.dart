@@ -111,6 +111,7 @@ class PortState {
 
 class PlacedBuilding {
   static const int maxInputItemCount = 50;
+  static const int maxOutputItemCount = 50;
 
   final String id;
   final Building building;
@@ -121,6 +122,7 @@ class PlacedBuilding {
   String? depotOutputItemId;
   String? inputItemId;
   int inputItemCount;
+  Map<String, int> outputItems;
   List<PortState> inputPorts;
   List<PortState> outputPorts;
   bool isBlocked;
@@ -136,9 +138,11 @@ class PlacedBuilding {
     this.depotOutputItemId,
     this.inputItemId,
     this.inputItemCount = 0,
+    Map<String, int>? outputItems,
     this.isBlocked = false,
     this.productionProgress = 0.0,
-  })  : inputPorts = List.generate(
+  })  : outputItems = outputItems ?? {},
+        inputPorts = List.generate(
           building.ports.inputs.length,
           (i) => PortState(
             index: i,
@@ -154,6 +158,30 @@ class PlacedBuilding {
             definition: building.ports.outputs[i],
           ),
         );
+
+  int get totalOutputCount =>
+      outputItems.values.fold<int>(0, (sum, count) => sum + count);
+
+  bool canAcceptOutputItem(String itemId) {
+    return totalOutputCount < maxOutputItemCount;
+  }
+
+  void addOutputItem(String itemId, int amount) {
+    outputItems[itemId] = (outputItems[itemId] ?? 0) + amount;
+  }
+
+  bool hasOutputItem(String itemId, [int amount = 1]) {
+    return (outputItems[itemId] ?? 0) >= amount;
+  }
+
+  bool consumeOutputItem(String itemId, int amount) {
+    if (!hasOutputItem(itemId, amount)) return false;
+    outputItems[itemId] = outputItems[itemId]! - amount;
+    if (outputItems[itemId]! <= 0) {
+      outputItems.remove(itemId);
+    }
+    return true;
+  }
 
   bool canAcceptInputItem(String itemId) {
     if (itemId.isEmpty || inputItemCount >= maxInputItemCount) return false;
@@ -208,6 +236,47 @@ class PlacedBuilding {
 
   bool overlaps(Rect other, double cellSize) {
     return getBounds(cellSize).overlaps(other);
+  }
+
+  Map<String, bool> conveyorPortConnections(
+    Iterable<ConveyorBelt> conveyors, {
+    double cellSize = 48.0,
+    double threshold = 30.0,
+  }) {
+    final connections = <String, bool>{};
+    for (final belt in conveyors) {
+      for (final port in inputPorts) {
+        if (_isPortConnectedToBelt(port, belt, cellSize, threshold)) {
+          connections['input_${port.index}'] = true;
+        }
+      }
+      for (final port in outputPorts) {
+        if (_isPortConnectedToBelt(port, belt, cellSize, threshold)) {
+          connections['output_${port.index}'] = true;
+        }
+      }
+    }
+    return connections;
+  }
+
+  bool _isPortConnectedToBelt(
+    PortState port,
+    ConveyorBelt belt,
+    double cellSize,
+    double threshold,
+  ) {
+    if (belt.path.length < 2) return false;
+
+    final portWorld = port.worldPosition(
+      gridX,
+      gridY,
+      cellSize,
+      building.gridWidth,
+      building.gridHeight,
+      rotation: rotation,
+    );
+    final beltEndpoint = port.type == 'input' ? belt.end : belt.start;
+    return (beltEndpoint - portWorld).distance < threshold;
   }
 }
 
@@ -311,7 +380,7 @@ class ConveyorBelt {
     this.deadEndFreezeProgress,
     this.lastItemFreezeProgress,
   })  : particles = particles ?? [],
-        itemSegments = itemSegments ?? [],
+        itemSegments = List<ConveyorItemSegment>.from(itemSegments ?? const []),
         lastItemId = lastItemId ?? itemId {
     if (this.itemSegments.isNotEmpty) {
       syncLegacyFromSegments();

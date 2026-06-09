@@ -1568,13 +1568,20 @@ class _SynthesisGridState extends State<_SynthesisGrid>
     final inventoryCount =
         widget.isInput ? widget.placedBuilding.inputItemCount : 0;
     final item = widget.items.isNotEmpty ? widget.items.first : null;
+    // 输出侧使用输出库存
+    final outputItemId = !widget.isInput ? item?.itemId : null;
+    final outputCount = !widget.isInput && outputItemId != null
+        ? (widget.placedBuilding.outputItems[outputItemId] ?? 0)
+        : 0;
     final dataItem = inventoryItemId != null && inventoryItemId.isNotEmpty
         ? widget.dataLoader.getItem(inventoryItemId)
         : (item != null ? widget.dataLoader.getItem(item.itemId) : null);
     final level = dataItem?.level;
     final totalAmount = inventoryCount > 0
         ? inventoryCount
-        : widget.items.fold<int>(0, (sum, io) => sum + io.amount);
+        : outputCount > 0
+            ? outputCount
+            : widget.items.fold<int>(0, (sum, io) => sum + io.amount);
 
     final solidPorts = (widget.isInput
             ? widget.placedBuilding.inputPorts
@@ -1702,8 +1709,13 @@ class _SynthesisGridState extends State<_SynthesisGrid>
         if (totalAmount > 0)
           Text(
             '$totalAmount',
-            style: const TextStyle(
-              color: Color(0xFFDDDDDD),
+            style: TextStyle(
+              color: ((widget.isInput &&
+                          inventoryCount >= PlacedBuilding.maxInputItemCount) ||
+                      (!widget.isInput &&
+                          outputCount >= PlacedBuilding.maxOutputItemCount))
+                  ? const Color(0xFFFF4444)
+                  : const Color(0xFFDDDDDD),
               fontSize: 20,
               fontWeight: FontWeight.w500,
             ),
@@ -1766,30 +1778,9 @@ class _TrackJointsConnectorState extends State<_TrackJointsConnector>
   }
 
   bool _isPortConnected(PortState port) {
-    final portWorldPos = port.gridPosition(
-      widget.placedBuilding.gridX,
-      widget.placedBuilding.gridY,
-      widget.placedBuilding.building.gridWidth,
-      widget.placedBuilding.building.gridHeight,
-      rotation: widget.placedBuilding.rotation,
-    );
-    for (final conveyor in widget.conveyors) {
-      if (conveyor.path.isEmpty) continue;
-      if (widget.isInput) {
-        final last = conveyor.path.last;
-        if (last.dx.round() == portWorldPos.dx.round() &&
-            last.dy.round() == portWorldPos.dy.round()) {
-          return true;
-        }
-      } else {
-        final first = conveyor.path.first;
-        if (first.dx.round() == portWorldPos.dx.round() &&
-            first.dy.round() == portWorldPos.dy.round()) {
-          return true;
-        }
-      }
-    }
-    return false;
+    final connections =
+        widget.placedBuilding.conveyorPortConnections(widget.conveyors);
+    return connections['${port.type}_${port.index}'] == true;
   }
 
   @override

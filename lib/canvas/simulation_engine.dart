@@ -102,6 +102,11 @@ class SimulationEngine extends ChangeNotifier {
         pb.productionProgress = br.productionProgress;
         pb.inputItemId = br.inputItemId.isEmpty ? null : br.inputItemId;
         pb.inputItemCount = br.inputItemCount;
+        if (br.activeRecipeId != null) {
+          pb.activeRecipeId = br.activeRecipeId;
+        }
+        // 同步输出库存
+        pb.outputItems = Map<String, int>.from(br.outputItems);
       }
     }
 
@@ -196,6 +201,7 @@ class SimulationEngine extends ChangeNotifier {
                 depotOutputItemId: pb.depotOutputItemId ?? '',
                 inputItemId: pb.inputItemId ?? '',
                 inputItemCount: pb.inputItemCount,
+                outputItems: pb.outputItems,
                 gridWidth: pb.building.gridWidth,
                 gridHeight: pb.building.gridHeight,
                 inputPorts: pb.inputPorts
@@ -249,6 +255,7 @@ class SimulationEngine extends ChangeNotifier {
                     .map((io) =>
                         SimRecipeIOData(itemId: io.itemId, amount: io.amount))
                     .toList(),
+                allowedBuildings: r.allowedBuildings,
               ))
           .toList(),
       speedMultiplier: _speedMultiplier,
@@ -356,12 +363,22 @@ class SimulationEngine extends ChangeNotifier {
         continue;
       }
 
+      // 自动匹配配方：当建筑没有激活配方但有输入物品时，自动选择匹配的配方
+      if (pb.activeRecipeId == null &&
+          pb.inputItemId != null &&
+          pb.inputItemCount > 0) {
+        _fallbackAutoSelectRecipe(pb);
+      }
+
       if (pb.activeRecipeId == null) continue;
       final recipe = _dataLoader.getRecipe(pb.activeRecipeId!);
       if (recipe == null) continue;
 
+      // 尝试将输出库存推送到传送带
+      _fallbackPushOutputToBelts(pb);
+
       final hasInputs = _fallbackCheckInputsAvailable(pb, recipe);
-      final hasOutputSpace = _fallbackCheckOutputSpace(pb);
+      final hasOutputSpace = pb.totalOutputCount < PlacedBuilding.maxOutputItemCount;
 
       if (!hasInputs || !hasOutputSpace) {
         pb.isBlocked = true;
@@ -375,7 +392,21 @@ class SimulationEngine extends ChangeNotifier {
       if (pb.productionProgress >= 1.0) {
         pb.productionProgress = 0.0;
         _fallbackConsumeInputs(pb, recipe);
-        _fallbackProduceOutputs(pb, recipe);
+        // 产出物品放入输出库存
+        for (final output in recipe.outputs) {
+          pb.addOutputItem(output.itemId, output.amount);
+        }
+      }
+    }
+  }
+
+  /// 自动匹配配方：根据建筑类型和输入物品选择第一个匹配的配方
+  void _fallbackAutoSelectRecipe(PlacedBuilding pb) {
+    final recipes = _dataLoader.getRecipesForBuilding(pb.building.id);
+    for (final recipe in recipes) {
+      if (recipe.inputs.any((input) => input.itemId == pb.inputItemId)) {
+        pb.activeRecipeId = recipe.id;
+        return;
       }
     }
   }
@@ -397,9 +428,7 @@ class SimulationEngine extends ChangeNotifier {
             }
             port.connected = true;
             port.linkedItemId = outputItemId;
-            print(
-                '[SimFallback] Set belt ${belt.id} itemId=$outputItemId, fillCount=1, dist=$dist');
-          }
+            }
         }
       }
     }
@@ -412,44 +441,38 @@ class SimulationEngine extends ChangeNotifier {
     return true;
   }
 
-  bool _fallbackCheckOutputSpace(PlacedBuilding pb) {
-    if (pb.isBlocked) return false;
-    for (final port in pb.outputPorts) {
-      final portWorld = port.worldPosition(pb.gridX, pb.gridY, _cellSize,
-          pb.building.gridWidth, pb.building.gridHeight,
-          rotation: pb.rotation);
-      for (final belt in _project!.conveyors) {
-        if ((belt.start - portWorld).distance < _portConnectionThreshold) {
-          if (_hasOutputSpace(belt)) return true;
-        }
-      }
-    }
-    return false;
-  }
-
   void _fallbackConsumeInputs(PlacedBuilding pb, Recipe recipe) {
     for (final input in recipe.inputs) {
       pb.consumeInputItems(input.itemId, input.amount);
     }
   }
 
-  void _fallbackProduceOutputs(PlacedBuilding pb, Recipe recipe) {
-    for (final output in recipe.outputs) {
-      for (final port in pb.outputPorts) {
-        final portWorld = port.worldPosition(pb.gridX, pb.gridY, _cellSize,
-            pb.building.gridWidth, pb.building.gridHeight,
-            rotation: pb.rotation);
-        for (final belt in _project!.conveyors) {
-          if ((belt.start - portWorld).distance < _portConnectionThreshold) {
-            if (_hasOutputSpace(belt)) {
-              if (belt.itemSegments.isEmpty) {
-                belt.pushSourceItem(output.itemId);
-              }
-              port.connected = true;
-              port.linkedItemId = output.itemId;
-              break;
-            }
+  /// 将输出库存中的物品推送到连接的传送带
+  void _fallbackPushOutputToBelts(PlacedBuilding pb) {
+    if (pb.outputItems.isEmpty) return;
+    for (final port in pb.outputPorts) {
+      final portWorld = port.worldPosition(pb.gridX, pb.gridY, _cellSize,
+          pb.building.gridWidth, pb.building.gridHeight,
+          rotation: pb.rotation);
+      for (final belt in _project!.conveyors) {
+        if ((belt.start - portWorld).distance < _portConnectionThreshold) {
+          if (!_hasOutputSpace(belt)) continue;
+          // 按配方输出顺序确定该端口应推送的物品
+          final recipe = pb.activeRecipeId != null
+              ? _dataLoader.getRecipe(pb.activeRecipeId!)
+              : null;
+          if (recipe == null) continue;
+          final outputIndex = port.index;
+          final output = outputIndex < recipe.outputs.length
+              ? recipe.outputs[outputIndex]
+              : recipe.outputs.first;
+          if (!pb.hasOutputItem(output.itemId)) continue;
+          if (belt.pushSourceItem(output.itemId)) {
+            pb.consumeOutputItem(output.itemId, 1);
           }
+          port.connected = true;
+          port.linkedItemId = output.itemId;
+          break;
         }
       }
     }

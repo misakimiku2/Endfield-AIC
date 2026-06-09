@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
+import 'package:endfield_aic_planner/AIC/Logistics Units/transport_belt.dart';
 import 'package:endfield_aic_planner/models/building.dart';
 import 'package:endfield_aic_planner/models/project.dart';
 
@@ -60,6 +61,121 @@ void main() {
       expect(building.inputItemId, isNull);
       expect(building.inputItemCount, 0);
     });
+
+    test('input port disconnects when only the port cell remains after split',
+        () {
+      const threeByThreeProcessor = Building(
+        id: 'three_by_three_processor',
+        name: 'Three By Three Processor',
+        gridWidth: 3,
+        gridHeight: 3,
+        color: Colors.orange,
+        category: 'test',
+        maxInputs: 1,
+        maxOutputs: 1,
+        ports: PortsLayout(
+          inputs: [
+            PortDefinition(relativeX: 0.833, relativeY: 1.0, direction: 'down'),
+          ],
+          outputs: [
+            PortDefinition(relativeX: 0.833, relativeY: 0.0, direction: 'up'),
+          ],
+        ),
+      );
+      final building = PlacedBuilding(
+        id: 'processor',
+        building: threeByThreeProcessor,
+        gridX: 0,
+        gridY: 0,
+      );
+
+      final connectedBelt = ConveyorBelt(
+        id: 'connected_belt',
+        path: const [
+          Offset(2, 3),
+          Offset(2, 2),
+        ],
+        itemId: '',
+      );
+
+      expect(
+        building.conveyorPortConnections([connectedBelt])['input_0'],
+        true,
+      );
+
+      final portCellRemainder = ConveyorBelt(
+        id: 'port_cell_remainder',
+        path: const [Offset(2, 2)],
+        itemId: '',
+        forcedDirection: 'up',
+      );
+      final upstreamRemainder = ConveyorBelt(
+        id: 'upstream_remainder',
+        path: const [Offset(2, 3)],
+        itemId: '',
+        forcedDirection: 'up',
+      );
+
+      expect(
+        building.conveyorPortConnections(
+          [portCellRemainder, upstreamRemainder],
+        )['input_0'],
+        isNull,
+      );
+    });
+
+    test('output port requires a conveyor start cell to be connected', () {
+      const threeByThreeProcessor = Building(
+        id: 'three_by_three_processor',
+        name: 'Three By Three Processor',
+        gridWidth: 3,
+        gridHeight: 3,
+        color: Colors.orange,
+        category: 'test',
+        maxInputs: 1,
+        maxOutputs: 1,
+        ports: PortsLayout(
+          inputs: [
+            PortDefinition(relativeX: 0.833, relativeY: 1.0, direction: 'down'),
+          ],
+          outputs: [
+            PortDefinition(relativeX: 0.833, relativeY: 0.0, direction: 'up'),
+          ],
+        ),
+      );
+      final building = PlacedBuilding(
+        id: 'processor',
+        building: threeByThreeProcessor,
+        gridX: 0,
+        gridY: 0,
+      );
+
+      final connectedBelt = ConveyorBelt(
+        id: 'output_belt',
+        path: const [
+          Offset(2, 0),
+          Offset(2, -1),
+        ],
+        itemId: '',
+      );
+      final endingAtOutput = ConveyorBelt(
+        id: 'ending_at_output',
+        path: const [
+          Offset(2, -1),
+          Offset(2, 0),
+        ],
+        itemId: '',
+      );
+
+      expect(
+        building.conveyorPortConnections([connectedBelt])['output_0'],
+        true,
+      );
+      expect(
+        building.conveyorPortConnections([endingAtOutput])['output_0'],
+        isNull,
+      );
+    });
   });
 
   group('ConveyorBelt', () {
@@ -103,6 +219,19 @@ void main() {
       );
 
       expect(belt.length, 0.0);
+    });
+
+    test('constructor copies immutable item segment lists before sorting', () {
+      final belt = ConveyorBelt(
+        id: 'immutable_segments_belt',
+        path: const [Offset(0, 0), Offset(1, 0)],
+        itemId: '',
+        itemSegments: const [],
+      );
+
+      belt.ensureItemSegmentsFromLegacy();
+
+      expect(belt.itemSegments, isEmpty);
     });
 
     test(
@@ -304,6 +433,72 @@ void main() {
       expect(belt.itemSegments.map((s) => s.itemId), ['item_b']);
       expect(belt.itemSegments.single.fillCount, 2);
       expect(belt.itemSegments.single.drainCount, 0);
+    });
+  });
+
+  group('TransportBeltController', () {
+    test('split creation removes dangling input port stub', () {
+      const threeByThreeProcessor = Building(
+        id: 'three_by_three_processor',
+        name: 'Three By Three Processor',
+        gridWidth: 3,
+        gridHeight: 3,
+        color: Colors.orange,
+        category: 'test',
+        maxInputs: 1,
+        maxOutputs: 1,
+        ports: PortsLayout(
+          inputs: [
+            PortDefinition(relativeX: 0.833, relativeY: 1.0, direction: 'down'),
+          ],
+          outputs: [
+            PortDefinition(relativeX: 0.833, relativeY: 0.0, direction: 'up'),
+          ],
+        ),
+      );
+      final project = ProjectState(
+        buildings: [
+          PlacedBuilding(
+            id: 'processor',
+            building: threeByThreeProcessor,
+            gridX: 0,
+            gridY: 0,
+          ),
+        ],
+        conveyors: [
+          ConveyorBelt(
+            id: 'old_input_belt',
+            path: const [
+              Offset(2, 4),
+              Offset(2, 3),
+              Offset(2, 2),
+            ],
+            itemId: '',
+          ),
+        ],
+      );
+
+      final controller = TransportBeltController(
+        project: project,
+        onProjectChanged: (_) {},
+        onRebuildCache: () {},
+        notifyListeners: () {},
+      );
+
+      expect(controller.handleTap(const Offset(2, 3)), true);
+      expect(controller.handleTap(const Offset(3, 3)), true);
+      controller.handleRightClick();
+
+      expect(
+        project.conveyors.any((belt) =>
+            belt.path.length == 1 && belt.path.single == const Offset(2, 2)),
+        false,
+      );
+      expect(
+        project.buildings.single
+            .conveyorPortConnections(project.conveyors)['input_0'],
+        isNull,
+      );
     });
   });
 }

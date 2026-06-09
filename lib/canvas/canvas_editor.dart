@@ -123,20 +123,10 @@ class CanvasEditorState extends State<CanvasEditor>
   void _rebuildPortConnectionsCache() {
     _portConnectionsCache = {};
     for (final pb in _project.buildings) {
-      final connections = <String, bool>{};
-      for (final belt in _project.conveyors) {
-        for (final port in [...pb.inputPorts, ...pb.outputPorts]) {
-          final portWorld = port.worldPosition(pb.gridX, pb.gridY, _cellSize,
-              pb.building.gridWidth, pb.building.gridHeight,
-              rotation: pb.rotation);
-          final distStart = (belt.start - portWorld).distance;
-          final distEnd = (belt.end - portWorld).distance;
-          if (distStart < 30 || distEnd < 30) {
-            connections['${port.type}_${port.index}'] = true;
-          }
-        }
-      }
-      _portConnectionsCache[pb.id] = connections;
+      _portConnectionsCache[pb.id] = pb.conveyorPortConnections(
+        _project.conveyors,
+        cellSize: _cellSize,
+      );
     }
   }
 
@@ -166,8 +156,6 @@ class CanvasEditorState extends State<CanvasEditor>
       final v = _beltArrowController.value;
       // 跨零检测：从 >0.5 跳到 <0.5（即从 ~1.0 重置到 ~0.0）
       if (_prevArrowForTick > 0.5 && v < 0.5) {
-        print(
-            '[BeltTick] cross-zero prev=${_prevArrowForTick.toStringAsFixed(6)} curr=${v.toStringAsFixed(6)} (belt clock tick)');
         _onBeltTick();
       }
       _prevArrowForTick = v;
@@ -181,8 +169,6 @@ class CanvasEditorState extends State<CanvasEditor>
     DepotAccessRenderer.init(onReady: () {
       _forceRepaint();
     });
-    print(
-        '[BeltTick] CanvasEditor initState complete, controller value=${_beltArrowController.value}');
   }
 
   @override
@@ -278,9 +264,6 @@ class CanvasEditorState extends State<CanvasEditor>
   void _onBeltTick() {
     final buildings = _project.buildings;
 
-    print(
-        '[BeltTick] _onBeltTick called, conveyors: ${_project.conveyors.length}');
-
     var inventoryChanged = false;
     for (final belt in _project.conveyors) {
       if (belt.isBlocked) continue;
@@ -299,14 +282,6 @@ class CanvasEditorState extends State<CanvasEditor>
       final terminalLimit = inputBlocked ? belt.path.length - 1 : null;
       final sourceItemId = _getOutputItemIdForBeltStart(belt);
       final isProducing = sourceItemId != null && sourceItemId.isNotEmpty;
-
-      print(
-          '[BeltTick] belt=${belt.id} id=${belt.id.hashCode.toRadixString(16)} '
-          'isDeadEnd=$isDeadEnd '
-          'sourceItemId="${sourceItemId ?? ''}" itemId="${belt.itemId}" '
-          'fill=$belt.itemFillCount drain=$belt.itemDrainCount pathLen=${belt.path.length} '
-          'lastFill=$belt.lastItemFillCount lastDrain=$belt.lastItemDrainCount '
-          'lastId="${belt.lastItemId}"');
 
       belt.ensureItemSegmentsFromLegacy();
       if (isProducing) {
@@ -366,8 +341,24 @@ class CanvasEditorState extends State<CanvasEditor>
     final itemId = belt.outputReadyItemId();
     if (itemId == null) return false;
     if (!building.acceptInputItem(itemId)) return false;
+    // 自动匹配配方：当建筑没有激活配方时，根据输入物品自动选择匹配的配方
+    if (building.activeRecipeId == null) {
+      _autoSelectRecipe(building, itemId);
+    }
     belt.removeOutputReadyItem();
     return true;
+  }
+
+  /// 根据输入物品自动选择匹配的配方
+  void _autoSelectRecipe(PlacedBuilding building, String inputItemId) {
+    final recipes =
+        widget.dataLoader.getRecipesForBuilding(building.building.id);
+    for (final recipe in recipes) {
+      if (recipe.inputs.any((input) => input.itemId == inputItemId)) {
+        building.activeRecipeId = recipe.id;
+        return;
+      }
+    }
   }
 
   void _freezeReadyOutputSegments(ConveyorBelt belt, {required int limit}) {
@@ -1547,7 +1538,10 @@ class _EditorPainter extends CustomPainter {
     // 使用 anchors.first（用户实际点击的位置），而非路径的 first
     // 如果当前路径有效，才需要对原传送带进行裁剪来建立连接。
     // 如果新传送带路径无效，不应对旧传送带进行裁剪，以保持已有样式的完整性。
-    final Offset? startCell = conveyorPathInvalid ? null : conveyorForkCell;
+    final hasConfirmedForkHandoff = !conveyorPathInvalid &&
+        conveyorForkCell != null &&
+        conveyorConfirmedPath.any((cell) => _sameCell(cell, conveyorForkCell!));
+    final Offset? startCell = hasConfirmedForkHandoff ? conveyorForkCell : null;
 
     // 构建 fullPathContext（已确认段 + 实时段的完整路径）
     // 不论路径有效还是无效都构建上下文，这样即使渲染红色错误预览时，转角处的纹理也能计算正确
@@ -1579,6 +1573,18 @@ class _EditorPainter extends CustomPainter {
         previewContextExtension!.isNotEmpty &&
         fullPathContext != null) {
       fullPathContext.addAll(previewContextExtension!);
+    }
+
+    final previewItemSegments = <ConveyorItemSegment>[];
+    if (conveyorMode &&
+        !conveyorPathInvalid &&
+        fullPathContext != null &&
+        fullPathContext.isNotEmpty) {
+      previewItemSegments.addAll(_previewItemSegmentsForPath(
+        fullPathContext,
+        shouldProjectForkSource: hasConfirmedForkHandoff,
+        forkProjectionLimit: previewStartIndex + 1,
+      ));
     }
 
     // 调试：视口与裁剪统计（有裁剪时才输出，且每2秒最多一次）
@@ -1648,23 +1654,33 @@ class _EditorPainter extends CustomPainter {
           path: renderPath,
           itemId: belt.itemId,
           lastItemId: belt.lastItemId,
-          itemSegments: forkIdx >= 0
-              ? belt.clippedItemSegments(forkIdx + 1, belt.path.length)
-              : belt.shiftedItemSegments(0),
+          itemSegments: hasConfirmedForkHandoff && forkIdx >= 0
+              ? <ConveyorItemSegment>[]
+              : forkIdx >= 0
+                  ? belt.clippedItemSegments(forkIdx + 1, belt.path.length)
+                  : belt.shiftedItemSegments(0),
           itemFillCount: forkIdx >= 0
-              ? math.max(0, belt.itemFillCount - (forkIdx + 1))
+              ? hasConfirmedForkHandoff
+                  ? 0
+                  : math.max(0, belt.itemFillCount - (forkIdx + 1))
               : belt.itemFillCount,
           itemDrainCount: forkIdx >= 0
-              ? math.max(0, belt.itemDrainCount - (forkIdx + 1))
+              ? hasConfirmedForkHandoff
+                  ? 0
+                  : math.max(0, belt.itemDrainCount - (forkIdx + 1))
               : belt.itemDrainCount,
           isBlocked: belt.isBlocked,
           forcedDirection: forcedDir,
           incomingDirection: incomingDir,
           lastItemFillCount: belt.lastItemFillCount > 0 && forkIdx >= 0
-              ? math.max(0, belt.lastItemFillCount - (forkIdx + 1))
+              ? hasConfirmedForkHandoff
+                  ? 0
+                  : math.max(0, belt.lastItemFillCount - (forkIdx + 1))
               : belt.lastItemFillCount,
           lastItemDrainCount: belt.lastItemFillCount > 0 && forkIdx >= 0
-              ? math.max(0, belt.lastItemDrainCount - (forkIdx + 1))
+              ? hasConfirmedForkHandoff
+                  ? 0
+                  : math.max(0, belt.lastItemDrainCount - (forkIdx + 1))
               : belt.lastItemDrainCount,
           deadEndFreezeProgress: belt.deadEndFreezeProgress,
           lastItemFreezeProgress: belt.lastItemFreezeProgress,
@@ -1706,6 +1722,9 @@ class _EditorPainter extends CustomPainter {
         fullPathContext: fullPathContext,
         contextStartIndex: confirmedStartIndex,
         incomingDirection: conveyorIncomingDirection,
+        arrowProgress: beltArrowController.value,
+        itemSegments: previewItemSegments,
+        allItems: dataLoader.items,
       );
     }
 
@@ -1723,6 +1742,9 @@ class _EditorPainter extends CustomPainter {
           fullPathContext: fullPathContext,
           contextStartIndex: previewStartIndex,
           incomingDirection: conveyorIncomingDirection,
+          arrowProgress: beltArrowController.value,
+          itemSegments: previewItemSegments,
+          allItems: dataLoader.items,
         );
       }
     } else {
@@ -1737,6 +1759,9 @@ class _EditorPainter extends CustomPainter {
           fullPathContext: fullPathContext,
           contextStartIndex: previewStartIndex,
           incomingDirection: conveyorIncomingDirection,
+          arrowProgress: beltArrowController.value,
+          itemSegments: previewItemSegments,
+          allItems: dataLoader.items,
         );
       } else if (conveyorMode &&
           mouseGridPos != null &&
@@ -1861,18 +1886,6 @@ class _EditorPainter extends CustomPainter {
           pb.rotation,
           displayAngle,
         );
-      }
-
-      // 动态部分：进度条（每帧绘制，不缓存）
-      if (detailLevel >= 1 &&
-          pb.productionProgress > 0 &&
-          pb.productionProgress < 1.0) {
-        canvas.save();
-        canvas.translate(x + w / 2, y + h / 2);
-        canvas.rotate(pb.rotation * math.pi / 2);
-        canvas.translate(-w / 2, -h / 2);
-        _drawProgressBar(canvas, w, h, pb.productionProgress, pb.building);
-        canvas.restore();
       }
     }
 
@@ -2226,6 +2239,119 @@ class _EditorPainter extends CustomPainter {
     return maxX > vp.minX && minX < vp.maxX && maxY > vp.minY && minY < vp.maxY;
   }
 
+  List<ConveyorItemSegment> _previewItemSegmentsForPath(
+      List<Offset> contextPath,
+      {required bool shouldProjectForkSource,
+      required int forkProjectionLimit}) {
+    if (contextPath.isEmpty) return const [];
+
+    final segments = <ConveyorItemSegment>[];
+    final maxContextEnd = contextPath.length;
+
+    for (final belt in project.conveyors) {
+      if (belt.path.isEmpty) continue;
+
+      if (shouldProjectForkSource) {
+        final forkIndex = _pathIndexOfCell(belt.path, contextPath.first);
+        if (forkIndex > 0) {
+          final projected = _projectForkSourceSegments(
+            belt,
+            forkIndex,
+            math.min(forkProjectionLimit, contextPath.length),
+            math.min(forkProjectionLimit, contextPath.length),
+          );
+          if (projected.isNotEmpty) {
+            segments.addAll(projected);
+            continue;
+          }
+        }
+      }
+
+      for (int beltStart = 0; beltStart < belt.path.length; beltStart++) {
+        for (int contextStart = 0;
+            contextStart < maxContextEnd;
+            contextStart++) {
+          if (!_sameCell(belt.path[beltStart], contextPath[contextStart])) {
+            continue;
+          }
+          if (beltStart > 0 &&
+              contextStart > 0 &&
+              _sameCell(
+                belt.path[beltStart - 1],
+                contextPath[contextStart - 1],
+              )) {
+            continue;
+          }
+
+          var length = 0;
+          while (beltStart + length < belt.path.length &&
+              contextStart + length < maxContextEnd &&
+              _sameCell(
+                belt.path[beltStart + length],
+                contextPath[contextStart + length],
+              )) {
+            length++;
+          }
+          if (length <= 0) continue;
+
+          segments.addAll(
+            belt
+                .clippedItemSegments(
+                  beltStart,
+                  beltStart + length,
+                  clearFreezeProgress: true,
+                )
+                .map((segment) => segment.shifted(contextStart))
+                .where((segment) => segment.hasItems),
+          );
+          break;
+        }
+      }
+    }
+
+    segments.sort((a, b) => a.drainCount.compareTo(b.drainCount));
+    return segments;
+  }
+
+  List<ConveyorItemSegment> _projectForkSourceSegments(
+    ConveyorBelt belt,
+    int forkIndex,
+    int contextLength,
+    int projectedEnd,
+  ) {
+    final projected = <ConveyorItemSegment>[];
+    final sourceEnd = math.min(contextLength, belt.path.length);
+    for (final segment in belt.clippedItemSegments(
+      0,
+      sourceEnd,
+      clearFreezeProgress: true,
+    )) {
+      final fill = math
+          .max(segment.fillCount, projectedEnd)
+          .clamp(0, contextLength)
+          .toInt();
+      final drain = segment.drainCount.clamp(0, contextLength).toInt();
+      if (fill <= drain) continue;
+      projected.add(ConveyorItemSegment(
+        itemId: segment.itemId,
+        fillCount: fill,
+        drainCount: drain,
+      ));
+    }
+    return projected;
+  }
+
+  int _pathIndexOfCell(List<Offset> path, Offset cell) {
+    for (int i = 0; i < path.length; i++) {
+      if (_sameCell(path[i], cell)) return i;
+    }
+    return -1;
+  }
+
+  bool _sameCell(Offset a, Offset b) {
+    return a.dx.round() == b.dx.round() && a.dy.round() == b.dy.round();
+  }
+
   /// 渲染设备的静态部分到指定 Canvas（用于预渲染缓存）
   void _renderBuildingStatic(Canvas canvas, PlacedBuilding pb, double cellSize,
       int detailLevel, Map<String, int> portConnections) {
@@ -2273,21 +2399,6 @@ class _EditorPainter extends CustomPainter {
         detailLevel: detailLevel,
       );
     }
-  }
-
-  /// 绘制进度条（动态部分，不缓存）
-  void _drawProgressBar(
-      Canvas canvas, double w, double h, double progress, Building building) {
-    const barHeight = 4.0;
-    final barY = h - barHeight - 2;
-    canvas.drawRect(
-      Rect.fromLTWH(2, barY, w - 4, barHeight),
-      Paint()..color = const Color(0x40000000),
-    );
-    canvas.drawRect(
-      Rect.fromLTWH(2, barY, (w - 4) * progress, barHeight),
-      Paint()..color = const Color(0xFF00FF66),
-    );
   }
 
   @override

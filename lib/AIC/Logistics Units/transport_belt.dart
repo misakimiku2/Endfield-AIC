@@ -390,7 +390,9 @@ class TransportBeltController {
           // 保留分叉点之后的下游部分（不含分叉点，分叉点归属新传送带）
           if (forkIdx + 1 < oldBelt.path.length) {
             final downstream = oldBelt.path.sublist(forkIdx + 1);
-            if (downstream.isNotEmpty) {
+            final isDanglingInputPortStub = downstream.length == 1 &&
+                _isCellDeviceInputPort(downstream.single);
+            if (downstream.isNotEmpty && !isDanglingInputPortStub) {
               // 单格下游无法从路径邻居推断方向，从旧传送带记录原始方向
               String? forcedDir;
               if (downstream.length == 1 && forkIdx + 1 < oldBelt.path.length) {

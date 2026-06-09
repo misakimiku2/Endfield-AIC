@@ -149,6 +149,7 @@ class _EditorPageState extends State<EditorPage> {
                 'recipe_id': pb.activeRecipeId,
                 'input_item_id': pb.inputItemId,
                 'input_item_count': pb.inputItemCount,
+                'output_items': pb.outputItems,
               })
           .toList(),
       'conveyors': _project.conveyors
@@ -257,6 +258,9 @@ class _EditorPageState extends State<EditorPage> {
             activeRecipeId: bd['recipe_id'] as String?,
             inputItemId: bd['input_item_id'] as String?,
             inputItemCount: (bd['input_item_count'] as num?)?.toInt() ?? 0,
+            outputItems: (bd['output_items'] as Map<String, dynamic>?)
+                    ?.map((k, v) => MapEntry(k, v as int)) ??
+                {},
           ));
         }
       }

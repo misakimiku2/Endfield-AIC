@@ -11,7 +11,6 @@ class BuildingRenderer {
   static const Color _frameColor = Color(0xFF333333);
   static const Color _portActiveColor = Color(0xFFFFCC00);
   static const Color _portInactiveColor = Color(0xFF666666);
-  static const Color _blockedOverlayColor = Color(0x40FF0000);
 
   static void renderBuilding(
     Canvas canvas,
@@ -36,33 +35,18 @@ class BuildingRenderer {
     canvas.rotate(rotation * math.pi / 2);
     canvas.translate(-w / 2, -h / 2);
 
-    _drawBuildingBody(canvas, building, cellSize, isBlocked);
-
-    // LOD 1+: 进度条
-    if (detailLevel >= 1 && productionProgress > 0 && productionProgress < 1.0) {
-      _drawProgressBar(canvas, cellSize, building, productionProgress);
-    }
+    _drawBuildingBody(canvas, building, cellSize);
 
     // LOD 2: 端口箭头
     if (detailLevel >= 2) {
       _drawPorts(canvas, building, cellSize, activeRecipe, portConnections);
     }
 
-    // LOD 2: 设备名称
-    if (detailLevel >= 2) {
-      _drawBuildingName(canvas, building, cellSize);
-    }
-
-    // LOD 2: 配方标签
-    if (detailLevel >= 2 && activeRecipe != null) {
-      _drawRecipeLabel(canvas, activeRecipe.name, cellSize, building);
-    }
-
     canvas.restore();
   }
 
   static void _drawBuildingBody(
-    Canvas canvas, Building building, double cellSize, bool isBlocked) {
+    Canvas canvas, Building building, double cellSize) {
     final w = building.gridWidth * cellSize;
     final h = building.gridHeight * cellSize;
     final rect = RRect.fromRectAndRadius(
@@ -86,33 +70,6 @@ class BuildingRenderer {
       ..style = PaintingStyle.stroke;
     canvas.drawLine(const Offset(0, 0), Offset(0, h), leftRightPaint);
     canvas.drawLine(Offset(w, 0), Offset(w, h), leftRightPaint);
-
-    if (isBlocked) {
-      canvas.drawRect(
-        Rect.fromLTWH(0, 0, w, h),
-        Paint()..color = _blockedOverlayColor,
-      );
-    }
-  }
-
-  static void _drawProgressBar(
-    Canvas canvas, double cellSize, Building building, double progress) {
-    final w = building.gridWidth * cellSize;
-    final h = building.gridHeight * cellSize;
-    const barHeight = 4.0;
-    final barY = h - barHeight - 2;
-
-    final bgPaint = Paint()..color = const Color(0x40000000);
-    canvas.drawRect(
-      Rect.fromLTWH(2, barY, w - 4, barHeight),
-      bgPaint,
-    );
-
-    final progressPaint = Paint()..color = const Color(0xFF00FF66);
-    canvas.drawRect(
-      Rect.fromLTWH(2, barY, (w - 4) * progress, barHeight),
-      progressPaint,
-    );
   }
 
   static void _drawPorts(
@@ -228,42 +185,6 @@ class BuildingRenderer {
           end.dy - dirNorm.dy * arrowHead - perp.dy)
       ..close();
     canvas.drawPath(headPath, Paint()..color = arrowPaint.color);
-  }
-
-  static void _drawBuildingName(
-    Canvas canvas, Building building, double cellSize) {
-    final w = building.gridWidth * cellSize;
-    final textPainter = TextPainter(
-      text: TextSpan(
-        text: building.name,
-        style: TextStyle(
-          color: _frameColor.withValues(alpha: 0.6),
-          fontSize: 10,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    textPainter.layout(maxWidth: w - 4);
-    textPainter.paint(canvas, const Offset(2, 2));
-  }
-
-  static void _drawRecipeLabel(
-    Canvas canvas, String recipeName, double cellSize, Building building) {
-    final w = building.gridWidth * cellSize;
-    final textPainter = TextPainter(
-      text: TextSpan(
-        text: recipeName,
-        style: const TextStyle(
-          color: Color(0xFF888888),
-          fontSize: 8,
-          fontWeight: FontWeight.w400,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    textPainter.layout(maxWidth: w - 4);
-    textPainter.paint(canvas, const Offset(2, 14));
   }
 
   static void renderPlaceholder(

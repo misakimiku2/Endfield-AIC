@@ -31,6 +31,7 @@ class TransportBeltRenderer {
   static PictureInfo? _moveRedPicture;
   static PictureInfo? _rotateRedPicture;
   static PictureInfo? _pointerPicture;
+  static PictureInfo? _previewPointerPicture;
   static bool _initialized = false;
   static bool _initializing = false;
 
@@ -232,6 +233,7 @@ class TransportBeltRenderer {
           await rootBundle.loadString('assets/svg/Transport_Belt_Move.svg');
       final rotateStr =
           await rootBundle.loadString('assets/svg/Transport_Belt_rotate.svg');
+      final pointerStr = await rootBundle.loadString('assets/svg/pointer.svg');
 
       // 2. 生成蓝色预览 SVG 字符串
       final moveBlueStr = _makePreviewSvg(moveStr, '#44AAFF');
@@ -240,6 +242,7 @@ class TransportBeltRenderer {
       // 3. 生成红色预览 SVG 字符串
       final moveRedStr = _makePreviewSvg(moveStr, '#FF4444');
       final rotateRedStr = _makePreviewSvg(rotateStr, '#FF4444');
+      final pointerPreviewStr = pointerStr.replaceAll('#dfb615', '#555555');
 
       final results = await Future.wait([
         vg.loadPicture(
@@ -251,6 +254,7 @@ class TransportBeltRenderer {
         vg.loadPicture(SvgStringLoader(moveRedStr), null),
         vg.loadPicture(SvgStringLoader(rotateRedStr), null),
         vg.loadPicture(const SvgAssetLoader('assets/svg/pointer.svg'), null),
+        vg.loadPicture(SvgStringLoader(pointerPreviewStr), null),
       ]);
 
       _movePicture = results[0];
@@ -260,6 +264,7 @@ class TransportBeltRenderer {
       _moveRedPicture = results[4];
       _rotateRedPicture = results[5];
       _pointerPicture = results[6];
+      _previewPointerPicture = results[7];
       _initialized = true;
     } catch (e) {
       debugPrint('Failed to load conveyor belt SVGs: $e');
@@ -304,7 +309,8 @@ class TransportBeltRenderer {
       _rotateBluePicture != null &&
       _moveRedPicture != null &&
       _rotateRedPicture != null &&
-      _pointerPicture != null;
+      _pointerPicture != null &&
+      _previewPointerPicture != null;
 
   // 方向索引：up=0, right=1, down=2, left=3
   static const int _dirUp = 0;
@@ -493,9 +499,8 @@ class TransportBeltRenderer {
             : belt.path.length;
         final sourceSegment =
             i < sourceSegments.length ? sourceSegments[i] : segment;
-        final shouldFreezeSegment =
-            sourceSegment.freezeProgress != null ||
-                (isDeadEnd && segment.fillCount >= limit);
+        final shouldFreezeSegment = sourceSegment.freezeProgress != null ||
+            (isDeadEnd && segment.fillCount >= limit);
         if (shouldFreezeSegment && sourceSegment.freezeProgress == null) {
           sourceSegment.freezeProgress = -1.0;
         }
@@ -529,35 +534,29 @@ class TransportBeltRenderer {
       // 刚达到满载：不立即冻结。设置为 -1.0 表示 "等待自然到位"
       // 渲染时会继续用实时 arrowProgress，直到物品移动到末端再冻结
       belt.deadEndFreezeProgress = -1.0;
-      print('[Freeze] belt ${belt.id} current pending freeze');
     }
     if (shouldFreezeCurrent && belt.deadEndFreezeProgress == -1.0) {
       // Wait until the leading item reaches the center of the final belt cell.
       // Freezing at the exit edge (1.0) clips half of the item outside a dead end.
       if (arrowProgress >= 0.5) {
         belt.deadEndFreezeProgress = 0.5;
-        print('[Freeze] belt ${belt.id} current frozen at arrowProgress=0.5');
       }
     }
     if (!shouldFreezeCurrent && belt.deadEndFreezeProgress != null) {
       // 不再满载（如被加长或源断开排空）：清除冻结值
       belt.deadEndFreezeProgress = null;
-      print('[Freeze] belt ${belt.id} current unfrozen');
     }
 
     if (shouldFreezeLast && belt.lastItemFreezeProgress == null) {
       belt.lastItemFreezeProgress = -1.0;
-      print('[Freeze] belt ${belt.id} last pending freeze');
     }
     if (shouldFreezeLast && belt.lastItemFreezeProgress == -1.0) {
       if (arrowProgress >= 0.5) {
         belt.lastItemFreezeProgress = 0.5;
-        print('[Freeze] belt ${belt.id} last frozen at arrowProgress=0.5');
       }
     }
     if (!shouldFreezeLast && belt.lastItemFreezeProgress != null) {
       belt.lastItemFreezeProgress = null;
-      print('[Freeze] belt ${belt.id} last unfrozen');
     }
 
     final effectiveArrowProgress = (shouldFreezeCurrent &&
@@ -1023,6 +1022,9 @@ class TransportBeltRenderer {
     int contextStartIndex = 0,
     String? forcedDirection,
     String? incomingDirection,
+    double arrowProgress = 0.0,
+    List<ConveyorItemSegment>? itemSegments,
+    Map<String, Item>? allItems,
   }) {
     if (path.isEmpty) return;
 
@@ -1032,7 +1034,10 @@ class TransportBeltRenderer {
           fullPathContext: fullPathContext,
           contextStartIndex: contextStartIndex,
           forcedDirection: forcedDirection,
-          incomingDirection: incomingDirection);
+          incomingDirection: incomingDirection,
+          arrowProgress: arrowProgress,
+          itemSegments: itemSegments,
+          allItems: allItems);
     } else {
       _renderPreviewLegacy(canvas, path, cellSize, occupiedKeys, buildings,
           isInvalid: isInvalid);
@@ -1088,11 +1093,40 @@ class TransportBeltRenderer {
     int contextStartIndex = 0,
     String? forcedDirection,
     String? incomingDirection,
+    double arrowProgress = 0.0,
+    List<ConveyorItemSegment>? itemSegments,
+    Map<String, Item>? allItems,
   }) {
+    final segmentImages = <String, ui.Image?>{};
+    if (itemSegments != null && allItems != null) {
+      for (final segment in itemSegments) {
+        final imagePath = allItems[segment.itemId]?.imageAssetPath;
+        if (imagePath == null || imagePath.isEmpty) continue;
+        segmentImages[segment.itemId] = _itemImageCache[imagePath];
+        if (!_itemImageCache.containsKey(imagePath) &&
+            !_itemImageLoading.contains(imagePath)) {
+          _loadItemImage(imagePath);
+        }
+      }
+    }
+
     for (int i = 0; i < path.length; i++) {
       final cell = path[i];
       final key = '${cell.dx.toInt()}_${cell.dy.toInt()}';
       final isOccupied = isInvalid || occupiedKeys.contains(key);
+      final actualIndex = fullPathContext != null ? contextStartIndex + i : i;
+      ui.Image? cellItemImage;
+      if (itemSegments != null) {
+        for (int j = itemSegments.length - 1; j >= 0; j--) {
+          final segment = itemSegments[j];
+          if (!segment.hasItems) continue;
+          if (actualIndex >= segment.drainCount &&
+              actualIndex < segment.fillCount) {
+            cellItemImage = segmentImages[segment.itemId];
+            break;
+          }
+        }
+      }
 
       final cx = cell.dx * cellSize + cellSize / 2;
       final cy = cell.dy * cellSize + cellSize / 2;
@@ -1128,8 +1162,10 @@ class TransportBeltRenderer {
         contextStartIndex: contextStartIndex,
         forcedDirection: forcedDirection,
         incomingDirection: incomingDirection,
+        arrowProgress: arrowProgress,
         drawBackground: true,
         drawPointer: true,
+        itemImage: cellItemImage,
       );
       canvas.restore();
 
@@ -1225,8 +1261,7 @@ class TransportBeltRenderer {
     // - 有 itemImage 时总是画物品（不受 drawPointer 影响）
     // - 无 itemImage 且 drawPointer=true 时画指针
     // 这确保物品一旦出现就不会因为 drawPointer 标志而被意外隐藏
-    if (!isPreview &&
-        (itemImage != null || (drawPointer && _pointerPicture != null))) {
+    if (itemImage != null || (drawPointer && _pointerPicture != null)) {
       canvas.save();
 
       void drawItemAt(double pProgress) {
@@ -1274,11 +1309,13 @@ class TransportBeltRenderer {
                 center: Offset.zero, width: drawSize, height: drawSize);
             canvas.drawImageRect(itemImage, srcRect, dstRect, Paint());
           } else {
-            final pSize = _pointerPicture!.size;
+            final pointer =
+                isPreview ? _previewPointerPicture! : _pointerPicture!;
+            final pSize = pointer.size;
             final double uniformScale = (cellSize * 0.25) / pSize.height;
             canvas.scale(uniformScale, uniformScale);
             canvas.translate(-pSize.width / 2, -pSize.height / 2);
-            canvas.drawPicture(_pointerPicture!.picture);
+            canvas.drawPicture(pointer.picture);
           }
           canvas.restore();
         } else {
@@ -1302,11 +1339,13 @@ class TransportBeltRenderer {
                 center: Offset.zero, width: drawSize, height: drawSize);
             canvas.drawImageRect(itemImage, srcRect, dstRect, Paint());
           } else {
-            final pSize = _pointerPicture!.size;
+            final pointer =
+                isPreview ? _previewPointerPicture! : _pointerPicture!;
+            final pSize = pointer.size;
             final double uniformScale = (cellSize * 0.25) / pSize.height;
             canvas.scale(uniformScale, uniformScale);
             canvas.translate(-pSize.width / 2, -pSize.height / 2);
-            canvas.drawPicture(_pointerPicture!.picture);
+            canvas.drawPicture(pointer.picture);
           }
           canvas.restore();
         }
@@ -1502,17 +1541,36 @@ class TransportBeltRenderer {
     int contextStartIndex = 0,
     String? forcedDirection,
     String? incomingDirection,
+    double arrowProgress = 0.0,
+    List<ConveyorItemSegment>? itemSegments,
+    Map<String, Item>? allItems,
   }) {
     if (path.isEmpty) return;
 
     if (isReady) {
+      final segmentImages = <String, ui.Image?>{};
+      if (itemSegments != null && allItems != null) {
+        for (final segment in itemSegments) {
+          final imagePath = allItems[segment.itemId]?.imageAssetPath;
+          if (imagePath == null || imagePath.isEmpty) continue;
+          segmentImages[segment.itemId] = _itemImageCache[imagePath];
+          if (!_itemImageCache.containsKey(imagePath) &&
+              !_itemImageLoading.contains(imagePath)) {
+            _loadItemImage(imagePath);
+          }
+        }
+      }
+
       // 使用 SVG 渲染，通过 saveLayer 降低透明度
       canvas.saveLayer(null, Paint()..color = const Color(0xCCFFFFFF));
       _renderWithSvg(canvas, path, cellSize, buildings,
           fullPathContext: fullPathContext,
           contextStartIndex: contextStartIndex,
           forcedDirection: forcedDirection,
-          incomingDirection: incomingDirection);
+          incomingDirection: incomingDirection,
+          arrowProgress: arrowProgress,
+          itemSegments: itemSegments,
+          segmentImages: segmentImages);
       canvas.restore();
     } else {
       for (int i = 0; i < path.length; i++) {
