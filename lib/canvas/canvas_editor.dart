@@ -1416,6 +1416,7 @@ class CanvasEditorState extends State<CanvasEditor>
                 conveyorForkCell: _beltCtrl.anchors.isNotEmpty
                     ? _beltCtrl.anchors.first
                     : null,
+                conveyorHasCommittedPath: _beltCtrl.hasCommittedPath,
                 conveyorIncomingDirection: _beltCtrl.incomingDirection,
                 previewContextExtension: _beltCtrl.previewContextExtension,
                 displayScale: _displayScale,
@@ -1454,6 +1455,7 @@ class _EditorPainter extends CustomPainter {
   final Set<String>? conveyorPreviewOccupied;
   final bool conveyorPathInvalid;
   final Offset? conveyorForkCell;
+  final bool conveyorHasCommittedPath;
   final String? conveyorIncomingDirection;
   final List<Offset>? previewContextExtension;
   final double displayScale;
@@ -1492,6 +1494,7 @@ class _EditorPainter extends CustomPainter {
     this.conveyorPreviewOccupied,
     this.conveyorPathInvalid = false,
     this.conveyorForkCell,
+    this.conveyorHasCommittedPath = false,
     this.conveyorIncomingDirection,
     this.previewContextExtension,
     required this.displayScale,
@@ -1538,7 +1541,8 @@ class _EditorPainter extends CustomPainter {
     // 使用 anchors.first（用户实际点击的位置），而非路径的 first
     // 如果当前路径有效，才需要对原传送带进行裁剪来建立连接。
     // 如果新传送带路径无效，不应对旧传送带进行裁剪，以保持已有样式的完整性。
-    final hasConfirmedForkHandoff = !conveyorPathInvalid &&
+    final hasConfirmedForkHandoff = !conveyorHasCommittedPath &&
+        !conveyorPathInvalid &&
         conveyorForkCell != null &&
         conveyorConfirmedPath.any((cell) => _sameCell(cell, conveyorForkCell!));
     final Offset? startCell = hasConfirmedForkHandoff ? conveyorForkCell : null;
@@ -1577,6 +1581,7 @@ class _EditorPainter extends CustomPainter {
 
     final previewItemSegments = <ConveyorItemSegment>[];
     if (conveyorMode &&
+        !conveyorHasCommittedPath &&
         !conveyorPathInvalid &&
         fullPathContext != null &&
         fullPathContext.isNotEmpty) {
@@ -1704,16 +1709,18 @@ class _EditorPainter extends CustomPainter {
     // Build previewSet for checking which ports are currently covered by preview path
     final Set<Offset> previewSet = {};
     if (conveyorMode) {
-      if (conveyorConfirmedPath.isNotEmpty) {
+      if (!conveyorHasCommittedPath && conveyorConfirmedPath.isNotEmpty) {
         previewSet.addAll(conveyorConfirmedPath);
       }
-      if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
+      if (conveyorPreviewPath != null &&
+          conveyorPreviewPath!.isNotEmpty &&
+          (!conveyorHasCommittedPath || conveyorPreviewPath!.length > 1)) {
         previewSet.addAll(conveyorPreviewPath!);
       }
     }
 
     // 已确认段始终使用传送带本色渲染（不论有效还是无效） - (放到建筑下方渲染)
-    if (conveyorConfirmedPath.isNotEmpty) {
+    if (!conveyorHasCommittedPath && conveyorConfirmedPath.isNotEmpty) {
       TransportBeltRenderer.renderConfirmedPreviewPath(
         canvas,
         conveyorConfirmedPath,
@@ -1731,7 +1738,9 @@ class _EditorPainter extends CustomPainter {
     // 实时段根据有效/无效状态分别渲染 - (放到建筑下方渲染)
     if (conveyorPathInvalid) {
       // 无效状态：仅实时段标红，但是同样传入 fullPathContext 使得转弯样式能与已确认段进行平滑衔接
-      if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
+      if (conveyorPreviewPath != null &&
+          conveyorPreviewPath!.isNotEmpty &&
+          (!conveyorHasCommittedPath || conveyorPreviewPath!.length > 1)) {
         TransportBeltRenderer.renderPreviewPath(
           canvas,
           conveyorPreviewPath!,
@@ -1749,7 +1758,9 @@ class _EditorPainter extends CustomPainter {
       }
     } else {
       // 有效状态：实时段为蓝色预览
-      if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
+      if (conveyorPreviewPath != null &&
+          conveyorPreviewPath!.isNotEmpty &&
+          (!conveyorHasCommittedPath || conveyorPreviewPath!.length > 1)) {
         TransportBeltRenderer.renderPreviewPath(
           canvas,
           conveyorPreviewPath!,
@@ -2414,6 +2425,7 @@ class _EditorPainter extends CustomPainter {
         conveyorMode != oldDelegate.conveyorMode ||
         conveyorPathInvalid != oldDelegate.conveyorPathInvalid ||
         conveyorForkCell != oldDelegate.conveyorForkCell ||
+        conveyorHasCommittedPath != oldDelegate.conveyorHasCommittedPath ||
         conveyorIncomingDirection != oldDelegate.conveyorIncomingDirection ||
         previewContextExtension != oldDelegate.previewContextExtension ||
         !_listEquals(

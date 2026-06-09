@@ -30,9 +30,12 @@ class TransportBeltController {
   List<Offset>? previewContextExtension;
   String? _startingPortDirection;
   String? _incomingDirection;
+  String? _committedBeltId;
+  int _lastCommittedPathLength = 0;
 
   /// 当前创建中传送带首格的入方向（用于预览渲染转角）
   String? get incomingDirection => _incomingDirection;
+  bool get hasCommittedPath => _committedBeltId != null;
 
   // === 静态工具 ===
   static const double cellSize = 48.0;
@@ -50,6 +53,8 @@ class TransportBeltController {
     _mergeTarget = null;
     _startingPortDirection = null;
     _incomingDirection = null;
+    _committedBeltId = null;
+    _lastCommittedPathLength = 0;
   }
 
   /// 返回 true 表示点击已被处理
@@ -216,12 +221,20 @@ class TransportBeltController {
       }
     }
 
+    _finish(keepCreating: true);
     _updatePreview();
     notifyListeners();
     return true;
   }
 
-  void _finish() {
+  void _finish({bool keepCreating = false}) {
+    if (!keepCreating &&
+        _committedBeltId != null &&
+        fullPath.length == _lastCommittedPathLength) {
+      reset();
+      return;
+    }
+
     if (anchors.length >= 2 && fullPath.length >= 2) {
       // 合并：将合并目标的路径追加到 fullPath（跳过首格，因为已包含）
       // 记录新段长度，用于偏移合并目标的物品进度
@@ -282,9 +295,30 @@ class TransportBeltController {
       double? newDeadEndFreezeProgress;
       double? newLastItemFreezeProgress;
       final newItemSegments = <ConveyorItemSegment>[];
+      final committedSourceBelt = _committedBeltId == null
+          ? null
+          : project.conveyors
+              .where((belt) => belt.id == _committedBeltId)
+              .firstOrNull;
 
       // 继承源传送带的物品状态（加长断头传送带时）
-      if (sourceBelt != null) {
+      if (committedSourceBelt != null &&
+          _isPathPrefix(committedSourceBelt.path, fullPath)) {
+        newItemSegments.addAll(
+          committedSourceBelt.shiftedItemSegments(
+            0,
+            clearFreezeProgress: true,
+          ),
+        );
+        newItemId = committedSourceBelt.itemId;
+        newItemFillCount = committedSourceBelt.itemFillCount;
+        newItemDrainCount = committedSourceBelt.itemDrainCount;
+        if (committedSourceBelt.lastItemFillCount > 0) {
+          newLastItemId = committedSourceBelt.lastItemId;
+          newLastItemFillCount = committedSourceBelt.lastItemFillCount;
+          newLastItemDrainCount = committedSourceBelt.lastItemDrainCount;
+        }
+      } else if (sourceBelt != null) {
         newItemSegments.addAll(
           sourceBelt.shiftedItemSegments(0, clearFreezeProgress: true),
         );
@@ -373,6 +407,11 @@ class TransportBeltController {
       final toAdd = <ConveyorBelt>[];
 
       for (final oldBelt in project.conveyors) {
+        if (_committedBeltId != null && oldBelt.id == _committedBeltId) {
+          toRemove.add(oldBelt);
+          continue;
+        }
+
         // 跳过合并目标（会单独移除）
         if (_mergeTarget != null && identical(oldBelt, _mergeTarget)) continue;
 
@@ -474,6 +513,17 @@ class TransportBeltController {
       project.offsetX; // no-op to ensure project reference works
       onProjectChanged(project);
       onRebuildCache();
+
+      if (keepCreating) {
+        _committedBeltId = belt.id;
+        _lastCommittedPathLength = fullPath.length;
+        _mergeTarget = null;
+        if (fullPath.length >= 2) {
+          _incomingDirection =
+              _directionBetween(fullPath[fullPath.length - 2], fullPath.last);
+        }
+        return;
+      }
     }
 
     reset();
@@ -546,6 +596,27 @@ class TransportBeltController {
   int _clampDownstreamCount(int count, int removedPrefixLength) {
     final shifted = count - removedPrefixLength;
     return shifted > 0 ? shifted : 0;
+  }
+
+  bool _isPathPrefix(List<Offset> prefix, List<Offset> path) {
+    if (prefix.length > path.length) return false;
+    for (int i = 0; i < prefix.length; i++) {
+      if (prefix[i].dx.toInt() != path[i].dx.toInt() ||
+          prefix[i].dy.toInt() != path[i].dy.toInt()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  String? _directionBetween(Offset from, Offset to) {
+    final dx = (to.dx - from.dx).toInt();
+    final dy = (to.dy - from.dy).toInt();
+    if (dx > 0) return 'right';
+    if (dx < 0) return 'left';
+    if (dy > 0) return 'down';
+    if (dy < 0) return 'up';
+    return null;
   }
 
   /// 检查新路径在连接点处的方向是否与目标传送带起始方向一致

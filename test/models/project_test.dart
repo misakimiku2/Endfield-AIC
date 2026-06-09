@@ -500,5 +500,67 @@ void main() {
         isNull,
       );
     });
+
+    test('split segment commits immediately and keeps creation active', () {
+      final project = ProjectState(
+        conveyors: [
+          ConveyorBelt(
+            id: 'old_belt',
+            path: const [
+              Offset(0, 3),
+              Offset(0, 2),
+              Offset(0, 1),
+              Offset(0, 0),
+            ],
+            itemId: '',
+            itemSegments: [
+              ConveyorItemSegment(
+                itemId: 'item_a',
+                fillCount: 3,
+                drainCount: 0,
+              ),
+            ],
+          ),
+        ],
+      );
+
+      final controller = TransportBeltController(
+        project: project,
+        onProjectChanged: (_) {},
+        onRebuildCache: () {},
+        notifyListeners: () {},
+      );
+
+      expect(controller.handleTap(const Offset(0, 2)), true);
+      expect(controller.handleTap(const Offset(1, 2)), true);
+
+      expect(controller.hasCommittedPath, true);
+      expect(controller.anchors, [
+        const Offset(0, 2),
+        const Offset(1, 2),
+      ]);
+      expect(project.conveyors, hasLength(2));
+
+      final newBelt = project.conveyors.singleWhere(
+        (belt) => belt.path.contains(const Offset(1, 2)),
+      );
+      expect(newBelt.path, [
+        const Offset(0, 3),
+        const Offset(0, 2),
+        const Offset(1, 2),
+      ]);
+      expect(newBelt.itemSegments.single.itemId, 'item_a');
+      expect(newBelt.itemSegments.single.fillCount, 2);
+      expect(newBelt.itemSegments.single.drainCount, 0);
+      expect(newBelt.pushSourceItem('item_a'), true);
+      expect(newBelt.itemSegments.single.fillCount, 3);
+
+      final downstream = project.conveyors.singleWhere(
+        (belt) => belt.path.first == const Offset(0, 1),
+      );
+      expect(downstream.itemSegments.single.itemId, 'item_a');
+      expect(downstream.itemSegments.single.fillCount, 1);
+      expect(downstream.itemSegments.single.drainCount, 0);
+    });
   });
 }
