@@ -21,6 +21,7 @@ class _SimWorker {
   List<SimConveyorData> _conveyors = [];
   List<SimRecipeData> _recipes = [];
   double _speedMultiplier = 1.0;
+  int _revision = 0;
   bool _isRunning = false;
 
   static const double _tickRate = 20.0;
@@ -37,11 +38,35 @@ class _SimWorker {
 
   bool _hasOutputSpace(SimConveyorData belt) {
     if (belt.itemId.isNotEmpty) {
-      return belt.itemDrainCount > 0 ||
-          belt.itemFillCount < belt.path.length;
+      return belt.itemDrainCount > 0 || belt.itemFillCount < belt.path.length;
     }
     if (!_hasStoppedLastItems(belt)) return true;
     return belt.lastItemDrainCount > 0;
+  }
+
+  SimBuildingData _copyBuilding(
+    SimBuildingData pb, {
+    String? activeRecipeId,
+    String? inputItemId,
+    int? inputItemCount,
+    Map<String, int>? outputItems,
+  }) {
+    return SimBuildingData(
+      id: pb.id,
+      buildingId: pb.buildingId,
+      gridX: pb.gridX,
+      gridY: pb.gridY,
+      rotation: pb.rotation,
+      activeRecipeId: activeRecipeId ?? pb.activeRecipeId,
+      depotOutputItemId: pb.depotOutputItemId,
+      inputItemId: inputItemId ?? pb.inputItemId,
+      inputItemCount: inputItemCount ?? pb.inputItemCount,
+      outputItems: outputItems ?? pb.outputItems,
+      gridWidth: pb.gridWidth,
+      gridHeight: pb.gridHeight,
+      inputPorts: pb.inputPorts,
+      outputPorts: pb.outputPorts,
+    );
   }
 
   void _init() {
@@ -78,6 +103,7 @@ class _SimWorker {
     _conveyors = state.conveyors;
     _recipes = state.recipes;
     _speedMultiplier = state.speedMultiplier;
+    _revision = state.revision;
   }
 
   void _onStart() {
@@ -103,6 +129,7 @@ class _SimWorker {
 
     // 发送轻量结果回主 Isolate
     final result = SimTickResult(
+      revision: _revision,
       buildings: _buildings
           .map((b) => SimBuildingResult(
                 id: b.id,
@@ -184,22 +211,7 @@ class _SimWorker {
           pb.inputItemCount > 0) {
         final recipeId = _findMatchingRecipe(pb.buildingId, pb.inputItemId);
         if (recipeId != null) {
-          pb = SimBuildingData(
-            id: pb.id,
-            buildingId: pb.buildingId,
-            gridX: pb.gridX,
-            gridY: pb.gridY,
-            rotation: pb.rotation,
-            activeRecipeId: recipeId,
-            depotOutputItemId: pb.depotOutputItemId,
-            inputItemId: pb.inputItemId,
-            inputItemCount: pb.inputItemCount,
-            outputItems: pb.outputItems,
-            gridWidth: pb.gridWidth,
-            gridHeight: pb.gridHeight,
-            inputPorts: pb.inputPorts,
-            outputPorts: pb.outputPorts,
-          );
+          pb = _copyBuilding(pb, activeRecipeId: recipeId);
           _buildings[i] = pb;
         }
       }
@@ -209,54 +221,53 @@ class _SimWorker {
           _recipes.where((r) => r.id == pb.activeRecipeId).firstOrNull;
       if (recipe == null) continue;
 
-      // 尝试将输出库存推送到传送带
-      _pushOutputToBelts(pb, i);
+      var progress = _buildingProgress[pb.id] ?? 0.0;
+      if (progress <= 0.0) {
+        if (!_canAcceptRecipeOutputs(pb, recipe)) {
+          _buildingBlocked[pb.id] = false;
+          _buildingProgress[pb.id] = 0.0;
+          continue;
+        }
 
-      final hasInputs = _checkInputsAvailable(pb, recipe);
-      final totalOutputCount =
-          pb.outputItems.values.fold<int>(0, (sum, c) => sum + c);
-      final hasOutputSpace = totalOutputCount < 50;
+        if (!_checkInputsAvailable(pb, recipe)) {
+          _buildingBlocked[pb.id] = false;
+          _buildingProgress[pb.id] = 0.0;
+          continue;
+        }
 
-      if (!hasInputs || !hasOutputSpace) {
-        _buildingBlocked[pb.id] = true;
-        _buildingProgress[pb.id] = (_buildingProgress[pb.id] ?? 0.0) * 0.9;
-        continue;
+        pb = _consumeInputs(pb, recipe);
+        _buildings[i] = pb;
       }
 
       _buildingBlocked[pb.id] = false;
-      _buildingProgress[pb.id] =
-          (_buildingProgress[pb.id] ?? 0.0) + dt / recipe.processTimeSeconds;
+      final processTime =
+          recipe.processTimeSeconds <= 0 ? 1.0 : recipe.processTimeSeconds;
+      progress += dt / processTime;
 
-      if (_buildingProgress[pb.id]! >= 1.0) {
-        _buildingProgress[pb.id] = 0.0;
-        _consumeInputs(pb, recipe);
-        // 产出物品放入输出库存
+      if (progress >= 1.0) {
+        progress = 0.0;
         final newOutputItems = Map<String, int>.from(pb.outputItems);
         for (final output in recipe.outputs) {
           newOutputItems[output.itemId] =
               (newOutputItems[output.itemId] ?? 0) + output.amount;
         }
-        _buildings[i] = SimBuildingData(
-          id: pb.id,
-          buildingId: pb.buildingId,
-          gridX: pb.gridX,
-          gridY: pb.gridY,
-          rotation: pb.rotation,
-          activeRecipeId: pb.activeRecipeId,
-          depotOutputItemId: pb.depotOutputItemId,
-          inputItemId: pb.inputItemId,
-          inputItemCount: pb.inputItemCount,
-          outputItems: newOutputItems,
-          gridWidth: pb.gridWidth,
-          gridHeight: pb.gridHeight,
-          inputPorts: pb.inputPorts,
-          outputPorts: pb.outputPorts,
-        );
+        pb = _copyBuilding(pb, outputItems: newOutputItems);
+        _buildings[i] = pb;
       }
+
+      _buildingProgress[pb.id] = progress;
     }
   }
 
   /// 根据建筑类型和输入物品查找匹配的配方ID
+  bool _canAcceptRecipeOutputs(SimBuildingData pb, SimRecipeData recipe) {
+    final totalOutputCount =
+        pb.outputItems.values.fold<int>(0, (sum, count) => sum + count);
+    final outputAmount =
+        recipe.outputs.fold<int>(0, (sum, output) => sum + output.amount);
+    return totalOutputCount + outputAmount <= 50;
+  }
+
   String? _findMatchingRecipe(String buildingId, String inputItemId) {
     for (final recipe in _recipes) {
       if (!recipe.allowedBuildings.contains(buildingId)) continue;
@@ -306,13 +317,13 @@ class _SimWorker {
     return true;
   }
 
-  void _consumeInputs(SimBuildingData pb, SimRecipeData recipe) {
+  SimBuildingData _consumeInputs(SimBuildingData pb, SimRecipeData recipe) {
     var nextInputItemId = pb.inputItemId;
     var nextInputItemCount = pb.inputItemCount;
     for (final input in recipe.inputs) {
       if (nextInputItemId != input.itemId ||
           nextInputItemCount < input.amount) {
-        return;
+        return pb;
       }
       nextInputItemCount -= input.amount;
     }
@@ -321,31 +332,17 @@ class _SimWorker {
       nextInputItemId = '';
     }
 
-    final index = _buildings.indexWhere((b) => b.id == pb.id);
-    if (index < 0) return;
-    _buildings[index] = SimBuildingData(
-      id: pb.id,
-      buildingId: pb.buildingId,
-      gridX: pb.gridX,
-      gridY: pb.gridY,
-      rotation: pb.rotation,
-      activeRecipeId: pb.activeRecipeId,
-      depotOutputItemId: pb.depotOutputItemId,
+    return _copyBuilding(
+      pb,
       inputItemId: nextInputItemId,
       inputItemCount: nextInputItemCount,
-      outputItems: pb.outputItems,
-      gridWidth: pb.gridWidth,
-      gridHeight: pb.gridHeight,
-      inputPorts: pb.inputPorts,
-      outputPorts: pb.outputPorts,
     );
   }
 
   /// 将输出库存中的物品推送到连接的传送带
   void _pushOutputToBelts(SimBuildingData pb, int buildingIndex) {
     if (pb.outputItems.isEmpty) return;
-    final recipe =
-        _recipes.where((r) => r.id == pb.activeRecipeId).firstOrNull;
+    final recipe = _recipes.where((r) => r.id == pb.activeRecipeId).firstOrNull;
     if (recipe == null) return;
 
     var remainingItems = Map<String, int>.from(pb.outputItems);

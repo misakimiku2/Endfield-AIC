@@ -16,6 +16,7 @@ class BuildingDetailDialog extends StatefulWidget {
   final List<ConveyorBelt>? conveyors;
   final VoidCallback? onMove;
   final VoidCallback? onDelete;
+  final VoidCallback? onInventoryChanged;
   final ValueChanged<String?>? onOutputItemSelected;
 
   const BuildingDetailDialog({
@@ -25,6 +26,7 @@ class BuildingDetailDialog extends StatefulWidget {
     this.conveyors,
     this.onMove,
     this.onDelete,
+    this.onInventoryChanged,
     this.onOutputItemSelected,
   });
 
@@ -35,6 +37,7 @@ class BuildingDetailDialog extends StatefulWidget {
     List<ConveyorBelt>? conveyors,
     VoidCallback? onMove,
     VoidCallback? onDelete,
+    VoidCallback? onInventoryChanged,
     ValueChanged<String?>? onOutputItemSelected,
   }) {
     return showDialog<void>(
@@ -46,6 +49,7 @@ class BuildingDetailDialog extends StatefulWidget {
         conveyors: conveyors,
         onMove: onMove,
         onDelete: onDelete,
+        onInventoryChanged: onInventoryChanged,
         onOutputItemSelected: onOutputItemSelected,
       ),
     );
@@ -817,6 +821,17 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
     final double defaultGridBoxH = 128.0;
     final double defaultRowH =
         connectorHeight > defaultGridBoxH ? connectorHeight : defaultGridBoxH;
+    final activeRecipe = _activeRecipe;
+    final productionProgress =
+        widget.placedBuilding.productionProgress.clamp(0.0, 1.0);
+    final isProductionRunning =
+        activeRecipe != null && widget.placedBuilding.productionProgress > 0;
+    final remainingSeconds = activeRecipe == null
+        ? 0
+        : (activeRecipe.processTimeSeconds * (1.0 - productionProgress))
+            .ceil()
+            .clamp(0, 999);
+    final double productionRowH = defaultRowH + 74.0;
 
     return Column(
       children: [
@@ -858,7 +873,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final double containerH = constraints.maxHeight;
-                final double rowTop = (containerH / 2.0) - (defaultRowH / 2.0);
+                final double rowTop =
+                    (containerH / 2.0) - (productionRowH / 2.0);
 
                 return Stack(
                   clipBehavior: Clip.none,
@@ -867,37 +883,66 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                       top: rowTop,
                       left: 0,
                       right: 0,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _SynthesisGrid(
-                            items: _activeRecipe?.inputs ?? [],
-                            isInput: true,
-                            dataLoader: widget.dataLoader,
-                            placedBuilding: widget.placedBuilding,
-                            conveyors: widget.conveyors ?? [],
-                            isLiquidMode: _isLiquidMode,
-                          ),
-                          const SizedBox(width: 11),
-                          Container(
-                            height: defaultRowH,
-                            alignment: Alignment.center,
-                            child: _ProcessingIndicator(
-                                isRunning:
-                                    widget.placedBuilding.productionProgress >
-                                        0),
-                          ),
-                          const SizedBox(width: 11),
-                          _SynthesisGrid(
-                            items: _activeRecipe?.outputs ?? [],
-                            isInput: false,
-                            dataLoader: widget.dataLoader,
-                            placedBuilding: widget.placedBuilding,
-                            conveyors: widget.conveyors ?? [],
-                            isLiquidMode: _isLiquidMode,
-                          ),
-                        ],
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.topCenter,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _SynthesisGrid(
+                              items: _activeRecipe?.inputs ?? [],
+                              isInput: true,
+                              dataLoader: widget.dataLoader,
+                              placedBuilding: widget.placedBuilding,
+                              conveyors: widget.conveyors ?? [],
+                              isLiquidMode: _isLiquidMode,
+                            ),
+                            const SizedBox(width: 11),
+                            SizedBox(
+                              width: 112,
+                              height: productionRowH,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  SizedBox(
+                                    height: defaultRowH,
+                                    child: Center(
+                                      child: _ProcessingIndicator(
+                                        isRunning: isProductionRunning,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    isProductionRunning
+                                        ? '$remainingSeconds秒'
+                                        : '',
+                                    style: const TextStyle(
+                                      color: Color(0xFFEDEDED),
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  _ProductionProgressBar(
+                                    progress: isProductionRunning
+                                        ? productionProgress.toDouble()
+                                        : 0,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 11),
+                            _SynthesisGrid(
+                              items: _activeRecipe?.outputs ?? [],
+                              isInput: false,
+                              dataLoader: widget.dataLoader,
+                              placedBuilding: widget.placedBuilding,
+                              conveyors: widget.conveyors ?? [],
+                              isLiquidMode: _isLiquidMode,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -909,14 +954,19 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
         const SizedBox(height: 14),
         Builder(
           builder: (context) {
-            final isProducing = _activeRecipe != null &&
-                widget.placedBuilding.productionProgress > 0;
+            final isProducing = _activeRecipe != null;
+            final hasCollectableOutput =
+                widget.placedBuilding.totalOutputCount > 0;
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (isProducing)
-                  const Padding(
+                Visibility(
+                  visible: isProducing,
+                  maintainSize: true,
+                  maintainAnimation: true,
+                  maintainState: true,
+                  child: const Padding(
                     padding: EdgeInsets.only(left: 30, bottom: 6),
                     child: Text(
                       '当前自动生产中的配方',
@@ -927,12 +977,13 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                       ),
                     ),
                   ),
+                ),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: Padding(
                     padding: const EdgeInsets.only(left: 30),
                     child: SizedBox(
-                      width: 369.92001,
+                      width: 800,
                       height: 76.8,
                       child: Stack(
                         clipBehavior: Clip.none,
@@ -945,11 +996,10 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                             child: GestureDetector(
                               onTap: () =>
                                   _showRecipeListDialog(context, recipes),
-                              child: SvgPicture.asset(
-                                'assets/svg/information_BG.svg',
+                              child: _InformationBackground(
+                                hideNo: isProducing,
                                 width: 348.16,
                                 height: 76.8,
-                                fit: BoxFit.fill,
                               ),
                             ),
                           ),
@@ -983,10 +1033,10 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                                                           horizontal: 4),
                                                       child: Image.asset(
                                                         item.imageAssetPath,
-                                                        width: 24,
-                                                        height: 24,
-                                                        cacheWidth: 72,
-                                                        cacheHeight: 72,
+                                                        width: 40,
+                                                        height: 40,
+                                                        cacheWidth: 120,
+                                                        cacheHeight: 120,
                                                         fit: BoxFit.contain,
                                                         filterQuality:
                                                             FilterQuality
@@ -996,7 +1046,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                                                     );
                                                   }) ??
                                                   []),
-                                              const SizedBox(width: 48),
+                                              const SizedBox(width: 54),
                                               ...(_activeRecipe?.outputs
                                                       .map((out) {
                                                     final item = widget
@@ -1011,10 +1061,10 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                                                           horizontal: 4),
                                                       child: Image.asset(
                                                         item.imageAssetPath,
-                                                        width: 24,
-                                                        height: 24,
-                                                        cacheWidth: 72,
-                                                        cacheHeight: 72,
+                                                        width: 40,
+                                                        height: 40,
+                                                        cacheWidth: 120,
+                                                        cacheHeight: 120,
                                                         fit: BoxFit.contain,
                                                         filterQuality:
                                                             FilterQuality
@@ -1054,7 +1104,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                             ),
                           ),
                           Positioned(
-                            right: 0,
+                            left: 326,
                             top: (76.8 - 43.52002) / 2,
                             child: HoverSvgButton(
                               svgPath: 'assets/svg/Recipe_button.svg',
@@ -1062,6 +1112,21 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                               height: 43.52002,
                               onTap: () =>
                                   _showRecipeListDialog(context, recipes),
+                            ),
+                          ),
+                          Positioned(
+                            left: 424,
+                            top: (76.8 - 87.59967 * 0.78) / 2,
+                            child: _CollectAllButton(
+                              width: 300,
+                              height: 68.32774,
+                              enabled: hasCollectableOutput,
+                              onTap: () {
+                                setState(() {
+                                  widget.placedBuilding.outputItems.clear();
+                                });
+                                widget.onInventoryChanged?.call();
+                              },
                             ),
                           ),
                         ],
@@ -1445,6 +1510,17 @@ class _ResourceGridTileState extends State<_ResourceGridTile> {
   }
 }
 
+class _ItemTrackAnim {
+  final AnimationController controller;
+  final Animation<double> curveAnim;
+  final String itemId;
+
+  _ItemTrackAnim(
+      {required this.controller,
+      required this.curveAnim,
+      required this.itemId});
+}
+
 class _SynthesisGrid extends StatefulWidget {
   final List<RecipeIO> items;
   final bool isInput;
@@ -1469,6 +1545,9 @@ class _SynthesisGrid extends StatefulWidget {
 class _SynthesisGridState extends State<_SynthesisGrid>
     with TickerProviderStateMixin {
   late AnimationController _animationController;
+  int _previousCount = -1;
+  DateTime? _lastCountChangeTime;
+  final List<_ItemTrackAnim> _itemAnims = [];
 
   @override
   void initState() {
@@ -1482,6 +1561,9 @@ class _SynthesisGridState extends State<_SynthesisGrid>
   @override
   void dispose() {
     _animationController.dispose();
+    for (final anim in _itemAnims) {
+      anim.controller.dispose();
+    }
     super.dispose();
   }
 
@@ -1573,21 +1655,50 @@ class _SynthesisGridState extends State<_SynthesisGrid>
     final outputCount = !widget.isInput && outputItemId != null
         ? (widget.placedBuilding.outputItems[outputItemId] ?? 0)
         : 0;
-    final dataItem = inventoryItemId != null && inventoryItemId.isNotEmpty
-        ? widget.dataLoader.getItem(inventoryItemId)
-        : (item != null ? widget.dataLoader.getItem(item.itemId) : null);
+    final dataItem = widget.isInput
+        ? (inventoryItemId != null && inventoryItemId.isNotEmpty
+            ? widget.dataLoader.getItem(inventoryItemId)
+            : (item != null
+                ? widget.dataLoader.getItem(item.itemId)
+                : null))
+        : (outputItemId != null
+            ? widget.dataLoader.getItem(outputItemId)
+            : null);
     final level = dataItem?.level;
-    final totalAmount = inventoryCount > 0
-        ? inventoryCount
-        : outputCount > 0
-            ? outputCount
-            : widget.items.fold<int>(0, (sum, io) => sum + io.amount);
+    final totalAmount = widget.isInput ? inventoryCount : outputCount;
 
     final solidPorts = (widget.isInput
             ? widget.placedBuilding.inputPorts
             : widget.placedBuilding.outputPorts)
         .where((p) => p.definition.portType == 'solid')
         .toList();
+
+    // 检查是否有已连接的传送带端口
+    final portConnections =
+        widget.placedBuilding.conveyorPortConnections(widget.conveyors);
+    final hasConnectedPort =
+        solidPorts.any((p) => portConnections['${p.type}_${p.index}'] == true);
+
+    // 检测数量变化，创建物品动画（仅在有连接的传送带时）
+    final currentCount = widget.isInput ? inventoryCount : outputCount;
+    if (_previousCount >= 0 &&
+        currentCount > _previousCount &&
+        hasConnectedPort) {
+      final delta = currentCount - _previousCount;
+      final animItemId =
+          widget.isInput ? (inventoryItemId ?? '') : (outputItemId ?? '');
+      _previousCount = currentCount;
+      if (animItemId.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _createItemAnimations(delta, animItemId);
+        });
+      }
+    } else {
+      _previousCount = currentCount;
+    }
+
+    // 直接显示实际数量
+    final displayCount = totalAmount;
 
     final gridBox = Container(
       width: 128,
@@ -1601,16 +1712,24 @@ class _SynthesisGridState extends State<_SynthesisGrid>
           ),
           if (dataItem != null && dataItem.imageAssetPath.isNotEmpty)
             Center(
-              child: Image.asset(
-                dataItem.imageAssetPath,
-                width: 128,
-                height: 128,
-                cacheWidth: 384,
-                cacheHeight: 384,
-                fit: BoxFit.contain,
-                filterQuality: FilterQuality.medium,
-                isAntiAlias: true,
-                errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
+              child: AnimatedOpacity(
+                opacity: totalAmount == 0
+                    ? 0.3
+                    : totalAmount == 1
+                        ? 0.5
+                        : 1.0,
+                duration: const Duration(milliseconds: 300),
+                child: Image.asset(
+                  dataItem.imageAssetPath,
+                  width: 128,
+                  height: 128,
+                  cacheWidth: 384,
+                  cacheHeight: 384,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.medium,
+                  isAntiAlias: true,
+                  errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
+                ),
               ),
             )
           else if (dataItem != null)
@@ -1656,9 +1775,18 @@ class _SynthesisGridState extends State<_SynthesisGrid>
     final double liquidCx = (widget.isInput ? 221.0 : 45.7) * liquidScale;
     final double liquidBoxX = gridBoxCenterX - liquidCx;
 
-    Widget mainGridContent = SizedBox(
+    // 数量文本位于网格下方
+    final double countY = finalGridBoxY + defaultGridBoxH + 6;
+    final double newHeight = math.max(finalHeight, countY + 24);
+
+    // 构建物品动画 widgets（坐标相对于轨道连接器）
+    final List<Widget> itemAnimWidgets = _buildItemAnimWidgets(
+      solidPorts: solidPorts,
+    );
+
+    return SizedBox(
       width: totalWidth,
-      height: finalHeight,
+      height: newHeight,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
@@ -1683,6 +1811,7 @@ class _SynthesisGridState extends State<_SynthesisGrid>
                 isInput: true,
                 placedBuilding: widget.placedBuilding,
                 offsetY: finalOffsetY,
+                itemAnimChildren: itemAnimWidgets,
               ),
             ),
           if (!widget.isInput && solidPorts.isNotEmpty)
@@ -1695,33 +1824,176 @@ class _SynthesisGridState extends State<_SynthesisGrid>
                 isInput: false,
                 placedBuilding: widget.placedBuilding,
                 offsetY: finalOffsetY,
+                itemAnimChildren: itemAnimWidgets,
               ),
             ),
+          // 数量文本位于网格正下方
+          Positioned(
+            left: gridBoxX,
+            top: countY,
+            width: gridBoxWidth,
+            child: Center(
+              child: Text(
+                '$displayCount',
+                style: TextStyle(
+                  color: ((widget.isInput &&
+                              inventoryCount >=
+                                  PlacedBuilding.maxInputItemCount) ||
+                          (!widget.isInput &&
+                              outputCount >= PlacedBuilding.maxOutputItemCount))
+                      ? const Color(0xFFFF4444)
+                      : const Color(0xFFDDDDDD),
+                  fontSize: 20,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
+  }
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        mainGridContent,
-        const SizedBox(height: 8),
-        if (totalAmount > 0)
-          Text(
-            '$totalAmount',
-            style: TextStyle(
-              color: ((widget.isInput &&
-                          inventoryCount >= PlacedBuilding.maxInputItemCount) ||
-                      (!widget.isInput &&
-                          outputCount >= PlacedBuilding.maxOutputItemCount))
-                  ? const Color(0xFFFF4444)
-                  : const Color(0xFFDDDDDD),
-              fontSize: 20,
-              fontWeight: FontWeight.w500,
+  void _createItemAnimations(int delta, String itemId) {
+    final now = DateTime.now();
+    int durationMs = 1500;
+    if (_lastCountChangeTime != null) {
+      final interval = now.difference(_lastCountChangeTime!).inMilliseconds;
+      if (interval > 0) {
+        durationMs = interval.clamp(300, 5000);
+      }
+    }
+    _lastCountChangeTime = now;
+
+    for (int i = 0; i < delta; i++) {
+      final controller = AnimationController(
+        vsync: this,
+        duration: Duration(milliseconds: durationMs),
+      );
+      final curveAnim = CurvedAnimation(
+        parent: controller,
+        curve: Curves.easeInOutCubic,
+      );
+      final anim = _ItemTrackAnim(
+          controller: controller, curveAnim: curveAnim, itemId: itemId);
+      _itemAnims.add(anim);
+      controller.forward().then((_) {
+        if (mounted) {
+          _itemAnims.remove(anim);
+          controller.dispose();
+        }
+      });
+    }
+  }
+
+  List<Widget> _buildItemAnimWidgets({
+    required List<PortState> solidPorts,
+  }) {
+    if (solidPorts.isEmpty || _itemAnims.isEmpty) return [];
+
+    // 找到第一个已连接的端口
+    final connections =
+        widget.placedBuilding.conveyorPortConnections(widget.conveyors);
+    int? connectedPortIndex;
+    for (int i = 0; i < solidPorts.length; i++) {
+      if (connections['${solidPorts[i].type}_${solidPorts[i].index}'] == true) {
+        connectedPortIndex = i;
+        break;
+      }
+    }
+
+    if (connectedPortIndex == null) return [];
+
+    const double itemSize = 40.0;
+    const double trackActiveWidth = 168.0;
+    const double trackHeight = 54.0;
+    // 物品从轨道外左侧进入的距离
+    const double entryOffset = itemSize;
+
+    // 坐标相对于轨道连接器
+    final double portCenterY = connectedPortIndex * 62.0 + 31.0;
+    final double y = portCenterY - trackHeight / 2.0;
+
+    // 输入：轨道从左侧开始(x=0)，渐变从透明→不透明
+    // 输出：轨道从右侧开始(x=288-168=120)，渐变从不透明→透明
+    final double trackStartX =
+        widget.isInput ? 0.0 : (288.0 - trackActiveWidth);
+
+    // 完整移动路径：从轨道外(entryOffset) 到轨道右边缘(trackActiveWidth)
+    final double totalTravel = trackActiveWidth + entryOffset;
+
+    // 渐变遮罩：与轨道 painter 中的渐变方向一致
+    // shader 区域限定为轨道矩形（不含外部进入段）
+    final trackGradient = widget.isInput
+        ? const LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [Color(0x00FFFFFF), Color(0xFFFFFFFF)],
+          )
+        : const LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [Color(0xFFFFFFFF), Color(0x00FFFFFF)],
+          );
+
+    // 轨道矩形在 ShaderMask 坐标系中的位置（ShaderMask 左边缘 = trackStartX - entryOffset）
+    final trackRectInMask = Rect.fromLTWH(
+      entryOffset, 0, trackActiveWidth, trackHeight,
+    );
+
+    final List<Widget> widgets = [];
+    for (final anim in _itemAnims) {
+      final dataItem = widget.dataLoader.getItem(anim.itemId);
+      if (dataItem == null) continue;
+
+      final double itemY = portCenterY - itemSize / 2;
+
+      widgets.add(
+        Positioned(
+          // 裁剪区域：从轨道外左侧到轨道右边缘，覆盖完整移动路径
+          left: trackStartX - entryOffset,
+          top: y,
+          width: totalTravel,
+          height: trackHeight,
+          child: ClipRect(
+            child: ShaderMask(
+              // 渐变只作用于轨道区域（不含外部进入段）
+              shaderCallback: (_) => trackGradient.createShader(trackRectInMask),
+              child: AnimatedBuilder(
+                animation: anim.curveAnim,
+                builder: (context, child) {
+                  // 从轨道外左侧(-entryOffset) 移动到轨道右边缘(trackActiveWidth)
+                  final double x =
+                      anim.curveAnim.value * totalTravel - entryOffset;
+                  return Transform.translate(
+                    offset: Offset(x, itemY - y),
+                    child: child,
+                  );
+                },
+                child: Opacity(
+                  opacity: 0.9,
+                  child: dataItem.imageAssetPath.isNotEmpty
+                      ? Image.asset(
+                          dataItem.imageAssetPath,
+                          width: itemSize,
+                          height: itemSize,
+                          cacheWidth: 120,
+                          cacheHeight: 120,
+                          fit: BoxFit.contain,
+                          filterQuality: FilterQuality.medium,
+                          isAntiAlias: true,
+                          errorBuilder: (_, __, ___) =>
+                              _buildItemPlaceholder(dataItem),
+                        )
+                      : _buildItemPlaceholder(dataItem),
+                ),
+              ),
             ),
           ),
-      ],
-    );
+        ),
+      );
+    }
+    return widgets;
   }
 
   Widget _buildItemPlaceholder(Item dataItem) {
@@ -1745,6 +2017,7 @@ class _TrackJointsConnector extends StatefulWidget {
   final bool isInput;
   final PlacedBuilding placedBuilding;
   final double offsetY;
+  final List<Widget> itemAnimChildren;
 
   const _TrackJointsConnector({
     required this.ports,
@@ -1752,6 +2025,7 @@ class _TrackJointsConnector extends StatefulWidget {
     required this.isInput,
     required this.placedBuilding,
     this.offsetY = 0.0,
+    this.itemAnimChildren = const [],
   });
 
   @override
@@ -1788,20 +2062,31 @@ class _TrackJointsConnectorState extends State<_TrackJointsConnector>
     final connections = widget.ports.map((p) => _isPortConnected(p)).toList();
     final int N = connections.length;
     final double height = N > 0 ? (N * 62.0) : 0;
+    final double totalHeight = height > 0 ? height + widget.offsetY : 0;
 
-    return AnimatedBuilder(
-      animation: _animationController,
-      builder: (context, child) {
-        return CustomPaint(
-          size: Size(288, height > 0 ? height + widget.offsetY : 0),
-          painter: _TrackJointsPainter(
-            connections: connections,
-            isInput: widget.isInput,
-            animationValue: _animationController.value,
-            offsetY: widget.offsetY,
+    return SizedBox(
+      width: 288,
+      height: totalHeight,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          AnimatedBuilder(
+            animation: _animationController,
+            builder: (context, child) {
+              return CustomPaint(
+                size: Size(288, totalHeight),
+                painter: _TrackJointsPainter(
+                  connections: connections,
+                  isInput: widget.isInput,
+                  animationValue: _animationController.value,
+                  offsetY: widget.offsetY,
+                ),
+              );
+            },
           ),
-        );
-      },
+          ...widget.itemAnimChildren,
+        ],
+      ),
     );
   }
 }
@@ -2171,6 +2456,179 @@ class _ProcessingIndicatorState extends State<_ProcessingIndicator>
         }).expand((widget) => [widget, const SizedBox(width: 4)]).toList()
           ..removeLast(),
       ],
+    );
+  }
+}
+
+class _ProductionProgressBar extends StatelessWidget {
+  final double progress;
+
+  const _ProductionProgressBar({required this.progress});
+
+  @override
+  Widget build(BuildContext context) {
+    final clamped = progress.clamp(0.0, 1.0).toDouble();
+    return SizedBox(
+      width: 156,
+      height: 14,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(end: clamped),
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
+        builder: (context, animatedProgress, child) {
+          return Stack(
+            alignment: Alignment.centerLeft,
+            children: [
+              Positioned(
+                left: 8,
+                right: 8,
+                child: Container(
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFBFBFBF),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 8,
+                child: Container(
+                  width: 140 * animatedProgress,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              const Positioned(
+                right: 2,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                  child: SizedBox(width: 12, height: 12),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _InformationBackground extends StatelessWidget {
+  final bool hideNo;
+  final double width;
+  final double height;
+
+  const _InformationBackground({
+    required this.hideNo,
+    required this.width,
+    required this.height,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String>(
+      future: DefaultAssetBundle.of(context)
+          .loadString('assets/svg/information_BG.svg'),
+      builder: (context, snapshot) {
+        var svg = snapshot.data;
+        if (svg != null && hideNo) {
+          svg = svg.replaceFirst(
+            RegExp(r'<path[^>]*inkscape:label="NO"[^>]*/>'),
+            '',
+          );
+        }
+
+        if (svg == null) {
+          return SizedBox(width: width, height: height);
+        }
+
+        return SvgPicture.string(
+          svg,
+          width: width,
+          height: height,
+          fit: BoxFit.fill,
+        );
+      },
+    );
+  }
+}
+
+class _CollectAllButton extends StatefulWidget {
+  final double width;
+  final double height;
+  final VoidCallback onTap;
+  final bool enabled;
+
+  const _CollectAllButton({
+    required this.width,
+    required this.height,
+    required this.onTap,
+    this.enabled = true,
+  });
+
+  @override
+  State<_CollectAllButton> createState() => _CollectAllButtonState();
+}
+
+class _CollectAllButtonState extends State<_CollectAllButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.enabled;
+    return GestureDetector(
+      onTap: enabled ? widget.onTap : null,
+      child: MouseRegion(
+        cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        onEnter: enabled ? (_) => setState(() => _hovered = true) : null,
+        onExit: enabled ? (_) => setState(() => _hovered = false) : null,
+        child: AnimatedScale(
+          scale: enabled && _hovered ? 1.02 : 1.0,
+          duration: const Duration(milliseconds: 120),
+          child: SizedBox(
+            width: widget.width,
+            height: widget.height,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                ColorFiltered(
+                  colorFilter: enabled
+                      ? const ColorFilter.mode(
+                          Colors.transparent, BlendMode.srcOver)
+                      : const ColorFilter.mode(
+                          Color(0xFF373737), BlendMode.srcIn),
+                  child: SvgPicture.asset(
+                    'assets/svg/Collect_button.svg',
+                    width: widget.width,
+                    height: widget.height,
+                    fit: BoxFit.fill,
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.center,
+                  child: Text(
+                    '全部收取',
+                    style: TextStyle(
+                      color: enabled
+                          ? const Color(0xFF222222)
+                          : const Color(0xFF666666),
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:isolate';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:flutter/material.dart';
 import '../models/project.dart';
 import '../models/recipe.dart';
@@ -13,6 +13,7 @@ class SimulationEngine extends ChangeNotifier {
   ProjectState? _project;
   bool _isRunning = false;
   double _speedMultiplier = 1.0;
+  int _syncRevision = 0;
 
   // Isolate 模式（原生平台）
   Isolate? _isolate;
@@ -86,6 +87,7 @@ class SimulationEngine extends ChangeNotifier {
 
     if (message is Map<String, dynamic>) {
       final result = SimTickResult.fromJson(message);
+      if (result.revision != _syncRevision) return;
       _applyTickResult(result);
       notifyListeners();
     }
@@ -113,35 +115,14 @@ class SimulationEngine extends ChangeNotifier {
     for (final cr in result.conveyors) {
       final belt = _project!.conveyors.where((c) => c.id == cr.id).firstOrNull;
       if (belt != null) {
-        final sourceItemId = _outputItemIdForBeltStart(belt);
-        if (cr.itemId.isNotEmpty && cr.itemId != sourceItemId) {
-          belt.flowProgress = cr.flowProgress;
-          belt.isBlocked = cr.isBlocked;
-          continue;
-        }
         if (belt.itemSegments.isNotEmpty) {
           belt.flowProgress = cr.flowProgress;
           belt.isBlocked = cr.isBlocked;
           continue;
         }
         // 只有当没有残留物品时才更新 lastItemId，避免覆盖残留物品的 ID
-        if (cr.itemId.isNotEmpty && belt.lastItemFillCount <= 0) {
-          belt.lastItemId = cr.itemId;
-        }
         // 当 itemId 首次从空变为非空时，立即初始化第一格物品
         // 避免等待下一个动画周期（最多 2 秒延迟）
-        if (cr.itemId.isNotEmpty && belt.itemId.isEmpty) {
-          belt.itemFillCount = 1;
-          belt.itemDrainCount = 0;
-          if (!belt.hasLastItems) {
-            belt.lastItemFillCount = 0;
-            belt.lastItemDrainCount = 0;
-            belt.lastItemFreezeProgress = null;
-          }
-        }
-        if (cr.itemId.isNotEmpty || belt.itemFillCount == 0) {
-          belt.itemId = cr.itemId;
-        }
         belt.flowProgress = cr.flowProgress;
         belt.isBlocked = cr.isBlocked;
       }
@@ -188,8 +169,10 @@ class SimulationEngine extends ChangeNotifier {
   /// 同步完整状态到计算 Isolate
   void _syncState() {
     if (_workerSendPort == null || _project == null) return;
+    _syncRevision++;
 
     final state = SimSyncState(
+      revision: _syncRevision,
       buildings: _project!.buildings
           .map((pb) => SimBuildingData(
                 id: pb.id,
@@ -320,6 +303,14 @@ class SimulationEngine extends ChangeNotifier {
     notifyListeners();
   }
 
+  @visibleForTesting
+  void debugTickForTesting(double dt) {
+    if (_project == null) return;
+    _fallbackUpdateConveyors(dt);
+    _fallbackUpdateBuildings(dt);
+    notifyListeners();
+  }
+
   // 用于限制日志输出频率
   int _fallbackLogCounter = 0;
 
@@ -359,7 +350,6 @@ class SimulationEngine extends ChangeNotifier {
     for (final pb in _project!.buildings) {
       // 仓库取货口：不需要配方，直接将 depotOutputItemId 推送到连接的传送带
       if (pb.building.id == 'depot_unloader_3x1') {
-        _fallbackProduceDepotOutput(pb);
         continue;
       }
 
@@ -375,23 +365,29 @@ class SimulationEngine extends ChangeNotifier {
       if (recipe == null) continue;
 
       // 尝试将输出库存推送到传送带
-      _fallbackPushOutputToBelts(pb);
+      if (pb.productionProgress <= 0.0) {
+        if (!_fallbackCanAcceptRecipeOutputs(pb, recipe)) {
+          pb.isBlocked = false;
+          pb.productionProgress = 0.0;
+          continue;
+        }
 
-      final hasInputs = _fallbackCheckInputsAvailable(pb, recipe);
-      final hasOutputSpace = pb.totalOutputCount < PlacedBuilding.maxOutputItemCount;
+        if (!_fallbackCheckInputsAvailable(pb, recipe)) {
+          pb.isBlocked = false;
+          pb.productionProgress = 0.0;
+          continue;
+        }
 
-      if (!hasInputs || !hasOutputSpace) {
-        pb.isBlocked = true;
-        pb.productionProgress = pb.productionProgress * 0.9;
-        continue;
+        _fallbackConsumeInputs(pb, recipe);
       }
 
       pb.isBlocked = false;
-      pb.productionProgress += dt / recipe.processTimeSeconds;
+      final processTime =
+          recipe.processTimeSeconds <= 0 ? 1.0 : recipe.processTimeSeconds;
+      pb.productionProgress += dt / processTime;
 
       if (pb.productionProgress >= 1.0) {
         pb.productionProgress = 0.0;
-        _fallbackConsumeInputs(pb, recipe);
         // 产出物品放入输出库存
         for (final output in recipe.outputs) {
           pb.addOutputItem(output.itemId, output.amount);
@@ -428,7 +424,7 @@ class SimulationEngine extends ChangeNotifier {
             }
             port.connected = true;
             port.linkedItemId = outputItemId;
-            }
+          }
         }
       }
     }
@@ -448,6 +444,13 @@ class SimulationEngine extends ChangeNotifier {
   }
 
   /// 将输出库存中的物品推送到连接的传送带
+  bool _fallbackCanAcceptRecipeOutputs(PlacedBuilding pb, Recipe recipe) {
+    final outputAmount =
+        recipe.outputs.fold<int>(0, (sum, output) => sum + output.amount);
+    return pb.totalOutputCount + outputAmount <=
+        PlacedBuilding.maxOutputItemCount;
+  }
+
   void _fallbackPushOutputToBelts(PlacedBuilding pb) {
     if (pb.outputItems.isEmpty) return;
     for (final port in pb.outputPorts) {

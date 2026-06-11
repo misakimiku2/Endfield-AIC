@@ -6,12 +6,14 @@ import 'dart:ui';
 
 /// 同步完整状态到计算 Isolate
 class SimSyncState {
+  final int revision;
   final List<SimBuildingData> buildings;
   final List<SimConveyorData> conveyors;
   final List<SimRecipeData> recipes;
   final double speedMultiplier;
 
   const SimSyncState({
+    required this.revision,
     required this.buildings,
     required this.conveyors,
     required this.recipes,
@@ -19,6 +21,7 @@ class SimSyncState {
   });
 
   Map<String, dynamic> toJson() => {
+        'revision': revision,
         'buildings': buildings.map((e) => e.toJson()).toList(),
         'conveyors': conveyors.map((e) => e.toJson()).toList(),
         'recipes': recipes.map((e) => e.toJson()).toList(),
@@ -26,6 +29,7 @@ class SimSyncState {
       };
 
   factory SimSyncState.fromJson(Map<String, dynamic> json) => SimSyncState(
+        revision: (json['revision'] as num?)?.toInt() ?? 0,
         buildings: (json['buildings'] as List)
             .map((e) => SimBuildingData.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -285,17 +289,24 @@ class SimRecipeIOData {
 
 /// 一次 tick 的计算结果（轻量，只含变化的字段）
 class SimTickResult {
+  final int revision;
   final List<SimBuildingResult> buildings;
   final List<SimConveyorResult> conveyors;
 
-  const SimTickResult({required this.buildings, required this.conveyors});
+  const SimTickResult({
+    required this.revision,
+    required this.buildings,
+    required this.conveyors,
+  });
 
   Map<String, dynamic> toJson() => {
+        'revision': revision,
         'buildings': buildings.map((e) => e.toJson()).toList(),
         'conveyors': conveyors.map((e) => e.toJson()).toList(),
       };
 
   factory SimTickResult.fromJson(Map<String, dynamic> json) => SimTickResult(
+        revision: (json['revision'] as num?)?.toInt() ?? 0,
         buildings: (json['buildings'] as List)
             .map((e) => SimBuildingResult.fromJson(e as Map<String, dynamic>))
             .toList(),

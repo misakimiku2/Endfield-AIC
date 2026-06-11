@@ -100,6 +100,10 @@ class _EditorPageState extends State<EditorPage> {
           });
           widget.simulationEngine.attach(_project);
         },
+        onInventoryChanged: () {
+          setState(() {});
+          widget.simulationEngine.attach(_project);
+        },
         onOutputItemSelected: (itemId) {
           _setDepotOutputItem(pb, itemId);
         },

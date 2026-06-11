@@ -280,12 +280,18 @@ class CanvasEditorState extends State<CanvasEditor>
           pendingOutputItemId != null &&
           !inputBuilding.canAcceptInputItem(pendingOutputItemId);
       final terminalLimit = inputBlocked ? belt.path.length - 1 : null;
-      final sourceItemId = _getOutputItemIdForBeltStart(belt);
+      final sourceItemId = _getAvailableOutputItemIdForBeltStart(belt);
       final isProducing = sourceItemId != null && sourceItemId.isNotEmpty;
 
       belt.ensureItemSegmentsFromLegacy();
       if (isProducing) {
-        belt.pushSourceItem(sourceItemId, terminalLimit: terminalLimit);
+        final pushed =
+            belt.pushSourceItem(sourceItemId, terminalLimit: terminalLimit);
+        if (pushed) {
+          inventoryChanged =
+              _consumeOutputItemForBeltStart(belt, sourceItemId) ||
+                  inventoryChanged;
+        }
       }
       belt.advanceItemSegments(
         isDeadEnd: isDeadEnd || inputBuilding != null || inputBlocked,
@@ -374,7 +380,7 @@ class CanvasEditorState extends State<CanvasEditor>
     belt.syncLegacyFromSegments();
   }
 
-  String? _getOutputItemIdForBeltStart(ConveyorBelt belt) {
+  String? _getAvailableOutputItemIdForBeltStart(ConveyorBelt belt) {
     if (belt.path.isEmpty) return null;
     final start = belt.path.first;
     for (final pb in _project.buildings) {
@@ -393,9 +399,22 @@ class CanvasEditorState extends State<CanvasEditor>
       final output = recipe.outputs.length > outputIndex
           ? recipe.outputs[outputIndex]
           : recipe.outputs.first;
+      if (!pb.hasOutputItem(output.itemId)) return null;
       return output.itemId;
     }
     return null;
+  }
+
+  bool _consumeOutputItemForBeltStart(ConveyorBelt belt, String itemId) {
+    if (belt.path.isEmpty || itemId.isEmpty) return false;
+    final start = belt.path.first;
+    for (final pb in _project.buildings) {
+      final outputIndex = _findOutputPortIndexAtCell(pb, start);
+      if (outputIndex == null) continue;
+      if (pb.building.id == DepotUnloaderConfig.id) return false;
+      return pb.consumeOutputItem(itemId, 1);
+    }
+    return false;
   }
 
   int? _findOutputPortIndexAtCell(PlacedBuilding pb, Offset cell) {
@@ -470,10 +489,7 @@ class CanvasEditorState extends State<CanvasEditor>
     // 1. 撤销 translate(center)
     pos = Offset(pos.dx - center.dx, pos.dy - center.dy);
     // 2. 撤销 rotate(θ) — 逆旋转
-    pos = Offset(
-      pos.dx * cosA + pos.dy * sinA,
-      -pos.dx * sinA + pos.dy * cosA,
-    );
+    pos = _inverseRotate(pos, cosA, sinA);
     // 3. 撤销 translate(-center)
     pos = Offset(pos.dx + center.dx, pos.dy + center.dy);
     // 4. 撤销 translate(-offset)
@@ -518,10 +534,7 @@ class CanvasEditorState extends State<CanvasEditor>
     final sinA = math.sin(_displayAngle);
     var preRotationPos =
         Offset(localPos.dx - center.dx, localPos.dy - center.dy);
-    preRotationPos = Offset(
-      preRotationPos.dx * cosA + preRotationPos.dy * sinA,
-      -preRotationPos.dx * sinA + preRotationPos.dy * cosA,
-    );
+    preRotationPos = _inverseRotate(preRotationPos, cosA, sinA);
     preRotationPos =
         Offset(preRotationPos.dx + center.dx, preRotationPos.dy + center.dy);
 
@@ -576,14 +589,19 @@ class CanvasEditorState extends State<CanvasEditor>
     _isPanning = false;
   }
 
+  /// 对坐标点进行逆旋转变换（绕原点旋转 -θ）
+  Offset _inverseRotate(Offset pos, double cosA, double sinA) {
+    return Offset(
+      pos.dx * cosA + pos.dy * sinA,
+      -pos.dx * sinA + pos.dy * cosA,
+    );
+  }
+
   /// 将屏幕空间的拖拽delta转换到offset坐标系（反向旋转）
   Offset _screenDeltaToWorldDelta(Offset screenDelta) {
     final cosA = math.cos(_displayAngle);
     final sinA = math.sin(_displayAngle);
-    return Offset(
-      screenDelta.dx * cosA + screenDelta.dy * sinA,
-      -screenDelta.dx * sinA + screenDelta.dy * cosA,
-    );
+    return _inverseRotate(screenDelta, cosA, sinA);
   }
 
   void _handleTap(Offset screenPos, Size size) {
@@ -2063,6 +2081,14 @@ class _EditorPainter extends CustomPainter {
     }
   }
 
+  /// 对坐标点进行逆旋转变换（绕原点旋转 -θ）
+  Offset _inverseRotate(Offset pos, double cosA, double sinA) {
+    return Offset(
+      pos.dx * cosA + pos.dy * sinA,
+      -pos.dx * sinA + pos.dy * cosA,
+    );
+  }
+
   /// 计算可见世界坐标区域（考虑旋转的轴对齐包围盒）
   _Viewport _computeViewport(Size size) {
     final center = Offset(size.width / 2, size.height / 2);
@@ -2084,10 +2110,7 @@ class _EditorPainter extends CustomPainter {
       var pos = corner;
       // 逆变换: translate(-center) → inverse-rotate → translate(center) → translate(+offset) → unscale
       pos = Offset(pos.dx - center.dx, pos.dy - center.dy);
-      pos = Offset(
-        pos.dx * cosA + pos.dy * sinA,
-        -pos.dx * sinA + pos.dy * cosA,
-      );
+      pos = _inverseRotate(pos, cosA, sinA);
       pos = Offset(pos.dx + center.dx, pos.dy + center.dy);
       pos = Offset(pos.dx + displayOffsetX, pos.dy + displayOffsetY);
       pos = Offset(pos.dx / displayScale, pos.dy / displayScale);
