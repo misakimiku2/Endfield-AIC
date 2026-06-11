@@ -1025,6 +1025,8 @@ class TransportBeltRenderer {
     double arrowProgress = 0.0,
     List<ConveyorItemSegment>? itemSegments,
     Map<String, Item>? allItems,
+    bool opaqueItems = false,
+    double? itemArrowProgress,
   }) {
     if (path.isEmpty) return;
 
@@ -1037,7 +1039,9 @@ class TransportBeltRenderer {
           incomingDirection: incomingDirection,
           arrowProgress: arrowProgress,
           itemSegments: itemSegments,
-          allItems: allItems);
+          allItems: allItems,
+          opaqueItems: opaqueItems,
+          itemArrowProgress: itemArrowProgress);
     } else {
       _renderPreviewLegacy(canvas, path, cellSize, occupiedKeys, buildings,
           isInvalid: isInvalid);
@@ -1096,6 +1100,8 @@ class TransportBeltRenderer {
     double arrowProgress = 0.0,
     List<ConveyorItemSegment>? itemSegments,
     Map<String, Item>? allItems,
+    bool opaqueItems = false,
+    double? itemArrowProgress,
   }) {
     final segmentImages = <String, ui.Image?>{};
     if (itemSegments != null && allItems != null) {
@@ -1164,12 +1170,47 @@ class TransportBeltRenderer {
         incomingDirection: incomingDirection,
         arrowProgress: arrowProgress,
         drawBackground: true,
-        drawPointer: true,
-        itemImage: cellItemImage,
+        drawPointer: !(opaqueItems && cellItemImage != null),
+        itemImage: opaqueItems ? null : cellItemImage,
       );
       canvas.restore();
 
       canvas.restore();
+
+      if (opaqueItems && cellItemImage != null) {
+        canvas.save();
+        canvas.translate(cx, cy);
+        final clip = getLocalClipRect(
+          path: path,
+          index: i,
+          cellSize: cellSize,
+          buildings: buildings,
+          fullPathContext: fullPathContext,
+          contextStartIndex: contextStartIndex,
+          forcedDirection: forcedDirection,
+          incomingDirection: incomingDirection,
+        );
+        if (clip != null) {
+          canvas.clipRect(clip);
+        }
+        _drawSvgCellAtOrigin(
+          canvas,
+          path,
+          i,
+          cellSize,
+          isPreview: true,
+          isOccupied: isOccupied,
+          fullPathContext: fullPathContext,
+          contextStartIndex: contextStartIndex,
+          forcedDirection: forcedDirection,
+          incomingDirection: incomingDirection,
+          arrowProgress: itemArrowProgress ?? arrowProgress,
+          drawBackground: false,
+          drawPointer: false,
+          itemImage: cellItemImage,
+        );
+        canvas.restore();
+      }
     }
   }
 
@@ -1532,6 +1573,73 @@ class TransportBeltRenderer {
   }
 
   /// 渲染已确认的传送带段（非实时预览部分），使用传送带本色但稍带透明
+  static void _renderOpaquePreviewItems(
+    Canvas canvas,
+    List<Offset> path,
+    double cellSize,
+    List<PlacedBuilding> buildings,
+    List<ConveyorItemSegment> itemSegments,
+    Map<String, ui.Image?> segmentImages, {
+    List<Offset>? fullPathContext,
+    int contextStartIndex = 0,
+    String? forcedDirection,
+    String? incomingDirection,
+    double arrowProgress = 0.5,
+  }) {
+    for (int i = 0; i < path.length; i++) {
+      final actualIndex = fullPathContext != null ? contextStartIndex + i : i;
+      ui.Image? cellItemImage;
+      for (int j = itemSegments.length - 1; j >= 0; j--) {
+        final segment = itemSegments[j];
+        if (!segment.hasItems) continue;
+        if (actualIndex >= segment.drainCount &&
+            actualIndex < segment.fillCount) {
+          cellItemImage = segmentImages[segment.itemId];
+          break;
+        }
+      }
+      if (cellItemImage == null) continue;
+
+      final cell = path[i];
+      final cx = cell.dx * cellSize + cellSize / 2;
+      final cy = cell.dy * cellSize + cellSize / 2;
+
+      canvas.save();
+      canvas.translate(cx, cy);
+
+      final clip = getLocalClipRect(
+        path: path,
+        index: i,
+        cellSize: cellSize,
+        buildings: buildings,
+        fullPathContext: fullPathContext,
+        contextStartIndex: contextStartIndex,
+        forcedDirection: forcedDirection,
+        incomingDirection: incomingDirection,
+      );
+      if (clip != null) {
+        canvas.clipRect(clip);
+      }
+
+      _drawSvgCellAtOrigin(
+        canvas,
+        path,
+        i,
+        cellSize,
+        isPreview: true,
+        fullPathContext: fullPathContext,
+        contextStartIndex: contextStartIndex,
+        forcedDirection: forcedDirection,
+        incomingDirection: incomingDirection,
+        arrowProgress: arrowProgress,
+        drawBackground: false,
+        drawPointer: false,
+        itemImage: cellItemImage,
+      );
+      canvas.restore();
+    }
+  }
+
   static void renderConfirmedPreviewPath(
     Canvas canvas,
     List<Offset> path,
@@ -1544,6 +1652,8 @@ class TransportBeltRenderer {
     double arrowProgress = 0.0,
     List<ConveyorItemSegment>? itemSegments,
     Map<String, Item>? allItems,
+    bool opaqueItems = false,
+    double? itemArrowProgress,
   }) {
     if (path.isEmpty) return;
 
@@ -1569,9 +1679,24 @@ class TransportBeltRenderer {
           forcedDirection: forcedDirection,
           incomingDirection: incomingDirection,
           arrowProgress: arrowProgress,
-          itemSegments: itemSegments,
+          itemSegments: opaqueItems ? null : itemSegments,
           segmentImages: segmentImages);
       canvas.restore();
+      if (opaqueItems && itemSegments != null) {
+        _renderOpaquePreviewItems(
+          canvas,
+          path,
+          cellSize,
+          buildings,
+          itemSegments,
+          segmentImages,
+          fullPathContext: fullPathContext,
+          contextStartIndex: contextStartIndex,
+          forcedDirection: forcedDirection,
+          incomingDirection: incomingDirection,
+          arrowProgress: itemArrowProgress ?? arrowProgress,
+        );
+      }
     } else {
       for (int i = 0; i < path.length; i++) {
         final cell = path[i];

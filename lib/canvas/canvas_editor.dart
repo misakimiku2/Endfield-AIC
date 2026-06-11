@@ -104,7 +104,7 @@ class CanvasEditorState extends State<CanvasEditor>
   final Map<String, String> _prevBeltLastItemIds = {};
 
   // 传送带填充时钟：用于在 addListener 中检测 arrowProgress 跨零
-  double _prevArrowForTick = 0.0;
+  final Map<String, double> _prevBeltProgressForTick = {};
 
   // 重绘触发计数器，确保图片缓存清理后，即使其他属性不变，也能正常强制触发 CustomPainter 完成重绘
   int _repaintTrigger = 0;
@@ -145,20 +145,16 @@ class CanvasEditorState extends State<CanvasEditor>
       onProjectChanged: widget.onProjectChanged,
       onRebuildCache: _rebuildPortConnectionsCache,
       notifyListeners: () => setState(() {}),
+      currentPhase: () => _beltArrowController.value,
     );
     _beltArrowController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat();
     // 监听 animation value 变化，检测跨零（完成一格传输）来触发传送带填充时钟滴答
-    _prevArrowForTick = _beltArrowController.value;
     _beltArrowController.addListener(() {
-      final v = _beltArrowController.value;
+      _onBeltAnimationFrame(_beltArrowController.value);
       // 跨零检测：从 >0.5 跳到 <0.5（即从 ~1.0 重置到 ~0.0）
-      if (_prevArrowForTick > 0.5 && v < 0.5) {
-        _onBeltTick();
-      }
-      _prevArrowForTick = v;
     });
     _rebuildPortConnectionsCache();
     TransportBeltRenderer.init();
@@ -261,6 +257,7 @@ class CanvasEditorState extends State<CanvasEditor>
 
   /// 传送带物品填充时钟滴答：每次 arrowProgress 跨零时触发
   /// 驱动所有传送带的 itemFillCount / itemDrainCount 增减
+  // ignore: unused_element
   void _onBeltTick() {
     final buildings = _project.buildings;
 
@@ -316,6 +313,80 @@ class CanvasEditorState extends State<CanvasEditor>
       }
       setState(() {});
     }
+  }
+
+  void _onBeltAnimationFrame(double globalProgress) {
+    final activeIds = _project.conveyors.map((belt) => belt.id).toSet();
+    _prevBeltProgressForTick.removeWhere((id, _) => !activeIds.contains(id));
+
+    final buildings = _project.buildings;
+    var inventoryChanged = false;
+    var ticked = false;
+
+    for (final belt in _project.conveyors) {
+      final progress = belt.animationProgress(globalProgress);
+      final previous = _prevBeltProgressForTick[belt.id] ?? progress;
+      if (previous > 0.5 && progress < 0.5) {
+        ticked = true;
+        inventoryChanged =
+            _tickSingleBeltOnce(belt, buildings) || inventoryChanged;
+      }
+      _prevBeltProgressForTick[belt.id] = progress;
+    }
+
+    if (!mounted || !ticked) return;
+    if (inventoryChanged) {
+      widget.onProjectChanged(_project);
+    }
+    setState(() {});
+  }
+
+  bool _tickSingleBeltOnce(
+    ConveyorBelt belt,
+    List<PlacedBuilding> buildings,
+  ) {
+    if (belt.isBlocked) return false;
+    if (belt.path.isEmpty) return false;
+
+    final isDeadEnd =
+        !TransportBeltRenderer.isInputPort(belt.path.last, buildings);
+    final inputBuilding =
+        isDeadEnd ? null : _findInputBuildingAtCell(belt.path.last);
+    final pendingOutputItemId =
+        inputBuilding == null ? null : belt.downstreamItemId();
+    final inputBlocked = inputBuilding != null &&
+        pendingOutputItemId != null &&
+        !inputBuilding.canAcceptInputItem(pendingOutputItemId);
+    final terminalLimit = inputBlocked ? belt.path.length - 1 : null;
+    final sourceItemId = _getAvailableOutputItemIdForBeltStart(belt);
+    final isProducing = sourceItemId != null && sourceItemId.isNotEmpty;
+
+    var inventoryChanged = false;
+    belt.ensureItemSegmentsFromLegacy();
+    if (isProducing) {
+      final pushed =
+          belt.pushSourceItem(sourceItemId, terminalLimit: terminalLimit);
+      if (pushed) {
+        inventoryChanged = _consumeOutputItemForBeltStart(belt, sourceItemId) ||
+            inventoryChanged;
+      }
+    }
+    belt.advanceItemSegments(
+      isDeadEnd: isDeadEnd || inputBuilding != null || inputBlocked,
+      activeSourceItemId: isProducing ? sourceItemId : null,
+      terminalLimit: terminalLimit,
+    );
+    if (inputBuilding != null) {
+      inventoryChanged = _transferBeltOutputToBuilding(belt, inputBuilding) ||
+          inventoryChanged;
+      _freezeReadyOutputSegments(
+        belt,
+        limit: terminalLimit ?? belt.path.length,
+      );
+    }
+    _prevBeltItemIds[belt.id] = belt.itemId;
+    _prevBeltLastItemIds[belt.id] = belt.lastItemId;
+    return inventoryChanged;
   }
 
   PlacedBuilding? _findInputBuildingAtCell(Offset cell) {
@@ -745,6 +816,7 @@ class CanvasEditorState extends State<CanvasEditor>
           isBlocked: belt.isBlocked,
           incomingDirection: belt.incomingDirection,
           forcedDirection: beforeForcedDir,
+          phaseOffset: belt.phaseOffset,
           itemFillCount: math.min(belt.itemFillCount, beforePath.length),
           itemDrainCount: math.min(belt.itemDrainCount, beforePath.length),
           lastItemFillCount:
@@ -786,6 +858,7 @@ class CanvasEditorState extends State<CanvasEditor>
           isBlocked: belt.isBlocked,
           forcedDirection: forcedDir,
           incomingDirection: incomingDir,
+          phaseOffset: belt.phaseOffset,
           itemFillCount: math.max(0, belt.itemFillCount - (cellIndex + 1)),
           itemDrainCount: math.max(0, belt.itemDrainCount - (cellIndex + 1)),
           lastItemFillCount: belt.lastItemFillCount > 0
@@ -1035,6 +1108,7 @@ class CanvasEditorState extends State<CanvasEditor>
               isBlocked: belt.isBlocked,
               forcedDirection: forcedDir,
               incomingDirection: incomingDir,
+              phaseOffset: belt.phaseOffset,
               lastItemFillCount: segLastFillCount,
               lastItemDrainCount: segLastDrainCount,
               deadEndFreezeProgress: segDeadEndFreezeProgress,
@@ -1052,6 +1126,7 @@ class CanvasEditorState extends State<CanvasEditor>
               isBlocked: belt.isBlocked,
               forcedDirection: forcedDir,
               incomingDirection: incomingDir,
+              phaseOffset: belt.phaseOffset,
               lastItemFillCount: segLastFillCount,
               lastItemDrainCount: segLastDrainCount,
               deadEndFreezeProgress: segDeadEndFreezeProgress,
@@ -1117,6 +1192,7 @@ class CanvasEditorState extends State<CanvasEditor>
             isBlocked: belt.isBlocked,
             forcedDirection: forcedDir,
             incomingDirection: incomingDir,
+            phaseOffset: belt.phaseOffset,
             lastItemFillCount: segLastFillCount,
             lastItemDrainCount: segLastDrainCount,
             deadEndFreezeProgress: segDeadEndFreezeProgress,
@@ -1134,6 +1210,7 @@ class CanvasEditorState extends State<CanvasEditor>
             isBlocked: belt.isBlocked,
             forcedDirection: forcedDir,
             incomingDirection: incomingDir,
+            phaseOffset: belt.phaseOffset,
             lastItemFillCount: segLastFillCount,
             lastItemDrainCount: segLastDrainCount,
             deadEndFreezeProgress: segDeadEndFreezeProgress,
@@ -1562,7 +1639,12 @@ class _EditorPainter extends CustomPainter {
     final hasConfirmedForkHandoff = !conveyorHasCommittedPath &&
         !conveyorPathInvalid &&
         conveyorForkCell != null &&
-        conveyorConfirmedPath.any((cell) => _sameCell(cell, conveyorForkCell!));
+        (conveyorConfirmedPath
+                .any((cell) => _sameCell(cell, conveyorForkCell!)) ||
+            (conveyorPreviewPath?.any(
+                  (cell) => _sameCell(cell, conveyorForkCell!),
+                ) ??
+                false));
     final Offset? startCell = hasConfirmedForkHandoff ? conveyorForkCell : null;
 
     // 构建 fullPathContext（已确认段 + 实时段的完整路径）
@@ -1610,11 +1692,21 @@ class _EditorPainter extends CustomPainter {
       ));
     }
 
+    final livePreviewRenderPath = conveyorPreviewPath;
+    final livePreviewContextStartIndex = previewStartIndex;
+    final hiddenPreviewTerminal =
+        conveyorPreviewPath != null && conveyorPreviewPath!.length > 1
+            ? conveyorPreviewPath!.first
+            : null;
+
     // 调试：视口与裁剪统计（有裁剪时才输出，且每2秒最多一次）
     for (final belt in project.conveyors) {
       // 动态裁剪：如果当前正在绘制且起点在旧传送带上，裁剪分叉点之前的部分
       List<Offset> renderPath = belt.path;
       int forkIdx = -1;
+      final hidesTerminalCell = hiddenPreviewTerminal != null &&
+          belt.path.isNotEmpty &&
+          _sameCell(belt.path.last, hiddenPreviewTerminal);
       if (startCell != null) {
         for (int i = 0; i < belt.path.length; i++) {
           if (belt.path[i].dx == startCell.dx &&
@@ -1635,7 +1727,13 @@ class _EditorPainter extends CustomPainter {
           // 没有分叉：继续使用 renderPath
         }
       }
+      if (hidesTerminalCell) {
+        renderPath = belt.path.sublist(0, belt.path.length - 1);
+      }
 
+      if (renderPath.isEmpty) {
+        continue;
+      }
       final visible = _isPathVisible(renderPath, viewport);
       if (!visible) {
         continue;
@@ -1655,7 +1753,20 @@ class _EditorPainter extends CustomPainter {
         String? forcedDir;
         // 下游首格的入方向：从分叉点指向下游首格
         String? incomingDir;
-        if (forkIdx >= 0 && forkIdx + 1 < belt.path.length) {
+        if (hidesTerminalCell && renderPath.isNotEmpty) {
+          final dx = belt.path.last.dx - renderPath.last.dx;
+          final dy = belt.path.last.dy - renderPath.last.dy;
+          if (dx > 0) {
+            forcedDir = 'right';
+          } else if (dx < 0) {
+            forcedDir = 'left';
+          } else if (dy > 0) {
+            forcedDir = 'down';
+          } else if (dy < 0) {
+            forcedDir = 'up';
+          }
+          incomingDir = belt.incomingDirection;
+        } else if (forkIdx >= 0 && forkIdx + 1 < belt.path.length) {
           final dx = belt.path[forkIdx + 1].dx - belt.path[forkIdx].dx;
           final dy = belt.path[forkIdx + 1].dy - belt.path[forkIdx].dy;
           if (dx > 0) {
@@ -1677,48 +1788,60 @@ class _EditorPainter extends CustomPainter {
           path: renderPath,
           itemId: belt.itemId,
           lastItemId: belt.lastItemId,
-          itemSegments: hasConfirmedForkHandoff && forkIdx >= 0
-              ? <ConveyorItemSegment>[]
+          itemSegments: hidesTerminalCell
+              ? belt.clippedItemSegments(0, renderPath.length)
+              : hasConfirmedForkHandoff && forkIdx >= 0
+                  ? <ConveyorItemSegment>[]
+                  : forkIdx >= 0
+                      ? belt.clippedItemSegments(forkIdx + 1, belt.path.length)
+                      : belt.shiftedItemSegments(0),
+          itemFillCount: hidesTerminalCell
+              ? math.min(belt.itemFillCount, renderPath.length)
               : forkIdx >= 0
-                  ? belt.clippedItemSegments(forkIdx + 1, belt.path.length)
-                  : belt.shiftedItemSegments(0),
-          itemFillCount: forkIdx >= 0
-              ? hasConfirmedForkHandoff
-                  ? 0
-                  : math.max(0, belt.itemFillCount - (forkIdx + 1))
-              : belt.itemFillCount,
-          itemDrainCount: forkIdx >= 0
-              ? hasConfirmedForkHandoff
-                  ? 0
-                  : math.max(0, belt.itemDrainCount - (forkIdx + 1))
-              : belt.itemDrainCount,
+                  ? hasConfirmedForkHandoff
+                      ? 0
+                      : math.max(0, belt.itemFillCount - (forkIdx + 1))
+                  : belt.itemFillCount,
+          itemDrainCount: hidesTerminalCell
+              ? math.min(belt.itemDrainCount, renderPath.length)
+              : forkIdx >= 0
+                  ? hasConfirmedForkHandoff
+                      ? 0
+                      : math.max(0, belt.itemDrainCount - (forkIdx + 1))
+                  : belt.itemDrainCount,
           isBlocked: belt.isBlocked,
           forcedDirection: forcedDir,
           incomingDirection: incomingDir,
-          lastItemFillCount: belt.lastItemFillCount > 0 && forkIdx >= 0
-              ? hasConfirmedForkHandoff
-                  ? 0
-                  : math.max(0, belt.lastItemFillCount - (forkIdx + 1))
-              : belt.lastItemFillCount,
-          lastItemDrainCount: belt.lastItemFillCount > 0 && forkIdx >= 0
-              ? hasConfirmedForkHandoff
-                  ? 0
-                  : math.max(0, belt.lastItemDrainCount - (forkIdx + 1))
-              : belt.lastItemDrainCount,
+          phaseOffset: belt.phaseOffset,
+          lastItemFillCount: hidesTerminalCell
+              ? math.min(belt.lastItemFillCount, renderPath.length)
+              : belt.lastItemFillCount > 0 && forkIdx >= 0
+                  ? hasConfirmedForkHandoff
+                      ? 0
+                      : math.max(0, belt.lastItemFillCount - (forkIdx + 1))
+                  : belt.lastItemFillCount,
+          lastItemDrainCount: hidesTerminalCell
+              ? math.min(belt.lastItemDrainCount, renderPath.length)
+              : belt.lastItemFillCount > 0 && forkIdx >= 0
+                  ? hasConfirmedForkHandoff
+                      ? 0
+                      : math.max(0, belt.lastItemDrainCount - (forkIdx + 1))
+                  : belt.lastItemDrainCount,
           deadEndFreezeProgress: belt.deadEndFreezeProgress,
           lastItemFreezeProgress: belt.lastItemFreezeProgress,
         );
         TransportBeltRenderer.renderConveyorPath(
             canvas, clippedBelt, item, cellSize, project.buildings,
             detailLevel: detailLevel,
-            arrowProgress: beltArrowController.value,
+            arrowProgress:
+                clippedBelt.animationProgress(beltArrowController.value),
             lastItem: lastItem,
             allItems: dataLoader.items);
       } else {
         TransportBeltRenderer.renderConveyorPath(
             canvas, belt, item, cellSize, project.buildings,
             detailLevel: detailLevel,
-            arrowProgress: beltArrowController.value,
+            arrowProgress: belt.animationProgress(beltArrowController.value),
             lastItem: lastItem,
             allItems: dataLoader.items);
       }
@@ -1730,10 +1853,10 @@ class _EditorPainter extends CustomPainter {
       if (!conveyorHasCommittedPath && conveyorConfirmedPath.isNotEmpty) {
         previewSet.addAll(conveyorConfirmedPath);
       }
-      if (conveyorPreviewPath != null &&
-          conveyorPreviewPath!.isNotEmpty &&
+      if (livePreviewRenderPath != null &&
+          livePreviewRenderPath.isNotEmpty &&
           (!conveyorHasCommittedPath || conveyorPreviewPath!.length > 1)) {
-        previewSet.addAll(conveyorPreviewPath!);
+        previewSet.addAll(livePreviewRenderPath);
       }
     }
 
@@ -1750,47 +1873,53 @@ class _EditorPainter extends CustomPainter {
         arrowProgress: beltArrowController.value,
         itemSegments: previewItemSegments,
         allItems: dataLoader.items,
+        opaqueItems: hasConfirmedForkHandoff,
+        itemArrowProgress: 0.5,
       );
     }
 
     // 实时段根据有效/无效状态分别渲染 - (放到建筑下方渲染)
     if (conveyorPathInvalid) {
       // 无效状态：仅实时段标红，但是同样传入 fullPathContext 使得转弯样式能与已确认段进行平滑衔接
-      if (conveyorPreviewPath != null &&
-          conveyorPreviewPath!.isNotEmpty &&
+      if (livePreviewRenderPath != null &&
+          livePreviewRenderPath.isNotEmpty &&
           (!conveyorHasCommittedPath || conveyorPreviewPath!.length > 1)) {
         TransportBeltRenderer.renderPreviewPath(
           canvas,
-          conveyorPreviewPath!,
+          livePreviewRenderPath,
           cellSize,
           <String>{},
           project.buildings,
           isInvalid: true,
           fullPathContext: fullPathContext,
-          contextStartIndex: previewStartIndex,
+          contextStartIndex: livePreviewContextStartIndex,
           incomingDirection: conveyorIncomingDirection,
           arrowProgress: beltArrowController.value,
           itemSegments: previewItemSegments,
           allItems: dataLoader.items,
+          opaqueItems: hasConfirmedForkHandoff,
+          itemArrowProgress: 0.5,
         );
       }
     } else {
       // 有效状态：实时段为蓝色预览
-      if (conveyorPreviewPath != null &&
-          conveyorPreviewPath!.isNotEmpty &&
+      if (livePreviewRenderPath != null &&
+          livePreviewRenderPath.isNotEmpty &&
           (!conveyorHasCommittedPath || conveyorPreviewPath!.length > 1)) {
         TransportBeltRenderer.renderPreviewPath(
           canvas,
-          conveyorPreviewPath!,
+          livePreviewRenderPath,
           cellSize,
           <String>{},
           project.buildings,
           fullPathContext: fullPathContext,
-          contextStartIndex: previewStartIndex,
+          contextStartIndex: livePreviewContextStartIndex,
           incomingDirection: conveyorIncomingDirection,
           arrowProgress: beltArrowController.value,
           itemSegments: previewItemSegments,
           allItems: dataLoader.items,
+          opaqueItems: hasConfirmedForkHandoff,
+          itemArrowProgress: 0.5,
         );
       } else if (conveyorMode &&
           mouseGridPos != null &&

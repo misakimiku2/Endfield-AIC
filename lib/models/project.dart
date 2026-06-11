@@ -353,6 +353,7 @@ class ConveyorBelt {
   bool isBlocked;
   final String? forcedDirection;
   final String? incomingDirection;
+  double phaseOffset;
 
   // 残留物品（源断开后的旧物品，正在排空中）
   int lastItemFillCount;
@@ -375,6 +376,7 @@ class ConveyorBelt {
     this.isBlocked = false,
     this.forcedDirection,
     this.incomingDirection,
+    this.phaseOffset = 0.0,
     this.lastItemFillCount = 0,
     this.lastItemDrainCount = 0,
     this.deadEndFreezeProgress,
@@ -400,6 +402,11 @@ class ConveyorBelt {
       : Offset.zero;
 
   double get length => path.length > 1 ? (path.length - 1) * _cellSize : 0.0;
+
+  double animationProgress(double globalProgress) {
+    final progress = (globalProgress - phaseOffset) % 1.0;
+    return progress < 0 ? progress + 1.0 : progress;
+  }
 
   bool get hasStoppedLastItems {
     ensureItemSegmentsFromLegacy();

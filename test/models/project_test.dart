@@ -513,6 +513,7 @@ void main() {
               Offset(0, 0),
             ],
             itemId: '',
+            phaseOffset: 0.42,
             itemSegments: [
               ConveyorItemSegment(
                 itemId: 'item_a',
@@ -529,6 +530,7 @@ void main() {
         onProjectChanged: (_) {},
         onRebuildCache: () {},
         notifyListeners: () {},
+        currentPhase: () => 0.87,
       );
 
       expect(controller.handleTap(const Offset(0, 2)), true);
@@ -552,6 +554,7 @@ void main() {
       expect(newBelt.itemSegments.single.itemId, 'item_a');
       expect(newBelt.itemSegments.single.fillCount, 2);
       expect(newBelt.itemSegments.single.drainCount, 0);
+      expect(newBelt.phaseOffset, 0.42);
       expect(newBelt.pushSourceItem('item_a'), true);
       expect(newBelt.itemSegments.single.fillCount, 3);
 
@@ -561,6 +564,7 @@ void main() {
       expect(downstream.itemSegments.single.itemId, 'item_a');
       expect(downstream.itemSegments.single.fillCount, 1);
       expect(downstream.itemSegments.single.drainCount, 0);
+      expect(downstream.phaseOffset, 0.42);
     });
   });
 }

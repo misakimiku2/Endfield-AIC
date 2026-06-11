@@ -162,6 +162,7 @@ class _EditorPageState extends State<EditorPage> {
                     .map((p) => {'x': p.dx.toInt(), 'y': p.dy.toInt()})
                     .toList(),
                 'item_id': c.itemId,
+                'phase_offset': c.phaseOffset,
                 'item_segments': c.itemSegments
                     .map((s) => {
                           'item_id': s.itemId,
@@ -306,6 +307,7 @@ class _EditorPageState extends State<EditorPage> {
             id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${newConveyors.length}',
             path: path,
             itemId: cd['item_id'] as String? ?? '',
+            phaseOffset: (cd['phase_offset'] as num?)?.toDouble() ?? 0.0,
             itemSegments: ((cd['item_segments'] as List?) ?? const [])
                 .map((s) => s as Map<String, dynamic>)
                 .map((s) => ConveyorItemSegment(

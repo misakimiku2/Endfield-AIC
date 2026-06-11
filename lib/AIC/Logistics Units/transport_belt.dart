@@ -8,12 +8,16 @@ class TransportBeltController {
   final void Function(ProjectState) onProjectChanged;
   final void Function() onRebuildCache;
   final void Function() notifyListeners;
+  final double Function() currentPhase;
+
+  static double _defaultCurrentPhase() => 0.0;
 
   TransportBeltController({
     required this.project,
     required this.onProjectChanged,
     required this.onRebuildCache,
     required this.notifyListeners,
+    this.currentPhase = _defaultCurrentPhase,
   });
 
   // === 状态 ===
@@ -294,6 +298,7 @@ class TransportBeltController {
       int newLastItemDrainCount = 0;
       double? newDeadEndFreezeProgress;
       double? newLastItemFreezeProgress;
+      double newPhaseOffset = currentPhase();
       final newItemSegments = <ConveyorItemSegment>[];
       final committedSourceBelt = _committedBeltId == null
           ? null
@@ -313,6 +318,7 @@ class TransportBeltController {
         newItemId = committedSourceBelt.itemId;
         newItemFillCount = committedSourceBelt.itemFillCount;
         newItemDrainCount = committedSourceBelt.itemDrainCount;
+        newPhaseOffset = committedSourceBelt.phaseOffset;
         if (committedSourceBelt.lastItemFillCount > 0) {
           newLastItemId = committedSourceBelt.lastItemId;
           newLastItemFillCount = committedSourceBelt.lastItemFillCount;
@@ -325,6 +331,7 @@ class TransportBeltController {
         newItemId = sourceBelt.itemId;
         newItemFillCount = sourceBelt.itemFillCount;
         newItemDrainCount = sourceBelt.itemDrainCount;
+        newPhaseOffset = sourceBelt.phaseOffset;
         // 源传送带的残留物品也继承
         if (sourceBelt.lastItemFillCount > 0) {
           newLastItemId = sourceBelt.lastItemId;
@@ -344,6 +351,7 @@ class TransportBeltController {
             forkSourceBelt.itemFillCount.clamp(0, forkSourceIndex + 1).toInt();
         newItemDrainCount =
             forkSourceBelt.itemDrainCount.clamp(0, forkSourceIndex + 1).toInt();
+        newPhaseOffset = forkSourceBelt.phaseOffset;
         if (forkSourceBelt.lastItemFillCount > 0) {
           newLastItemId = forkSourceBelt.lastItemId;
           newLastItemFillCount = forkSourceBelt.lastItemFillCount
@@ -394,6 +402,7 @@ class TransportBeltController {
         itemSegments: newItemSegments,
         isBlocked: false,
         incomingDirection: newBeltIncomingDir,
+        phaseOffset: newPhaseOffset,
         itemFillCount: newItemFillCount,
         itemDrainCount: newItemDrainCount,
         lastItemFillCount: newLastItemFillCount,
@@ -479,6 +488,7 @@ class TransportBeltController {
                 isBlocked: oldBelt.isBlocked,
                 forcedDirection: forcedDir,
                 incomingDirection: incomingDir,
+                phaseOffset: oldBelt.phaseOffset,
                 itemFillCount:
                     _clampDownstreamCount(oldBelt.itemFillCount, forkIdx + 1),
                 itemDrainCount:
