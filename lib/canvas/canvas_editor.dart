@@ -159,6 +159,7 @@ class CanvasEditorState extends State<CanvasEditor>
     });
     _rebuildPortConnectionsCache();
     TransportBeltRenderer.init();
+    ConveyorCreateModeHudPainter.init(onReady: _forceRepaint);
     TransportBeltRenderer.onItemImageReady = _forceRepaint;
     RefiningUnitRenderer.init(onReady: () {
       _forceRepaint();
@@ -2211,10 +2212,13 @@ class _EditorPainter extends CustomPainter {
     }
 
     if (conveyorMode) {
+      final hudPhase =
+          (beltArrowController.lastElapsedDuration?.inMicroseconds ?? 0) /
+              beltArrowController.duration!.inMicroseconds;
       ConveyorCreateModeHudPainter.paintHud(
         canvas,
         size,
-        beltArrowController.value,
+        hudPhase,
       );
     }
   }
