@@ -188,6 +188,14 @@ class TransportBeltController {
 
     // 点击输入端口时自动完成创建
     if (isInputPort) {
+      // 计算预期的完整路径
+      final prospectivePath = fullPath.isEmpty
+          ? List<Offset>.from(segment)
+          : [...fullPath, ...segment.sublist(1)];
+      // 设备输入/输出端口之间必须预留至少一格给传送带显示
+      if (!_hasIndependentBeltCell(prospectivePath)) {
+        return false;
+      }
       if (fullPath.isEmpty) {
         fullPath.addAll(segment);
       } else {
@@ -824,6 +832,17 @@ class TransportBeltController {
     return directions[(idx + rotation) % 4];
   }
 
+  /// 检查路径中是否至少有一个不在任何设备内部的格子（独立传送带格子）
+  /// 设备输入/输出端口之间必须预留至少一格给传送带显示
+  bool _hasIndependentBeltCell(List<Offset> path) {
+    for (final cell in path) {
+      if (!_isCellInBuilding(cell)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// 检查 gridPos 是否为设备的输入端口格子
   bool _isCellDeviceInputPort(Offset gridPos) {
     final portInfo = _findPortAtCell(gridPos);
@@ -912,6 +931,17 @@ class TransportBeltController {
       } else {
         pathInvalid = false;
         previewContextExtension = null;
+      }
+
+      // 设备输入/输出端口之间必须预留至少一格给传送带显示
+      if (!pathInvalid && isInputPort) {
+        final prospectivePath = <Offset>[
+          ...confirmedPath,
+          ...previewPath!,
+        ];
+        if (!_hasIndependentBeltCell(prospectivePath)) {
+          pathInvalid = true;
+        }
       }
     }
   }

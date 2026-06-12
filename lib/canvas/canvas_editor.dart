@@ -12,6 +12,7 @@ import '../AIC/Production I/refining_unit.dart';
 import '../AIC/Depot Access/depot_access.dart';
 import 'grid_painter.dart';
 import 'building_renderer.dart';
+import 'conveyor_create_mode_hud.dart';
 import '../AIC/Logistics Units/transport_belt.dart';
 import '../AIC/Logistics Units/transport_belt_renderer.dart';
 import '../widgets/conveyor_belt_dialog.dart';
@@ -2206,6 +2207,14 @@ class _EditorPainter extends CustomPainter {
         sweepAngle,
         false,
         progressPaint,
+      );
+    }
+
+    if (conveyorMode) {
+      ConveyorCreateModeHudPainter.paintHud(
+        canvas,
+        size,
+        beltArrowController.value,
       );
     }
   }

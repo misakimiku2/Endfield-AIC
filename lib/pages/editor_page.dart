@@ -458,8 +458,7 @@ class _EditorPageState extends State<EditorPage> {
                   ),
                   Positioned(
                     right: 0,
-                    top: 0,
-                    bottom: 60,
+                    bottom: 0,
                     child: FloatingActionButtons(
                       conveyorMode: _conveyorMode,
                       onConveyorToggle: _toggleConveyorMode,
