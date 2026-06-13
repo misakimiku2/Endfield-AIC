@@ -30,6 +30,10 @@ class _EquipmentDockState extends State<EquipmentDock>
     'refining_unit_3x3',
     'depot_loader_3x1',
     'depot_unloader_3x1',
+    'belt_bridge_1x1',
+    'splitter_1x1',
+    'converger_1x1',
+    'item_control_port_1x1',
   ];
 
   @override
@@ -196,22 +200,21 @@ class _DockBarBody extends StatelessWidget {
               final building =
                   index < buildings.length ? buildings[index] : null;
               final keyLabel = index == 9 ? '0' : '${index + 1}';
-              final isSelected = building != null &&
-                  selectedBuilding?.id == building.id;
+              final isSelected =
+                  building != null && selectedBuilding?.id == building.id;
               return Flexible(
                 flex: 1,
                 child: _DeviceSlot(
                   keyLabel: keyLabel,
                   building: building,
                   isSelected: isSelected,
-                  onTap: () => onBuildingSelected(
-                      isSelected ? null : building),
+                  onTap: () => onBuildingSelected(isSelected ? null : building),
                 ),
               );
             }),
           ),
         ),
-               const SizedBox(width: gap),
+        const SizedBox(width: gap),
         // 右半圆：纯装饰用的对称Cap
         const _DecorativeCap(width: capWidth),
       ],
@@ -397,9 +400,7 @@ class _DeviceSlot extends StatelessWidget {
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: hasBuilding
-                  ? (isSelected
-                      ? building!.color
-                      : const Color(0xFF3A3A3A))
+                  ? (isSelected ? building!.color : const Color(0xFF3A3A3A))
                   : const Color(0xFF252525),
               width: isSelected ? 1.8 : 1.0,
             ),
@@ -439,9 +440,8 @@ class _DeviceSlot extends StatelessWidget {
                               ? building!.color
                               : const Color(0xFFCCCCCC),
                           fontSize: 13,
-                          fontWeight: isSelected
-                              ? FontWeight.w600
-                              : FontWeight.w500,
+                          fontWeight:
+                              isSelected ? FontWeight.w600 : FontWeight.w500,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),

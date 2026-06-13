@@ -25,8 +25,7 @@ class EditorPage extends StatefulWidget {
   State<EditorPage> createState() => _EditorPageState();
 }
 
-class _EditorPageState extends State<EditorPage>
-    with TickerProviderStateMixin {
+class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
   late ProjectState _project;
   Building? _placingBuilding;
   PlacedBuilding? _selectedBuilding;
@@ -42,6 +41,10 @@ class _EditorPageState extends State<EditorPage>
     'refining_unit_3x3',
     'depot_loader_3x1',
     'depot_unloader_3x1',
+    'belt_bridge_1x1',
+    'splitter_1x1',
+    'converger_1x1',
+    'item_control_port_1x1',
   ];
 
   @override

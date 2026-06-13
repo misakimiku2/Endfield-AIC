@@ -10,6 +10,7 @@ import '../models/project.dart';
 import '../data/data_loader.dart';
 import '../AIC/Production I/refining_unit.dart';
 import '../AIC/Depot Access/depot_access.dart';
+import '../AIC/Logistics Units/logistics_unit_renderer.dart';
 import 'grid_painter.dart';
 import 'building_renderer.dart';
 import 'conveyor_create_mode_hud.dart';
@@ -149,6 +150,7 @@ class CanvasEditorState extends State<CanvasEditor>
       onRebuildCache: _rebuildPortConnectionsCache,
       notifyListeners: () => setState(() {}),
       currentPhase: () => _beltArrowController.value,
+      getBuilding: widget.dataLoader.getBuilding,
     );
     _beltArrowController = AnimationController(
       vsync: this,
@@ -167,6 +169,9 @@ class CanvasEditorState extends State<CanvasEditor>
       _forceRepaint();
     });
     DepotAccessRenderer.init(onReady: () {
+      _forceRepaint();
+    });
+    LogisticsUnitRenderer.init(onReady: () {
       _forceRepaint();
     });
   }
@@ -279,7 +284,11 @@ class CanvasEditorState extends State<CanvasEditor>
           inputBuilding == null ? null : belt.downstreamItemId();
       final inputBlocked = inputBuilding != null &&
           pendingOutputItemId != null &&
-          !inputBuilding.canAcceptInputItem(pendingOutputItemId);
+          !_canBeltOutputEnterBuilding(
+            belt,
+            inputBuilding,
+            pendingOutputItemId,
+          );
       final terminalLimit = inputBlocked ? belt.path.length - 1 : null;
       final sourceItemId = _getAvailableOutputItemIdForBeltStart(belt);
       final isProducing = sourceItemId != null && sourceItemId.isNotEmpty;
@@ -360,7 +369,11 @@ class CanvasEditorState extends State<CanvasEditor>
         inputBuilding == null ? null : belt.downstreamItemId();
     final inputBlocked = inputBuilding != null &&
         pendingOutputItemId != null &&
-        !inputBuilding.canAcceptInputItem(pendingOutputItemId);
+        !_canBeltOutputEnterBuilding(
+          belt,
+          inputBuilding,
+          pendingOutputItemId,
+        );
     final terminalLimit = inputBlocked ? belt.path.length - 1 : null;
     final sourceItemId = _getAvailableOutputItemIdForBeltStart(belt);
     final isProducing = sourceItemId != null && sourceItemId.isNotEmpty;
@@ -393,6 +406,46 @@ class CanvasEditorState extends State<CanvasEditor>
     return inventoryChanged;
   }
 
+  bool _canBeltOutputEnterBuilding(
+    ConveyorBelt belt,
+    PlacedBuilding building,
+    String itemId,
+  ) {
+    if (building.isBeltBridge) {
+      final outputDirection = _beltArrivalDirection(belt);
+      return outputDirection != null &&
+          building.canAcceptBridgeInputItem(itemId, outputDirection);
+    }
+    return building.canAcceptInputItem(itemId);
+  }
+
+  String? _beltExitDirection(ConveyorBelt belt) {
+    if (belt.path.length >= 2) {
+      return _directionBetween(belt.path.first, belt.path[1]);
+    }
+    return belt.forcedDirection;
+  }
+
+  String? _beltArrivalDirection(ConveyorBelt belt) {
+    if (belt.path.length >= 2) {
+      return _directionBetween(
+        belt.path[belt.path.length - 2],
+        belt.path.last,
+      );
+    }
+    return belt.incomingDirection;
+  }
+
+  String? _directionBetween(Offset from, Offset to) {
+    final dx = to.dx.round() - from.dx.round();
+    final dy = to.dy.round() - from.dy.round();
+    if (dx == 1 && dy == 0) return 'right';
+    if (dx == -1 && dy == 0) return 'left';
+    if (dx == 0 && dy == 1) return 'down';
+    if (dx == 0 && dy == -1) return 'up';
+    return null;
+  }
+
   PlacedBuilding? _findInputBuildingAtCell(Offset cell) {
     final gx = cell.dx.round();
     final gy = cell.dy.round();
@@ -421,6 +474,15 @@ class CanvasEditorState extends State<CanvasEditor>
     if (building.building.maxInputs <= 0) return false;
     final itemId = belt.outputReadyItemId();
     if (itemId == null) return false;
+    if (building.isBeltBridge) {
+      final outputDirection = _beltArrivalDirection(belt);
+      if (outputDirection == null) return false;
+      if (!building.acceptBridgeInputItem(itemId, outputDirection)) {
+        return false;
+      }
+      belt.removeOutputReadyItem();
+      return true;
+    }
     if (!building.acceptInputItem(itemId)) return false;
     // 自动匹配配方：当建筑没有激活配方时，根据输入物品自动选择匹配的配方
     if (building.activeRecipeId == null) {
@@ -462,6 +524,17 @@ class CanvasEditorState extends State<CanvasEditor>
       final outputIndex = _findOutputPortIndexAtCell(pb, start);
       if (outputIndex == null) continue;
 
+      if (pb.isBeltBridge) {
+        final outputDirection = _beltExitDirection(belt);
+        return outputDirection == null
+            ? null
+            : pb.bridgeItemIdForOutputDirection(outputDirection);
+      }
+
+      if (LogisticsUnitRenderer.isLogisticsUnit(pb.building.id)) {
+        return pb.inputItemCount > 0 ? pb.inputItemId : null;
+      }
+
       if (pb.building.id == DepotUnloaderConfig.id) {
         final itemId = pb.depotOutputItemId;
         return itemId == null || itemId.isEmpty ? null : itemId;
@@ -486,6 +559,14 @@ class CanvasEditorState extends State<CanvasEditor>
     for (final pb in _project.buildings) {
       final outputIndex = _findOutputPortIndexAtCell(pb, start);
       if (outputIndex == null) continue;
+      if (pb.isBeltBridge) {
+        final outputDirection = _beltExitDirection(belt);
+        return outputDirection != null &&
+            pb.consumeBridgeOutputItem(itemId, outputDirection);
+      }
+      if (LogisticsUnitRenderer.isLogisticsUnit(pb.building.id)) {
+        return pb.consumeInputItems(itemId, 1);
+      }
       if (pb.building.id == DepotUnloaderConfig.id) return false;
       return pb.consumeOutputItem(itemId, 1);
     }
@@ -2007,8 +2088,11 @@ class _EditorPainter extends CustomPainter {
         ..sort((a, b) => a.key.compareTo(b.key));
       final portsHash =
           sortedEntries.map((e) => '${e.key}:${e.value}').join(',');
+      final assetVersion = LogisticsUnitRenderer.isLogisticsUnit(pb.building.id)
+          ? LogisticsUnitRenderer.cacheVersion
+          : 0;
       final cacheKey =
-          '${pb.building.id}_${pb.rotation}_${detailLevel}_$portsHash';
+          '${pb.building.id}_${pb.rotation}_${detailLevel}_${assetVersion}_$portsHash';
 
       final x = pb.gridX * cellSize;
       final y = pb.gridY * cellSize;
@@ -2099,6 +2183,18 @@ class _EditorPainter extends CustomPainter {
           isBlocked: isBlocked,
           canvasRotation: displayAngle,
         );
+      } else if (LogisticsUnitRenderer.isLogisticsUnit(placingBuilding!.id)) {
+        LogisticsUnitRenderer.renderPlaceholder(
+          canvas,
+          placingBuilding!,
+          cx,
+          cy,
+          cellSize,
+          0.6,
+          rotation: placingRotation,
+          isBlocked: isBlocked,
+          canvasRotation: displayAngle,
+        );
       } else {
         BuildingRenderer.renderPlaceholder(
           canvas,
@@ -2140,6 +2236,18 @@ class _EditorPainter extends CustomPainter {
       } else if (mb.building.id == DepotLoaderConfig.id ||
           mb.building.id == DepotUnloaderConfig.id) {
         DepotAccessRenderer.renderPlaceholder(
+          canvas,
+          mb.building,
+          cx,
+          cy,
+          cellSize,
+          0.6,
+          rotation: movingRotation,
+          isBlocked: isBlocked,
+          canvasRotation: displayAngle,
+        );
+      } else if (LogisticsUnitRenderer.isLogisticsUnit(mb.building.id)) {
+        LogisticsUnitRenderer.renderPlaceholder(
           canvas,
           mb.building,
           cx,
@@ -2565,6 +2673,20 @@ class _EditorPainter extends CustomPainter {
     } else if (pb.building.id == DepotLoaderConfig.id ||
         pb.building.id == DepotUnloaderConfig.id) {
       DepotAccessRenderer.render(
+        canvas,
+        pb.building,
+        0,
+        0,
+        cellSize,
+        0,
+        activeRecipe: recipe,
+        isBlocked: pb.isBlocked,
+        productionProgress: 0,
+        portConnections: portConnections,
+        detailLevel: detailLevel,
+      );
+    } else if (LogisticsUnitRenderer.isLogisticsUnit(pb.building.id)) {
+      LogisticsUnitRenderer.render(
         canvas,
         pb.building,
         0,

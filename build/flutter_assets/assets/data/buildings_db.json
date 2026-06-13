@@ -65,6 +65,100 @@
           {"relative_x": 0.5, "relative_y": 0.0, "direction": "up", "port_type": "solid"}
         ]
       }
+    },
+    "belt_bridge_1x1": {
+      "id": "belt_bridge_1x1",
+      "name": "物流桥",
+      "grid_width": 1,
+      "grid_height": 1,
+      "color": "#4F8BFF",
+      "category": "logistics_units",
+      "max_inputs": 4,
+      "max_outputs": 4,
+      "power_consumption": 0.0,
+      "svg_asset": "assets/svg/Belt_Bridge.svg",
+      "logo_asset": "assets/svg/Belt_Bridge.svg",
+      "ports": {
+        "inputs": [
+          {"relative_x": 0.5, "relative_y": 0.0, "direction": "up", "port_type": "solid"},
+          {"relative_x": 0.5, "relative_y": 1.0, "direction": "down", "port_type": "solid"},
+          {"relative_x": 0.0, "relative_y": 0.5, "direction": "left", "port_type": "solid"},
+          {"relative_x": 1.0, "relative_y": 0.5, "direction": "right", "port_type": "solid"}
+        ],
+        "outputs": [
+          {"relative_x": 0.5, "relative_y": 0.0, "direction": "up", "port_type": "solid"},
+          {"relative_x": 0.5, "relative_y": 1.0, "direction": "down", "port_type": "solid"},
+          {"relative_x": 0.0, "relative_y": 0.5, "direction": "left", "port_type": "solid"},
+          {"relative_x": 1.0, "relative_y": 0.5, "direction": "right", "port_type": "solid"}
+        ]
+      }
+    },
+    "splitter_1x1": {
+      "id": "splitter_1x1",
+      "name": "分流器",
+      "grid_width": 1,
+      "grid_height": 1,
+      "color": "#F5A623",
+      "category": "logistics_units",
+      "max_inputs": 1,
+      "max_outputs": 3,
+      "power_consumption": 0.0,
+      "svg_asset": "assets/svg/Splitter.svg",
+      "logo_asset": "assets/svg/Splitter.svg",
+      "ports": {
+        "inputs": [
+          {"relative_x": 0.5, "relative_y": 1.0, "direction": "down", "port_type": "solid"}
+        ],
+        "outputs": [
+          {"relative_x": 0.5, "relative_y": 0.0, "direction": "up", "port_type": "solid"},
+          {"relative_x": 0.0, "relative_y": 0.5, "direction": "left", "port_type": "solid"},
+          {"relative_x": 1.0, "relative_y": 0.5, "direction": "right", "port_type": "solid"}
+        ]
+      }
+    },
+    "converger_1x1": {
+      "id": "converger_1x1",
+      "name": "汇流器",
+      "grid_width": 1,
+      "grid_height": 1,
+      "color": "#49B675",
+      "category": "logistics_units",
+      "max_inputs": 3,
+      "max_outputs": 1,
+      "power_consumption": 0.0,
+      "svg_asset": "assets/svg/Converger.svg",
+      "logo_asset": "assets/svg/Converger.svg",
+      "ports": {
+        "inputs": [
+          {"relative_x": 0.5, "relative_y": 1.0, "direction": "down", "port_type": "solid"},
+          {"relative_x": 0.0, "relative_y": 0.5, "direction": "left", "port_type": "solid"},
+          {"relative_x": 1.0, "relative_y": 0.5, "direction": "right", "port_type": "solid"}
+        ],
+        "outputs": [
+          {"relative_x": 0.5, "relative_y": 0.0, "direction": "up", "port_type": "solid"}
+        ]
+      }
+    },
+    "item_control_port_1x1": {
+      "id": "item_control_port_1x1",
+      "name": "物品准入口",
+      "grid_width": 1,
+      "grid_height": 1,
+      "color": "#8D6EFA",
+      "category": "logistics_units",
+      "max_inputs": 1,
+      "max_outputs": 1,
+      "power_consumption": 0.0,
+      "svg_asset": "assets/svg/Item_Control_Port.svg",
+      "logo_asset": "assets/svg/Item_Control_Port.svg",
+      "ports": {
+        "inputs": [
+          {"relative_x": 0.5, "relative_y": 1.0, "direction": "down", "port_type": "solid"}
+        ],
+        "outputs": [
+          {"relative_x": 0.5, "relative_y": 0.0, "direction": "up", "port_type": "solid"}
+        ]
+      }
     }
   }
 }

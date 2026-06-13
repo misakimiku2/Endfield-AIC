@@ -112,6 +112,11 @@ class PortState {
 class PlacedBuilding {
   static const int maxInputItemCount = 50;
   static const int maxOutputItemCount = 50;
+  /// 物流桥通道容量：传送带不再在物流桥处拆分，但以物流桥为终点/起点的
+  /// 传送带仍通过通道机制中转。容量设为1确保反压快速传播。
+  static const int maxBridgeLaneItemCount = 1;
+  static const String _beltBridgeId = 'belt_bridge_1x1';
+  static const String _bridgeLanePrefix = '__bridge_lane__';
 
   final String id;
   final Building building;
@@ -207,6 +212,78 @@ class PlacedBuilding {
     if (inputItemCount <= 0) {
       inputItemCount = 0;
       inputItemId = null;
+    }
+    return true;
+  }
+
+  bool get isBeltBridge => building.id == _beltBridgeId;
+
+  String _normalizeBridgeDirection(String direction) {
+    switch (direction) {
+      case 'up':
+      case 'down':
+      case 'left':
+      case 'right':
+        return direction;
+      default:
+        return 'up';
+    }
+  }
+
+  String _bridgeLanePrefixFor(String outputDirection) =>
+      '$_bridgeLanePrefix${_normalizeBridgeDirection(outputDirection)}__';
+
+  String _bridgeLaneKey(String outputDirection, String itemId) =>
+      '${_bridgeLanePrefixFor(outputDirection)}$itemId';
+
+  String? bridgeItemIdForOutputDirection(String outputDirection) {
+    if (!isBeltBridge) return null;
+    final prefix = _bridgeLanePrefixFor(outputDirection);
+    for (final entry in outputItems.entries) {
+      if (entry.value <= 0 || !entry.key.startsWith(prefix)) continue;
+      return entry.key.substring(prefix.length);
+    }
+    return null;
+  }
+
+  int bridgeItemCountForOutputDirection(String outputDirection) {
+    if (!isBeltBridge) return 0;
+    final prefix = _bridgeLanePrefixFor(outputDirection);
+    var count = 0;
+    for (final entry in outputItems.entries) {
+      if (entry.key.startsWith(prefix)) {
+        count += entry.value;
+      }
+    }
+    return count;
+  }
+
+  bool canAcceptBridgeInputItem(String itemId, String outputDirection) {
+    if (!isBeltBridge || itemId.isEmpty) return false;
+    if (bridgeItemCountForOutputDirection(outputDirection) >=
+        maxBridgeLaneItemCount) {
+      return false;
+    }
+    final currentItemId = bridgeItemIdForOutputDirection(outputDirection);
+    return currentItemId == null || currentItemId == itemId;
+  }
+
+  bool acceptBridgeInputItem(String itemId, String outputDirection) {
+    if (!canAcceptBridgeInputItem(itemId, outputDirection)) return false;
+    final key = _bridgeLaneKey(outputDirection, itemId);
+    outputItems[key] = (outputItems[key] ?? 0) + 1;
+    return true;
+  }
+
+  bool consumeBridgeOutputItem(String itemId, String outputDirection) {
+    if (!isBeltBridge || itemId.isEmpty) return false;
+    final key = _bridgeLaneKey(outputDirection, itemId);
+    final current = outputItems[key] ?? 0;
+    if (current <= 0) return false;
+    if (current == 1) {
+      outputItems.remove(key);
+    } else {
+      outputItems[key] = current - 1;
     }
     return true;
   }

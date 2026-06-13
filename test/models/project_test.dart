@@ -24,6 +24,31 @@ void main() {
     ),
   );
 
+  const testBeltBridge = Building(
+    id: 'belt_bridge_1x1',
+    name: 'Belt Bridge',
+    gridWidth: 1,
+    gridHeight: 1,
+    color: Colors.blue,
+    category: 'logistics_units',
+    maxInputs: 4,
+    maxOutputs: 4,
+    ports: PortsLayout(
+      inputs: [
+        PortDefinition(relativeX: 0.5, relativeY: 0.0, direction: 'up'),
+        PortDefinition(relativeX: 0.5, relativeY: 1.0, direction: 'down'),
+        PortDefinition(relativeX: 0.0, relativeY: 0.5, direction: 'left'),
+        PortDefinition(relativeX: 1.0, relativeY: 0.5, direction: 'right'),
+      ],
+      outputs: [
+        PortDefinition(relativeX: 0.5, relativeY: 0.0, direction: 'up'),
+        PortDefinition(relativeX: 0.5, relativeY: 1.0, direction: 'down'),
+        PortDefinition(relativeX: 0.0, relativeY: 0.5, direction: 'left'),
+        PortDefinition(relativeX: 1.0, relativeY: 0.5, direction: 'right'),
+      ],
+    ),
+  );
+
   group('PlacedBuilding input inventory', () {
     test('accepts only one item type up to 50 items', () {
       final building = PlacedBuilding(
@@ -175,6 +200,27 @@ void main() {
         building.conveyorPortConnections([endingAtOutput])['output_0'],
         isNull,
       );
+    });
+
+    test('belt bridge keeps each output direction in an independent lane', () {
+      final bridge = PlacedBuilding(
+        id: 'bridge',
+        building: testBeltBridge,
+        gridX: 0,
+        gridY: 0,
+      );
+
+      expect(bridge.acceptBridgeInputItem('item_up', 'up'), true);
+      expect(bridge.acceptBridgeInputItem('item_right', 'right'), true);
+
+      expect(bridge.bridgeItemIdForOutputDirection('up'), 'item_up');
+      expect(bridge.bridgeItemIdForOutputDirection('right'), 'item_right');
+      expect(bridge.bridgeItemIdForOutputDirection('down'), isNull);
+
+      expect(bridge.consumeBridgeOutputItem('item_up', 'right'), false);
+      expect(bridge.consumeBridgeOutputItem('item_up', 'up'), true);
+      expect(bridge.bridgeItemIdForOutputDirection('up'), isNull);
+      expect(bridge.bridgeItemIdForOutputDirection('right'), 'item_right');
     });
   });
 
