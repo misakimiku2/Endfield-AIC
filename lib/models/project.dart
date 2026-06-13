@@ -127,6 +127,7 @@ class PlacedBuilding {
   List<PortState> outputPorts;
   bool isBlocked;
   double productionProgress;
+  bool isPaused;
 
   PlacedBuilding({
     required this.id,
@@ -141,6 +142,7 @@ class PlacedBuilding {
     Map<String, int>? outputItems,
     this.isBlocked = false,
     this.productionProgress = 0.0,
+    this.isPaused = false,
   })  : outputItems = outputItems ?? {},
         inputPorts = List.generate(
           building.ports.inputs.length,

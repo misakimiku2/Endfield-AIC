@@ -59,6 +59,7 @@ class SimBuildingData {
   final int gridHeight;
   final List<SimPortData> inputPorts;
   final List<SimPortData> outputPorts;
+  final bool isPaused;
 
   const SimBuildingData({
     required this.id,
@@ -75,6 +76,7 @@ class SimBuildingData {
     required this.gridHeight,
     required this.inputPorts,
     required this.outputPorts,
+    this.isPaused = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -92,6 +94,7 @@ class SimBuildingData {
         'gridHeight': gridHeight,
         'inputPorts': inputPorts.map((e) => e.toJson()).toList(),
         'outputPorts': outputPorts.map((e) => e.toJson()).toList(),
+        'isPaused': isPaused,
       };
 
   factory SimBuildingData.fromJson(Map<String, dynamic> json) =>
@@ -116,6 +119,7 @@ class SimBuildingData {
         outputPorts: (json['outputPorts'] as List)
             .map((e) => SimPortData.fromJson(e as Map<String, dynamic>))
             .toList(),
+        isPaused: (json['isPaused'] as bool?) ?? false,
       );
 }
 

@@ -215,9 +215,16 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
               children: [
                 _buildWindowInfoBar(),
                 _buildSeparator(),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 20, top: 8, bottom: 4),
+                    child: _buildPowerSwitch(),
+                  ),
+                ),
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -365,6 +372,94 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildPowerSwitch() {
+    const switchWidth = 120.0;
+    const tabWidth = 60.0;
+    final isOn = !widget.placedBuilding.isPaused;
+
+    return SizedBox(
+      width: switchWidth,
+      height: 28,
+      child: Stack(
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF6E6E6E),
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              left: isOn ? 0 : tabWidth,
+              top: 0,
+              child: Container(
+                width: tabWidth,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: isOn ? Colors.white : const Color(0xFFE53935),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                SizedBox(
+                  width: tabWidth,
+                  height: 28,
+                  child: GestureDetector(
+                    onTap: isOn
+                        ? null
+                        : () {
+                            setState(() {
+                              widget.placedBuilding.isPaused = false;
+                            });
+                          },
+                    behavior: HitTestBehavior.opaque,
+                    child: Center(
+                      child: Text(
+                        '开',
+                        style: TextStyle(
+                          color: isOn ? const Color(0xFF212121) : const Color(0xFF929292),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: tabWidth,
+                  height: 28,
+                  child: GestureDetector(
+                    onTap: isOn
+                        ? () {
+                            setState(() {
+                              widget.placedBuilding.isPaused = true;
+                              widget.placedBuilding.productionProgress = 0.0;
+                            });
+                          }
+                        : null,
+                    behavior: HitTestBehavior.opaque,
+                    child: Center(
+                      child: Text(
+                        '关',
+                        style: TextStyle(
+                          color: !isOn ? Colors.white : const Color(0xFF929292),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
     );
   }
 
@@ -826,6 +921,14 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
         widget.placedBuilding.productionProgress.clamp(0.0, 1.0);
     final isProductionRunning =
         activeRecipe != null && widget.placedBuilding.productionProgress > 0;
+    final isInputFull =
+        widget.placedBuilding.inputItemCount >=
+            PlacedBuilding.maxInputItemCount;
+    final isOutputFull =
+        widget.placedBuilding.totalOutputCount >=
+            PlacedBuilding.maxOutputItemCount;
+    final isBlocked = isInputFull || isOutputFull;
+    final isPaused = widget.placedBuilding.isPaused;
     final remainingSeconds = activeRecipe == null
         ? 0
         : (activeRecipe.processTimeSeconds * (1.0 - productionProgress))
@@ -908,15 +1011,21 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                                   SizedBox(
                                     height: defaultRowH,
                                     child: Center(
-                                      child: _ProcessingIndicator(
-                                        isRunning: isProductionRunning,
-                                      ),
+                                      child: isPaused
+                                          ? _PausedIndicator()
+                                          : (isBlocked
+                                              ? _BlockedIndicator()
+                                              : _ProcessingIndicator(
+                                                  isRunning: isProductionRunning,
+                                                )),
                                     ),
                                   ),
                                   Text(
-                                    isProductionRunning
-                                        ? '$remainingSeconds秒'
-                                        : '',
+                                    isPaused || isBlocked
+                                        ? ''
+                                        : (isProductionRunning
+                                            ? '$remainingSeconds秒'
+                                            : ''),
                                     style: const TextStyle(
                                       color: Color(0xFFEDEDED),
                                       fontSize: 24,
@@ -924,11 +1033,15 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                                     ),
                                   ),
                                   const SizedBox(height: 8),
-                                  _ProductionProgressBar(
-                                    progress: isProductionRunning
-                                        ? productionProgress.toDouble()
-                                        : 0,
-                                  ),
+                                  isPaused
+                                      ? _PausedProgressBar()
+                                      : (isBlocked
+                                          ? _BlockedProgressBar()
+                                          : _ProductionProgressBar(
+                                              progress: isProductionRunning
+                                                  ? productionProgress.toDouble()
+                                                  : 0,
+                                            )),
                                 ],
                               ),
                             ),
@@ -1011,73 +1124,80 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                             child: IgnorePointer(
                               child: Center(
                                 child: isProducing
-                                    ? Column(
+                                    ? Row(
                                         mainAxisAlignment:
                                             MainAxisAlignment.center,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
                                         children: [
-                                          Row(
+                                          ...(_activeRecipe?.inputs
+                                                  .map((inp) {
+                                                final item = widget.dataLoader
+                                                    .getItem(inp.itemId);
+                                                if (item == null)
+                                                  return const SizedBox
+                                                      .shrink();
+                                                return Padding(
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 4),
+                                                  child: Image.asset(
+                                                    item.imageAssetPath,
+                                                    width: 56,
+                                                    height: 56,
+                                                    cacheWidth: 168,
+                                                    cacheHeight: 168,
+                                                    fit: BoxFit.contain,
+                                                    filterQuality:
+                                                        FilterQuality.medium,
+                                                    isAntiAlias: true,
+                                                  ),
+                                                );
+                                              }) ??
+                                              []),
+                                          const SizedBox(width: 24),
+                                          Column(
                                             mainAxisAlignment:
                                                 MainAxisAlignment.center,
                                             children: [
-                                              ...(_activeRecipe?.inputs
-                                                      .map((inp) {
-                                                    final item = widget
-                                                        .dataLoader
-                                                        .getItem(inp.itemId);
-                                                    if (item == null)
-                                                      return const SizedBox
-                                                          .shrink();
-                                                    return Padding(
-                                                      padding: const EdgeInsets
-                                                          .symmetric(
-                                                          horizontal: 4),
-                                                      child: Image.asset(
-                                                        item.imageAssetPath,
-                                                        width: 40,
-                                                        height: 40,
-                                                        cacheWidth: 120,
-                                                        cacheHeight: 120,
-                                                        fit: BoxFit.contain,
-                                                        filterQuality:
-                                                            FilterQuality
-                                                                .medium,
-                                                        isAntiAlias: true,
-                                                      ),
-                                                    );
-                                                  }) ??
-                                                  []),
-                                              const SizedBox(width: 54),
-                                              ...(_activeRecipe?.outputs
-                                                      .map((out) {
-                                                    final item = widget
-                                                        .dataLoader
-                                                        .getItem(out.itemId);
-                                                    if (item == null)
-                                                      return const SizedBox
-                                                          .shrink();
-                                                    return Padding(
-                                                      padding: const EdgeInsets
-                                                          .symmetric(
-                                                          horizontal: 4),
-                                                      child: Image.asset(
-                                                        item.imageAssetPath,
-                                                        width: 40,
-                                                        height: 40,
-                                                        cacheWidth: 120,
-                                                        cacheHeight: 120,
-                                                        fit: BoxFit.contain,
-                                                        filterQuality:
-                                                            FilterQuality
-                                                                .medium,
-                                                        isAntiAlias: true,
-                                                      ),
-                                                    );
-                                                  }) ??
-                                                  []),
+                                              const _RecipeRunIndicator(),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                '${_activeRecipe?.processTimeSeconds.toStringAsFixed(0)}秒',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
                                             ],
                                           ),
-                                          const SizedBox(height: 6),
-                                          const _RecipeRunIndicator(),
+                                          const SizedBox(width: 24),
+                                          ...(_activeRecipe?.outputs
+                                                  .map((out) {
+                                                final item = widget.dataLoader
+                                                    .getItem(out.itemId);
+                                                if (item == null)
+                                                  return const SizedBox
+                                                      .shrink();
+                                                return Padding(
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 4),
+                                                  child: Image.asset(
+                                                    item.imageAssetPath,
+                                                    width: 56,
+                                                    height: 56,
+                                                    cacheWidth: 168,
+                                                    cacheHeight: 168,
+                                                    fit: BoxFit.contain,
+                                                    filterQuality:
+                                                        FilterQuality.medium,
+                                                    isAntiAlias: true,
+                                                  ),
+                                                );
+                                              }) ??
+                                              []),
                                         ],
                                       )
                                     : Row(
@@ -1115,7 +1235,19 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                             ),
                           ),
                           Positioned(
-                            left: 424,
+                            left: 448,
+                            top: (76.8 - 30) / 2,
+                            child: Container(
+                              width: 3,
+                              height: 30,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF444444),
+                                borderRadius: BorderRadius.circular(1.5),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            left: 524,
                             top: (76.8 - 87.59967 * 0.78) / 2,
                             child: _CollectAllButton(
                               width: 300,
@@ -2519,6 +2651,157 @@ class _ProductionProgressBar extends StatelessWidget {
   }
 }
 
+class _PausedIndicator extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 20,
+          height: 4,
+          decoration: BoxDecoration(
+            color: const Color(0xFF929292),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        SvgPicture.asset(
+          'assets/png/window/Close_button.svg',
+          width: 36,
+          height: 36,
+          fit: BoxFit.contain,
+          colorFilter: const ColorFilter.mode(
+            Color(0xFF929292),
+            BlendMode.srcIn,
+          ),
+        ),
+        Container(
+          width: 20,
+          height: 4,
+          decoration: BoxDecoration(
+            color: const Color(0xFF929292),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PausedProgressBar extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 20,
+            height: 4,
+            decoration: BoxDecoration(
+              color: const Color(0xFF929292),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text(
+            '生产已暂停',
+            style: TextStyle(
+              color: Color(0xFF929292),
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            width: 20,
+            height: 4,
+            decoration: BoxDecoration(
+              color: const Color(0xFF929292),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BlockedIndicator extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 20,
+          height: 4,
+          decoration: BoxDecoration(
+            color: const Color(0xFFE53935),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        SvgPicture.asset(
+          'assets/png/window/Close_button.svg',
+          width: 36,
+          height: 36,
+          fit: BoxFit.contain,
+          colorFilter: const ColorFilter.mode(
+            Color(0xFFE53935),
+            BlendMode.srcIn,
+          ),
+        ),
+        Container(
+          width: 20,
+          height: 4,
+          decoration: BoxDecoration(
+            color: const Color(0xFFE53935),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BlockedProgressBar extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 20,
+          height: 4,
+          decoration: BoxDecoration(
+            color: const Color(0xFFE53935),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
+        const Text(
+          '阻塞',
+          style: TextStyle(
+            color: Color(0xFFE53935),
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          width: 20,
+          height: 4,
+          decoration: BoxDecoration(
+            color: const Color(0xFFE53935),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _InformationBackground extends StatelessWidget {
   final bool hideNo;
   final double width;
@@ -2582,6 +2865,9 @@ class _CollectAllButtonState extends State<_CollectAllButton> {
   @override
   Widget build(BuildContext context) {
     final enabled = widget.enabled;
+    final textColor = enabled
+        ? const Color(0xFF222222)
+        : const Color(0xFF666666);
     return GestureDetector(
       onTap: enabled ? widget.onTap : null,
       child: MouseRegion(
@@ -2598,11 +2884,14 @@ class _CollectAllButtonState extends State<_CollectAllButton> {
               alignment: Alignment.center,
               children: [
                 ColorFiltered(
-                  colorFilter: enabled
+                  colorFilter: !enabled
                       ? const ColorFilter.mode(
-                          Colors.transparent, BlendMode.srcOver)
-                      : const ColorFilter.mode(
-                          Color(0xFF373737), BlendMode.srcIn),
+                          Color(0xFF373737), BlendMode.srcIn)
+                      : _hovered
+                          ? const ColorFilter.mode(
+                              Color(0xFFEBAD26), BlendMode.srcIn)
+                          : const ColorFilter.mode(
+                              Colors.transparent, BlendMode.srcOver),
                   child: SvgPicture.asset(
                     'assets/svg/Collect_button.svg',
                     width: widget.width,
@@ -2610,17 +2899,22 @@ class _CollectAllButtonState extends State<_CollectAllButton> {
                     fit: BoxFit.fill,
                   ),
                 ),
-                Align(
-                  alignment: Alignment.center,
-                  child: Text(
-                    '全部收取',
-                    style: TextStyle(
-                      color: enabled
-                          ? const Color(0xFF222222)
-                          : const Color(0xFF666666),
-                      fontSize: 24,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0,
+                Positioned(
+                  left: 82,
+                  right: 48,
+                  top: 6,
+                  bottom: 14,
+                  child: Center(
+                    child: Text(
+                      '全部收取',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0,
+                        leadingDistribution: TextLeadingDistribution.even,
+                      ),
                     ),
                   ),
                 ),
@@ -3455,17 +3749,31 @@ class _RecipeRunIndicatorState extends State<_RecipeRunIndicator>
       child: SizedBox(
         width: 10,
         height: 12,
-        child: SvgPicture.asset(
-          'assets/svg/Directional.svg',
-          fit: BoxFit.contain,
-          colorFilter: const ColorFilter.mode(
-            Colors.white,
-            BlendMode.srcIn,
-          ),
+        child: CustomPaint(
+          painter: const _TrianglePainter(color: Colors.white),
         ),
       ),
     );
   }
+}
+
+class _TrianglePainter extends CustomPainter {
+  final Color color;
+  const _TrianglePainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = color;
+    final path = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, size.height / 2)
+      ..lineTo(0, size.height)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class HoverCloseButton extends StatefulWidget {

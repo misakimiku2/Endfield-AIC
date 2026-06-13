@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -24,12 +25,18 @@ class EditorPage extends StatefulWidget {
   State<EditorPage> createState() => _EditorPageState();
 }
 
-class _EditorPageState extends State<EditorPage> {
+class _EditorPageState extends State<EditorPage>
+    with TickerProviderStateMixin {
   late ProjectState _project;
   Building? _placingBuilding;
   PlacedBuilding? _selectedBuilding;
   bool _conveyorMode = false;
   final GlobalKey<CanvasEditorState> _canvasKey = GlobalKey();
+
+  // 错误提示 Toast 状态
+  String? _toastMessage;
+  late AnimationController _toastController;
+  Timer? _toastTimer;
 
   static const List<String> _dockOrder = [
     'refining_unit_3x3',
@@ -50,16 +57,39 @@ class _EditorPageState extends State<EditorPage> {
       // Isolate 就绪后同步当前状态
       widget.simulationEngine.attach(_project);
     });
+    _toastController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
   }
 
   @override
   void dispose() {
     widget.simulationEngine.removeListener(_onSimTick);
+    _toastTimer?.cancel();
+    _toastController.dispose();
     super.dispose();
   }
 
   void _onSimTick() {
     setState(() {});
+  }
+
+  void _showErrorToast(String message) {
+    _toastTimer?.cancel();
+    setState(() {
+      _toastMessage = message;
+    });
+    _toastController.forward(from: 0.0);
+    _toastTimer = Timer(const Duration(milliseconds: 2000), () {
+      _toastController.reverse().then((_) {
+        if (mounted) {
+          setState(() {
+            _toastMessage = null;
+          });
+        }
+      });
+    });
   }
 
   void _onDockBuildingSelected(Building? building) {
@@ -454,6 +484,7 @@ class _EditorPageState extends State<EditorPage> {
                       onBuildingPlaced: _onBuildingPlaced,
                       onBuildingSelected: _onBuildingTapped,
                       conveyorMode: _conveyorMode,
+                      onErrorToast: _showErrorToast,
                     ),
                   ),
                   Positioned(
@@ -477,6 +508,36 @@ class _EditorPageState extends State<EditorPage> {
                       ),
                     ),
                   ),
+                  // 错误提示 Toast
+                  if (_toastMessage != null)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 124,
+                      child: Center(
+                        child: FadeTransition(
+                          opacity: _toastController,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xCCFF3B30),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              _toastMessage!,
+                              style: const TextStyle(
+                                color: Color(0xFFFFFFFF),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),

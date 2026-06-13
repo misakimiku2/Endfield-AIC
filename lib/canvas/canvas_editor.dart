@@ -25,6 +25,7 @@ class CanvasEditor extends StatefulWidget {
   final VoidCallback? onBuildingPlaced;
   final ValueChanged<PlacedBuilding?>? onBuildingSelected;
   final bool conveyorMode;
+  final ValueChanged<String>? onErrorToast;
 
   const CanvasEditor({
     super.key,
@@ -35,6 +36,7 @@ class CanvasEditor extends StatefulWidget {
     this.onBuildingPlaced,
     this.onBuildingSelected,
     this.conveyorMode = false,
+    this.onErrorToast,
   });
 
   @override
@@ -687,7 +689,19 @@ class CanvasEditorState extends State<CanvasEditor>
     }
 
     if (widget.conveyorMode) {
+      final hadNoAnchors = _beltCtrl.anchors.isEmpty;
+      final wasPathInvalid = _beltCtrl.pathInvalid;
       if (_beltCtrl.handleTap(gridPos)) return;
+      // 创建失败时触发 HUD 错误动画和文字提示
+      if (hadNoAnchors) {
+        // 首次点击空白网格（未从设备输出端开始）
+        ConveyorCreateModeHudPainter.triggerError();
+        widget.onErrorToast?.call('请从设备输出端口进行创建');
+      } else if (wasPathInvalid) {
+        // 预览为红色时点击创建
+        ConveyorCreateModeHudPainter.triggerError();
+        widget.onErrorToast?.call('设备重叠');
+      }
     }
   }
 
@@ -941,7 +955,10 @@ class CanvasEditorState extends State<CanvasEditor>
     final cx = gridPos.dx - (building.gridWidth ~/ 2).toDouble();
     final cy = gridPos.dy - (building.gridHeight ~/ 2).toDouble();
 
-    if (_checkBuildingCollision(building, cx, cy, rotation)) return;
+    if (_checkBuildingCollision(building, cx, cy, rotation)) {
+      widget.onErrorToast?.call('设备重叠');
+      return;
+    }
 
     final newBuilding = PlacedBuilding(
       id: 'building_${DateTime.now().millisecondsSinceEpoch}',

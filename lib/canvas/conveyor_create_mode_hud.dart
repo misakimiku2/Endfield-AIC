@@ -14,8 +14,9 @@ import 'package:flutter_svg/flutter_svg.dart';
 ///   Right side → `\` stripes moving DOWN    pattern: (x + y)/spacing – gp + c
 class ConveyorCreateModeHudPainter {
   static const Color _yellow = Color(0xFFFFC400);
+  static const Color _red = Color(0xFFFF3B30);
   static const Color _softEdge = Color(0x33FFFFFF);
-  static const double _gap = 2.0;
+  static const double _gap = 5.0;
 
   /// Uniform spacing & thickness for all three sides.
   static const double _spacing = 28.0;
@@ -25,8 +26,25 @@ class ConveyorCreateModeHudPainter {
   static const double _createModuleGapCount = 2.7;
 
   static PictureInfo? _createTextPicture;
+  static PictureInfo? _errorTextPicture;
   static bool _initialized = false;
   static bool _initializing = false;
+
+  // ── Error animation state ──────────────────────────────────
+  static bool _isError = false;
+  static int? _errorStartTimeUs; // microseconds since epoch
+
+  // Error animation timing (microseconds)
+  static const int _flashHalfUs = 150000; // 150ms per half-flash
+  static const int _holdUs = 400000; // 400ms hold after flash
+  static const int _transitionUs = 500000; // 500ms transition back to normal
+  // Total flash: 4 half-flashes × 150ms = 600ms
+  // Total error: 600 + 400 + 500 = 1500ms
+
+  // Per-frame computed state (set at beginning of paintHud)
+  static Color _frameColor = _yellow;
+  static double _frameOpacity = 1.0;
+  static double _frameSvgBlend = 0.0; // 0.0 = create SVG, 1.0 = error SVG
 
   static Future<void> init({VoidCallback? onReady}) async {
     if (_initialized || _initializing) return;
@@ -37,17 +55,92 @@ class ConveyorCreateModeHudPainter {
         const SvgAssetLoader('assets/svg/HUD_create_text.svg'),
         null,
       );
+      _errorTextPicture = await vg.loadPicture(
+        const SvgAssetLoader('assets/svg/HUD_error_text.svg'),
+        null,
+      );
       _initialized = true;
       onReady?.call();
     } catch (e) {
-      debugPrint('Failed to load HUD create SVG: $e');
+      debugPrint('Failed to load HUD SVG: $e');
     } finally {
       _initializing = false;
     }
   }
 
+  /// 触发 HUD 错误动画：闪烁两次后自然恢复
+  static void triggerError() {
+    _isError = true;
+    _errorStartTimeUs = DateTime.now().microsecondsSinceEpoch;
+  }
+
+  /// 计算当前帧的错误动画状态，更新 _frameColor / _frameOpacity / _frameSvgBlend
+  static void _updateErrorState() {
+    if (!_isError || _errorStartTimeUs == null) {
+      _frameColor = _yellow;
+      _frameOpacity = 1.0;
+      _frameSvgBlend = 0.0;
+      return;
+    }
+
+    final elapsed = DateTime.now().microsecondsSinceEpoch - _errorStartTimeUs!;
+
+    // Phase 1: Flash (4 half-flashes = 600ms)
+    const flashTotal = _flashHalfUs * 4;
+    if (elapsed < flashTotal) {
+      final halfIndex = elapsed ~/ _flashHalfUs;
+      final withinHalf = (elapsed % _flashHalfUs) / _flashHalfUs;
+      // even half-index → fading out, odd → fading in
+      if (halfIndex.isEven) {
+        _frameOpacity = 1.0 - withinHalf;
+      } else {
+        _frameOpacity = withinHalf;
+      }
+      _frameColor = _red;
+      _frameSvgBlend = 1.0;
+      return;
+    }
+
+    // Phase 2: Hold error (400ms)
+    const holdEnd = flashTotal + _holdUs;
+    if (elapsed < holdEnd) {
+      _frameOpacity = 1.0;
+      _frameColor = _red;
+      _frameSvgBlend = 1.0;
+      return;
+    }
+
+    // Phase 3: Transition back to normal (500ms)
+    const transitionEnd = holdEnd + _transitionUs;
+    if (elapsed < transitionEnd) {
+      final t = (elapsed - holdEnd) / _transitionUs;
+      _frameOpacity = 1.0;
+      _frameColor = Color.lerp(_red, _yellow, t)!;
+      _frameSvgBlend = 1.0 - t;
+      return;
+    }
+
+    // Animation complete
+    _isError = false;
+    _errorStartTimeUs = null;
+    _frameColor = _yellow;
+    _frameOpacity = 1.0;
+    _frameSvgBlend = 0.0;
+  }
+
   static void paintHud(Canvas canvas, Size size, double phase) {
     if (size.width <= 0 || size.height <= 0) return;
+
+    _updateErrorState();
+
+    // Apply flash opacity via saveLayer
+    final needOpacityLayer = _frameOpacity < 1.0;
+    if (needOpacityLayer) {
+      canvas.saveLayer(
+        Rect.fromLTWH(0, 0, size.width, size.height),
+        Paint()..color = Color.fromRGBO(255, 255, 255, _frameOpacity),
+      );
+    }
 
     final rail = math.min(16.0, math.max(10.0, size.shortestSide * 0.014));
     final topHeight = rail + _gap + _stripeBand;
@@ -101,6 +194,10 @@ class ConveyorCreateModeHudPainter {
       Rect.fromLTWH(cornerX - sideWidth, s, sideWidth, sideHeight),
       phase,
     );
+
+    if (needOpacityLayer) {
+      canvas.restore();
+    }
   }
 
   // ════════════════════════════════════════════════════════════
@@ -115,7 +212,7 @@ class ConveyorCreateModeHudPainter {
   ) {
     canvas.drawRect(
       Rect.fromLTWH(0, 0, size.width, rail),
-      Paint()..color = _yellow,
+      Paint()..color = _frameColor,
     );
     _drawGradientRail(canvas, Rect.fromLTWH(0, 0, rail, sideHeight));
     _drawGradientRail(
@@ -126,7 +223,7 @@ class ConveyorCreateModeHudPainter {
 
   static void _drawGradientRail(Canvas canvas, Rect rect) {
     canvas.saveLayer(rect, Paint());
-    canvas.drawRect(rect, Paint()..color = _yellow);
+    canvas.drawRect(rect, Paint()..color = _frameColor);
     final maskPaint = Paint()
       ..blendMode = BlendMode.dstIn
       ..shader = ui.Gradient.linear(
@@ -159,7 +256,7 @@ class ConveyorCreateModeHudPainter {
     // x derived from pattern: x = rect.top + gp*spacing − k*spacing
     final xBase = rect.top + gp * _spacing;
     final paint = Paint()
-      ..color = _yellow.withValues(alpha: 0.95)
+      ..color = _frameColor.withValues(alpha: 0.95)
       ..style = PaintingStyle.fill;
 
     for (double x = xBase - _spacing * 2;
@@ -191,7 +288,7 @@ class ConveyorCreateModeHudPainter {
     // y derived from pattern: y = rect.left − gp*spacing + k*spacing
     final yBase = rect.left - gp * _spacing;
     final paint = Paint()
-      ..color = _yellow.withValues(alpha: 0.9)
+      ..color = _frameColor.withValues(alpha: 0.9)
       ..style = PaintingStyle.fill;
 
     for (double y = yBase - _spacing * 2;
@@ -226,7 +323,7 @@ class ConveyorCreateModeHudPainter {
     // clockwise turn instead of two overlapping stripe fields.
     final yBase = -rect.right + rp * _spacing;
     final paint = Paint()
-      ..color = _yellow.withValues(alpha: 0.9)
+      ..color = _frameColor.withValues(alpha: 0.9)
       ..style = PaintingStyle.fill;
 
     for (double y = yBase - _spacing * 2;
@@ -332,8 +429,7 @@ class ConveyorCreateModeHudPainter {
     bool reverse = false,
     bool mirrorShape = false,
   }) {
-    final picture = _createTextPicture;
-    if (picture == null || rect.width <= 0 || rect.height <= 0) return;
+    if (rect.width <= 0 || rect.height <= 0) return;
 
     final moduleWidth = math.max(
       _spacing * _createModuleStripeCount,
@@ -346,7 +442,7 @@ class ConveyorCreateModeHudPainter {
     final wrappedTravel =
         travel - (travel / modulePeriod).floor() * modulePeriod;
     final xBase = rect.left + wrappedTravel;
-    final modulePaint = Paint()..color = _yellow;
+    final modulePaint = Paint()..color = _frameColor;
 
     for (double x = xBase - modulePeriod * 2;
         x < rect.right + modulePeriod * 2;
@@ -378,15 +474,36 @@ class ConveyorCreateModeHudPainter {
         visualRect.width * 0.64,
         visualRect.height * 0.74,
       );
-      _drawPictureScaled(canvas, picture, textRect);
+
+      // 根据 _frameSvgBlend 绘制 SVG（支持交叉淡入淡出）
+      final blend = _frameSvgBlend;
+      if (blend > 0.0 && _errorTextPicture != null) {
+        _drawPictureScaled(
+          canvas,
+          _errorTextPicture!,
+          textRect,
+          tintColor: const Color(0xFFFFFFFF),
+          opacity: blend,
+        );
+      }
+      if (blend < 1.0 && _createTextPicture != null) {
+        _drawPictureScaled(
+          canvas,
+          _createTextPicture!,
+          textRect,
+          opacity: 1.0 - blend,
+        );
+      }
     }
   }
 
   static void _drawPictureScaled(
     Canvas canvas,
     PictureInfo picture,
-    Rect targetRect,
-  ) {
+    Rect targetRect, {
+    Color? tintColor,
+    double opacity = 1.0,
+  }) {
     if (targetRect.width <= 0 || targetRect.height <= 0) return;
 
     final pictureSize = picture.size;
@@ -404,7 +521,30 @@ class ConveyorCreateModeHudPainter {
     canvas.save();
     canvas.translate(dx, dy);
     canvas.scale(scale, scale);
-    canvas.drawPicture(picture.picture);
+
+    final needsLayer = tintColor != null || opacity < 1.0;
+    if (needsLayer) {
+      final bounds =
+          Rect.fromLTWH(0, 0, pictureSize.width, pictureSize.height);
+      final layerPaint = Paint();
+      if (opacity < 1.0) {
+        layerPaint.color = Color.fromRGBO(255, 255, 255, opacity);
+      }
+      canvas.saveLayer(bounds, layerPaint);
+      canvas.drawPicture(picture.picture);
+      if (tintColor != null) {
+        canvas.drawRect(
+          bounds,
+          Paint()
+            ..color = tintColor
+            ..blendMode = BlendMode.srcIn,
+        );
+      }
+      canvas.restore();
+    } else {
+      canvas.drawPicture(picture.picture);
+    }
+
     canvas.restore();
   }
 

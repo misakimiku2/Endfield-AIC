@@ -207,6 +207,7 @@ class SimulationEngine extends ChangeNotifier {
                           portType: p.definition.portType,
                         ))
                     .toList(),
+                isPaused: pb.isPaused,
               ))
           .toList(),
       conveyors: _project!.conveyors
@@ -361,6 +362,8 @@ class SimulationEngine extends ChangeNotifier {
       }
 
       if (pb.activeRecipeId == null) continue;
+      // 设备暂停时跳过生产
+      if (pb.isPaused) continue;
       final recipe = _dataLoader.getRecipe(pb.activeRecipeId!);
       if (recipe == null) continue;
 

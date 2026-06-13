@@ -50,6 +50,7 @@ class _SimWorker {
     String? inputItemId,
     int? inputItemCount,
     Map<String, int>? outputItems,
+    bool? isPaused,
   }) {
     return SimBuildingData(
       id: pb.id,
@@ -66,6 +67,7 @@ class _SimWorker {
       gridHeight: pb.gridHeight,
       inputPorts: pb.inputPorts,
       outputPorts: pb.outputPorts,
+      isPaused: isPaused ?? pb.isPaused,
     );
   }
 
@@ -217,6 +219,8 @@ class _SimWorker {
       }
 
       if (pb.activeRecipeId == null) continue;
+      // 设备暂停时跳过生产
+      if (pb.isPaused) continue;
       final recipe =
           _recipes.where((r) => r.id == pb.activeRecipeId).firstOrNull;
       if (recipe == null) continue;
@@ -402,6 +406,7 @@ class _SimWorker {
       gridHeight: pb.gridHeight,
       inputPorts: pb.inputPorts,
       outputPorts: pb.outputPorts,
+      isPaused: pb.isPaused,
     );
   }
 
