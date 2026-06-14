@@ -44,6 +44,63 @@ class CanvasEditor extends StatefulWidget {
   State<CanvasEditor> createState() => CanvasEditorState();
 }
 
+bool _isBeltBridgeBuilding(Building building) {
+  return building.id == LogisticsUnitRenderer.beltBridgeId;
+}
+
+String _gridCellKey(Offset cell) {
+  return '${cell.dx.round()}_${cell.dy.round()}';
+}
+
+Offset _normalizedGridCell(Offset cell) {
+  return Offset(cell.dx.roundToDouble(), cell.dy.roundToDouble());
+}
+
+String? _directionBetweenGridCells(Offset from, Offset to) {
+  final dx = to.dx.round() - from.dx.round();
+  final dy = to.dy.round() - from.dy.round();
+  if (dx == 1 && dy == 0) return 'right';
+  if (dx == -1 && dy == 0) return 'left';
+  if (dx == 0 && dy == 1) return 'down';
+  if (dx == 0 && dy == -1) return 'up';
+  return null;
+}
+
+bool _isStraightBeltCell(ConveyorBelt belt, int cellIndex) {
+  if (cellIndex < 0 || cellIndex >= belt.path.length) return false;
+  if (belt.path.length == 1) {
+    return belt.incomingDirection == null ||
+        belt.forcedDirection == null ||
+        belt.incomingDirection == belt.forcedDirection;
+  }
+  if (cellIndex == 0) {
+    final outgoing = _directionBetweenGridCells(belt.path[0], belt.path[1]);
+    return belt.incomingDirection == null ||
+        outgoing == null ||
+        belt.incomingDirection == outgoing;
+  }
+  if (cellIndex == belt.path.length - 1) return true;
+
+  final previous = belt.path[cellIndex - 1];
+  final current = belt.path[cellIndex];
+  final next = belt.path[cellIndex + 1];
+  final incomingDx = current.dx.round() - previous.dx.round();
+  final incomingDy = current.dy.round() - previous.dy.round();
+  final outgoingDx = next.dx.round() - current.dx.round();
+  final outgoingDy = next.dy.round() - current.dy.round();
+
+  return incomingDx == outgoingDx && incomingDy == outgoingDy;
+}
+
+bool _canBuildingOverlapBeltCell(
+  Building building,
+  ConveyorBelt belt,
+  int cellIndex,
+) {
+  return _isBeltBridgeBuilding(building) &&
+      _isStraightBeltCell(belt, cellIndex);
+}
+
 class CanvasEditorState extends State<CanvasEditor>
     with TickerProviderStateMixin {
   Offset? _lastFocalPoint;
@@ -1025,11 +1082,18 @@ class CanvasEditorState extends State<CanvasEditor>
     final cells = <String>{};
     for (int dx = 0; dx < effW; dx++) {
       for (int dy = 0; dy < effH; dy++) {
-        cells.add('${(effX + dx).toInt()}_${(effY + dy).toInt()}');
+        cells.add('${(effX + dx).round()}_${(effY + dy).round()}');
       }
     }
-    return _project.conveyors.any((b) =>
-        b.path.any((c) => cells.contains('${c.dx.toInt()}_${c.dy.toInt()}')));
+    for (final belt in _project.conveyors) {
+      for (int i = 0; i < belt.path.length; i++) {
+        if (!cells.contains(_gridCellKey(belt.path[i]))) continue;
+        if (!_canBuildingOverlapBeltCell(building, belt, i)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   void _placeBuilding(Building building, Offset gridPos, {int rotation = 0}) {
@@ -1614,6 +1678,7 @@ class CanvasEditorState extends State<CanvasEditor>
                 conveyorHasCommittedPath: _beltCtrl.hasCommittedPath,
                 conveyorIncomingDirection: _beltCtrl.incomingDirection,
                 previewContextExtension: _beltCtrl.previewContextExtension,
+                previewBridgeCells: _beltCtrl.previewBridgeCells,
                 displayScale: _displayScale,
                 displayOffsetX: _displayOffsetX,
                 displayOffsetY: _displayOffsetY,
@@ -1653,6 +1718,7 @@ class _EditorPainter extends CustomPainter {
   final bool conveyorHasCommittedPath;
   final String? conveyorIncomingDirection;
   final List<Offset>? previewContextExtension;
+  final List<Offset> previewBridgeCells;
   final double displayScale;
   final double displayOffsetX;
   final double displayOffsetY;
@@ -1692,6 +1758,7 @@ class _EditorPainter extends CustomPainter {
     this.conveyorHasCommittedPath = false,
     this.conveyorIncomingDirection,
     this.previewContextExtension,
+    this.previewBridgeCells = const [],
     required this.displayScale,
     required this.displayOffsetX,
     required this.displayOffsetY,
@@ -1799,6 +1866,24 @@ class _EditorPainter extends CustomPainter {
             ? conveyorPreviewPath!.first
             : null;
 
+    // 检查分叉点是否在物流桥上：如果是，则不应裁剪只是穿过物流桥的传送带
+    // （传送带从物流桥开始创建，并非从穿过物流桥的传送带分叉）
+    bool isForkAtBridge = false;
+    if (startCell != null) {
+      final sx = startCell.dx.toInt();
+      final sy = startCell.dy.toInt();
+      for (final pb in project.buildings) {
+        if (!pb.isBeltBridge) continue;
+        final bx = pb.effectiveGridX.toInt();
+        final by = pb.effectiveGridY.toInt();
+        if (sx >= bx && sx < bx + pb.effectiveWidth &&
+            sy >= by && sy < by + pb.effectiveHeight) {
+          isForkAtBridge = true;
+          break;
+        }
+      }
+    }
+
     // 调试：视口与裁剪统计（有裁剪时才输出，且每2秒最多一次）
     for (final belt in project.conveyors) {
       // 动态裁剪：如果当前正在绘制且起点在旧传送带上，裁剪分叉点之前的部分
@@ -1814,6 +1899,11 @@ class _EditorPainter extends CustomPainter {
             forkIdx = i;
             break;
           }
+        }
+        // 如果分叉点在物流桥上，且分叉点在传送带路径中间（非终点），
+        // 则不裁剪该传送带——传送带只是穿过物流桥，并非从该传送带分叉
+        if (isForkAtBridge && forkIdx >= 0 && forkIdx < belt.path.length - 1) {
+          forkIdx = -1;
         }
         if (forkIdx >= 0 && forkIdx < belt.path.length - 1) {
           // 分叉点在中间：裁剪分叉点之后的路径段
@@ -2027,6 +2117,25 @@ class _EditorPainter extends CustomPainter {
         // 传送带处于尚未锚定的预备状态且当前空节点鼠标浮动时，高亮选中指示格
         TransportBeltRenderer.renderHoverHighlight(
             canvas, mouseGridPos!, cellSize);
+      }
+    }
+
+    // 渲染物流桥预览：在传送带交叉点显示灰色半透明物流桥
+    if (conveyorMode && previewBridgeCells.isNotEmpty && !conveyorPathInvalid) {
+      final bridgeBuilding = dataLoader.getBuilding('belt_bridge_1x1');
+      if (bridgeBuilding != null) {
+        for (final cell in previewBridgeCells) {
+          LogisticsUnitRenderer.renderPlaceholder(
+            canvas,
+            bridgeBuilding,
+            cell.dx - (bridgeBuilding.gridWidth ~/ 2).toDouble(),
+            cell.dy - (bridgeBuilding.gridHeight ~/ 2).toDouble(),
+            cellSize,
+            0.6,
+            rotation: 0,
+            previewColorOverride: const Color(0xFF3D3D3D),
+          );
+        }
       }
     }
 
@@ -2411,9 +2520,9 @@ class _EditorPainter extends CustomPainter {
     // 检测与传送带的碰撞
     final previewCells = _getGridCells(building, gridX, gridY, rotation);
     for (final belt in project.conveyors) {
-      for (final cell in belt.path) {
-        if (previewCells.contains(
-            Offset(cell.dx.roundToDouble(), cell.dy.roundToDouble()))) {
+      for (int i = 0; i < belt.path.length; i++) {
+        if (previewCells.contains(_normalizedGridCell(belt.path[i])) &&
+            !_canBuildingOverlapBeltCell(building, belt, i)) {
           return true;
         }
       }
@@ -2492,9 +2601,10 @@ class _EditorPainter extends CustomPainter {
     // 阻拦的传送带：使用红色传送带预览渲染
     for (final belt in project.conveyors) {
       final blockedKeys = <String>{};
-      for (final cell in belt.path) {
-        final key = '${cell.dx.round()}_${cell.dy.round()}';
-        if (previewSet.contains(key)) {
+      for (int i = 0; i < belt.path.length; i++) {
+        final key = _gridCellKey(belt.path[i]);
+        if (previewSet.contains(key) &&
+            !_canBuildingOverlapBeltCell(building, belt, i)) {
           blockedKeys.add(key);
         }
       }
@@ -2732,6 +2842,7 @@ class _EditorPainter extends CustomPainter {
         conveyorHasCommittedPath != oldDelegate.conveyorHasCommittedPath ||
         conveyorIncomingDirection != oldDelegate.conveyorIncomingDirection ||
         previewContextExtension != oldDelegate.previewContextExtension ||
+        !_listEquals(previewBridgeCells, oldDelegate.previewBridgeCells) ||
         !_listEquals(
             conveyorConfirmedPath, oldDelegate.conveyorConfirmedPath) ||
         !_listEquals(conveyorPreviewPath, oldDelegate.conveyorPreviewPath) ||

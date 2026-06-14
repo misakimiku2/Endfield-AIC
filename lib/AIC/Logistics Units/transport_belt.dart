@@ -36,6 +36,10 @@ class TransportBeltController {
 
   /// 预览路径的转角上下文扩展（合并目标的路径，仅用于转角检测，不渲染为蓝色预览）
   List<Offset>? previewContextExtension;
+
+  /// 预览路径上需要放置物流桥的交叉点（用于渲染物流桥预览）
+  List<Offset> previewBridgeCells = [];
+
   String? _startingPortDirection;
   String? _incomingDirection;
   String? _committedBeltId;
@@ -58,6 +62,7 @@ class TransportBeltController {
     previewPath = null;
     previewOccupied = null;
     previewContextExtension = null;
+    previewBridgeCells = [];
     _mergeTarget = null;
     _startingPortDirection = null;
     _incomingDirection = null;
@@ -202,6 +207,7 @@ class TransportBeltController {
     final segment =
         _findPath(anchors.last, gridPos, blocked, verticalFirst: verticalFirst);
     if (segment == null || segment.length < 2) return false;
+    if (_isBlockedBridgeStartSegment(segment)) return false;
 
     // 点击输入端口时自动完成创建
     if (isInputPort) {
@@ -277,18 +283,36 @@ class TransportBeltController {
 
       // 使用 anchors.first（用户实际点击的位置）作为分叉点
       final startCell = anchors.first;
+      final startsAtBridge = _findBeltBridgeAtCell(startCell) != null;
+      final bridgeStartDirection = startsAtBridge && fullPath.length >= 2
+          ? _directionBetween(fullPath[0], fullPath[1])
+          : null;
+      final bridgeSourceBelt = startsAtBridge
+          ? _findBridgeContinuationSourceBelt(
+              startCell,
+              bridgeStartDirection,
+            )
+          : null;
+      if (bridgeSourceBelt != null) {
+        fullPath = [
+          ...bridgeSourceBelt.path,
+          ...fullPath.skip(1),
+        ];
+      }
       ConveyorBelt? forkSourceBelt;
       int forkSourceIndex = -1;
-      for (final oldBelt in project.conveyors) {
-        for (int i = 0; i < oldBelt.path.length; i++) {
-          if (oldBelt.path[i].dx == startCell.dx &&
-              oldBelt.path[i].dy == startCell.dy) {
-            forkSourceBelt = oldBelt;
-            forkSourceIndex = i;
-            break;
+      if (!startsAtBridge) {
+        for (final oldBelt in project.conveyors) {
+          for (int i = 0; i < oldBelt.path.length; i++) {
+            if (oldBelt.path[i].dx == startCell.dx &&
+                oldBelt.path[i].dy == startCell.dy) {
+              forkSourceBelt = oldBelt;
+              forkSourceIndex = i;
+              break;
+            }
           }
+          if (forkSourceBelt != null) break;
         }
-        if (forkSourceBelt != null) break;
       }
 
       // 查找 fullPath 首格来源的旧传送带，继承其 incomingDirection
@@ -307,13 +331,15 @@ class TransportBeltController {
 
       // 查找源传送带（用户从其终点开始创建新传送带的旧传送带）
       // 当 startCell 是某条旧传送带的终点时，继承其物品状态
-      ConveyorBelt? sourceBelt;
-      for (final oldBelt in project.conveyors) {
-        if (oldBelt.path.isNotEmpty &&
-            oldBelt.path.last.dx == startCell.dx &&
-            oldBelt.path.last.dy == startCell.dy) {
-          sourceBelt = oldBelt;
-          break;
+      ConveyorBelt? sourceBelt = bridgeSourceBelt;
+      if (sourceBelt == null) {
+        for (final oldBelt in project.conveyors) {
+          if (oldBelt.path.isNotEmpty &&
+              oldBelt.path.last.dx == startCell.dx &&
+              oldBelt.path.last.dy == startCell.dy) {
+            sourceBelt = oldBelt;
+            break;
+          }
         }
       }
 
@@ -409,13 +435,13 @@ class TransportBeltController {
             newLastItemFillCount = mergeBelt.lastItemFillCount + offset;
             newLastItemDrainCount = mergeBelt.lastItemDrainCount + offset;
           } else {
-            // 合并目标有当前物品 → 转为残留物品
+            // 合并目标有当前物品 -> 转为残留物品
             newLastItemId = mergeBelt.itemId;
             newLastItemFillCount = mergeBelt.itemFillCount + offset;
             newLastItemDrainCount = mergeBelt.itemDrainCount + offset;
           }
         } else if (mergeBelt.lastItemFillCount > 0) {
-          // 合并目标已有残留物品 → 继承
+          // 合并目标已有残留物品 -> 继承
           newLastItemId = mergeBelt.lastItemId;
           newLastItemFillCount = mergeBelt.lastItemFillCount + offset;
           newLastItemDrainCount = mergeBelt.lastItemDrainCount + offset;
@@ -446,6 +472,14 @@ class TransportBeltController {
       for (final oldBelt in project.conveyors) {
         if (_committedBeltId != null && oldBelt.id == _committedBeltId) {
           toRemove.add(oldBelt);
+          continue;
+        }
+
+        if (startsAtBridge) {
+          if (bridgeSourceBelt != null &&
+              identical(oldBelt, bridgeSourceBelt)) {
+            toRemove.add(oldBelt);
+          }
           continue;
         }
 
@@ -590,7 +624,7 @@ class TransportBeltController {
   /// 查找与 fromCell 相邻且方向兼容的传送带起点（转角吸附）
   /// 返回 (传送带, 起点坐标) 或 null
   /// 只有当从 fromCell 到相邻起点的方向与传送带出方向一致时才吸附，
-  /// 这样确保路径在连接点处与传送带方向吻合，不会产生S弯
+  /// 这样确保路径在连接点处与传送带方向吻合，不会产生 S 弯
   (ConveyorBelt, Offset)? _findAdjacentBeltStart(Offset fromCell) {
     final fx = fromCell.dx.toInt();
     final fy = fromCell.dy.toInt();
@@ -614,6 +648,30 @@ class TransportBeltController {
       }
     }
     return null;
+  }
+
+  ConveyorBelt? _findBridgeContinuationSourceBelt(
+      Offset bridgeCell, String? outgoingDirection) {
+    if (outgoingDirection == null) return null;
+    final bx = bridgeCell.dx.toInt();
+    final by = bridgeCell.dy.toInt();
+    for (final belt in project.conveyors) {
+      for (int i = 0; i < belt.path.length; i++) {
+        final cell = belt.path[i];
+        if (cell.dx.toInt() != bx || cell.dy.toInt() != by) continue;
+        if (i != belt.path.length - 1) continue;
+        if (_getBeltDirectionAtCell(belt, i) == outgoingDirection) {
+          return belt;
+        }
+      }
+    }
+    return null;
+  }
+
+  bool _isBlockedBridgeStartSegment(List<Offset> segment) {
+    if (segment.length < 2) return false;
+    if (_findBeltBridgeAtCell(segment.first) == null) return false;
+    return _findBeltAtCell(segment[1]) != null;
   }
 
   /// 检查给定方向是否与传送带的出方向一致
@@ -679,7 +737,7 @@ class TransportBeltController {
   bool _isDirectionCompatible(List<Offset> newPath, ConveyorBelt targetBelt) {
     if (newPath.length < 2) return false;
 
-    // 新路径在连接点处的方向（倒数第二格 → 最后一格）
+    // 新路径在连接点处的方向（倒数第二格 -> 最后一格）
     final lastCell = newPath.last;
     final prevCell = newPath[newPath.length - 2];
     final newDx = lastCell.dx - prevCell.dx;
@@ -853,7 +911,49 @@ class TransportBeltController {
     // 不再拆分被交叉的传送带——传送带保持完整路径穿过物流桥
   }
 
+  /// 计算预览路径上需要放置物流桥的交叉点（仅用于预览渲染，不实际创建建筑）
+  List<Offset> _computePreviewBridgeCells() {
+    if (pathInvalid) return [];
+    // 构建完整预览路径（已确认段 + 实时段）
+    final fullPreviewPath = <Offset>[...confirmedPath];
+    if (previewPath != null) {
+      // 去重：已确认段末尾和实时段开头可能重叠
+      if (fullPreviewPath.isNotEmpty && previewPath!.isNotEmpty &&
+          fullPreviewPath.last.dx == previewPath!.first.dx &&
+          fullPreviewPath.last.dy == previewPath!.first.dy) {
+        fullPreviewPath.addAll(previewPath!.skip(1));
+      } else {
+        fullPreviewPath.addAll(previewPath!);
+      }
+    }
+    if (fullPreviewPath.length < 2) return [];
 
+    final crossings = <Offset>[];
+    for (int i = 0; i < fullPreviewPath.length; i++) {
+      final cell = fullPreviewPath[i];
+      final newDir = _getPathDirectionAtIndex(fullPreviewPath, i);
+      for (final belt in project.conveyors) {
+        if (_committedBeltId != null && belt.id == _committedBeltId) continue;
+        if (_mergeTarget != null && identical(belt, _mergeTarget)) continue;
+        for (int j = 0; j < belt.path.length; j++) {
+          if (belt.path[j].dx.toInt() == cell.dx.toInt() &&
+              belt.path[j].dy.toInt() == cell.dy.toInt()) {
+            final beltDir = _getBeltDirectionAtCell(belt, j);
+            if (_isPerpendicularCrossing(newDir, beltDir)) {
+              if (_findBeltBridgeAtCell(cell) != null) continue;
+              if (crossings.any((c) =>
+                  c.dx.toInt() == cell.dx.toInt() &&
+                  c.dy.toInt() == cell.dy.toInt())) {
+                continue;
+              }
+              crossings.add(cell);
+            }
+          }
+        }
+      }
+    }
+    return crossings;
+  }
 
   bool _isCellOccupied(Offset gridPos) {
     final gx = gridPos.dx.toInt();
@@ -1007,6 +1107,7 @@ class TransportBeltController {
       previewOccupied = null;
       confirmedPath = [];
       pathInvalid = false;
+      previewBridgeCells = [];
       return;
     }
 
@@ -1046,6 +1147,11 @@ class TransportBeltController {
           : <Offset>[];
       previewPath = livePath;
       previewOccupied = null;
+      if (_isBlockedBridgeStartSegment(livePath)) {
+        pathInvalid = true;
+        previewContextExtension = null;
+        return;
+      }
 
       // 悬停在传送带起点时，检查方向兼容性
       if (mergeBelt != null && excludeCell != null) {
@@ -1094,6 +1200,9 @@ class TransportBeltController {
         }
       }
     }
+
+    // 计算预览路径上的物流桥交叉点（用于渲染物流桥预览）
+    previewBridgeCells = _computePreviewBridgeCells();
   }
 
   List<Offset> _deduplicatePath(List<Offset> path) {
@@ -1172,7 +1281,6 @@ class TransportBeltController {
     }
     if (momentumValid) return _deduplicatePath(momentumPath);
 
-    // BFS 也强制首步方向
     final bfsPath =
         _findPathBFS(start, end, blocked, firstStepDirection: activeDirection);
     return bfsPath != null ? _deduplicatePath(bfsPath) : null;
@@ -1191,7 +1299,6 @@ class TransportBeltController {
     int cx = sx;
     int cy = sy;
 
-    // 如果有起始方向约束，第一步必须按端口方向走
     if (startingDirection != null && (cx != ex || cy != ey)) {
       path.add(Offset(cx.toDouble(), cy.toDouble()));
       switch (startingDirection) {
@@ -1208,7 +1315,6 @@ class TransportBeltController {
           cx += 1;
           break;
       }
-      // 如果第一格正好是终点，直接返回
       if (cx == ex && cy == ey) {
         path.add(Offset(ex.toDouble(), ey.toDouble()));
         return path;
@@ -1274,22 +1380,23 @@ class TransportBeltController {
     if (startKey == endKey) return [start];
     if (blocked.contains(endKey)) return null;
 
-    // 方向常量：[dx, dy] → 方向索引
     // 0=up [0,-1], 1=right [1,0], 2=down [0,1], 3=left [-1,0]
     const dirOffsets = [
       [0, -1], // 0: up
-      [1, 0],  // 1: right
-      [0, 1],  // 2: down
+      [1, 0], // 1: right
+      [0, 1], // 2: down
       [-1, 0], // 3: left
     ];
 
-    // 方向字符串到索引的映射
     int? dirNameToIndex(String? name) => switch (name) {
-      'up' => 0, 'right' => 1, 'down' => 2, 'left' => 3, _ => null,
-    };
+          'up' => 0,
+          'right' => 1,
+          'down' => 2,
+          'left' => 3,
+          _ => null,
+        };
 
     final queue = <_BFSNode>[];
-    // visited: key → (parentKey, parentOffset)
     // 在物流桥格子处，key 包含方向信息以允许不同方向到达同一格子
     final visited = <String, (String?, Offset?)>{};
     final startVisitKey = startKey;
@@ -1305,13 +1412,15 @@ class TransportBeltController {
       if (nodeKey == endKey) {
         // 回溯路径
         final path = <Offset>[];
-        String? vKey = node.incomingDir >= 0 && _findBeltBridgeAtCell(Offset(node.x.toDouble(), node.y.toDouble())) != null
+        String? vKey = node.incomingDir >= 0 &&
+                _findBeltBridgeAtCell(
+                        Offset(node.x.toDouble(), node.y.toDouble())) !=
+                    null
             ? '${node.x}_${node.y}_${node.incomingDir}'
             : nodeKey;
         while (vKey != null) {
           final entry = visited[vKey];
           if (entry == null) break;
-          // 从 key 中提取坐标
           final parts = vKey.split('_');
           path.add(Offset(double.parse(parts[0]), double.parse(parts[1])));
           final parentKey = entry.$1;
@@ -1320,14 +1429,13 @@ class TransportBeltController {
         return path.reversed.toList();
       }
 
-      // 确定允许的扩展方向
       List<int> allowedDirIndices;
       if (nodeKey == startKey && firstStepDirection != null) {
-        // 起始点且有端口方向约束
         final idx = dirNameToIndex(firstStepDirection);
         allowedDirIndices = idx != null ? [idx] : [0, 1, 2, 3];
       } else if (node.incomingDir >= 0 &&
-          _findBeltBridgeAtCell(Offset(node.x.toDouble(), node.y.toDouble())) != null) {
+          _findBeltBridgeAtCell(Offset(node.x.toDouble(), node.y.toDouble())) !=
+              null) {
         // 物流桥格子：只允许沿入方向直线通过
         allowedDirIndices = [node.incomingDir];
       } else {
@@ -1342,17 +1450,22 @@ class TransportBeltController {
         if (blocked.contains(nKey) && nKey != startKey) continue;
 
         // 如果邻居是物流桥格子，visited key 包含方向信息
-        final isNeighborBridge = _findBeltBridgeAtCell(Offset(nx.toDouble(), ny.toDouble())) != null;
+        final isNeighborBridge =
+            _findBeltBridgeAtCell(Offset(nx.toDouble(), ny.toDouble())) != null;
         final visitKey = isNeighborBridge ? '${nx}_${ny}_$dirIdx' : nKey;
 
         if (visited.containsKey(visitKey)) continue;
 
         // 父节点的 visit key
-        final parentVisitKey = node.incomingDir >= 0 && _findBeltBridgeAtCell(Offset(node.x.toDouble(), node.y.toDouble())) != null
+        final parentVisitKey = node.incomingDir >= 0 &&
+                _findBeltBridgeAtCell(
+                        Offset(node.x.toDouble(), node.y.toDouble())) !=
+                    null
             ? '${node.x}_${node.y}_${node.incomingDir}'
             : nodeKey;
 
-        visited[visitKey] = (parentVisitKey, Offset(node.x.toDouble(), node.y.toDouble()));
+        visited[visitKey] =
+            (parentVisitKey, Offset(node.x.toDouble(), node.y.toDouble()));
         queue.add(_BFSNode(nx, ny, dirIdx));
       }
     }
@@ -1391,7 +1504,7 @@ class TransportBeltController {
 
 class _BFSNode {
   final int x, y;
-  /// 进入此格子的方向：0=up, 1=right, 2=down, 3=left, -1=起点无方向
+
   final int incomingDir;
   _BFSNode(this.x, this.y, this.incomingDir);
 }

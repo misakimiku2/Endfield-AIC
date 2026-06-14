@@ -612,5 +612,120 @@ void main() {
       expect(downstream.itemSegments.single.drainCount, 0);
       expect(downstream.phaseOffset, 0.42);
     });
+
+    test('bridge continuation only joins matching lane', () {
+      final project = ProjectState(
+        buildings: [
+          PlacedBuilding(
+            id: 'bridge',
+            building: testBeltBridge,
+            gridX: 0,
+            gridY: 0,
+          ),
+        ],
+        conveyors: [
+          ConveyorBelt(
+            id: 'vertical_belt',
+            path: const [
+              Offset(0, -2),
+              Offset(0, -1),
+              Offset(0, 0),
+              Offset(0, 1),
+              Offset(0, 2),
+            ],
+            itemId: '',
+          ),
+          ConveyorBelt(
+            id: 'left_belt',
+            path: const [
+              Offset(-2, 0),
+              Offset(-1, 0),
+              Offset(0, 0),
+            ],
+            itemId: '',
+          ),
+        ],
+      );
+
+      final controller = TransportBeltController(
+        project: project,
+        onProjectChanged: (_) {},
+        onRebuildCache: () {},
+        notifyListeners: () {},
+      );
+
+      expect(controller.handleTap(const Offset(0, 0)), true);
+      expect(controller.handleTap(const Offset(1, 0)), true);
+      controller.handleRightClick();
+
+      expect(
+        project.conveyors.any((belt) => belt.id == 'vertical_belt'),
+        true,
+      );
+      expect(
+        project.conveyors.any((belt) => belt.id == 'left_belt'),
+        false,
+      );
+      expect(
+        project.conveyors.any((belt) =>
+            belt.path.length == 4 &&
+            belt.path[0] == const Offset(-2, 0) &&
+            belt.path[1] == const Offset(-1, 0) &&
+            belt.path[2] == const Offset(0, 0) &&
+            belt.path[3] == const Offset(1, 0)),
+        true,
+      );
+    });
+
+    test('bridge start preview rejects occupied adjacent lane', () {
+      final project = ProjectState(
+        buildings: [
+          PlacedBuilding(
+            id: 'bridge',
+            building: testBeltBridge,
+            gridX: 0,
+            gridY: 0,
+          ),
+        ],
+        conveyors: [
+          ConveyorBelt(
+            id: 'vertical_belt',
+            path: const [
+              Offset(0, -2),
+              Offset(0, -1),
+              Offset(0, 0),
+              Offset(0, 1),
+            ],
+            itemId: '',
+          ),
+          ConveyorBelt(
+            id: 'left_belt',
+            path: const [
+              Offset(-2, 0),
+              Offset(-1, 0),
+              Offset(0, 0),
+            ],
+            itemId: '',
+          ),
+        ],
+      );
+
+      final controller = TransportBeltController(
+        project: project,
+        onProjectChanged: (_) {},
+        onRebuildCache: () {},
+        notifyListeners: () {},
+      );
+
+      expect(controller.handleTap(const Offset(0, 0)), true);
+      controller.handleHover(const Offset(-1, 0));
+      expect(controller.pathInvalid, true);
+      controller.handleHover(const Offset(0, -1));
+      expect(controller.pathInvalid, true);
+      controller.handleHover(const Offset(0, 1));
+      expect(controller.pathInvalid, true);
+      controller.handleHover(const Offset(1, 0));
+      expect(controller.pathInvalid, false);
+    });
   });
 }

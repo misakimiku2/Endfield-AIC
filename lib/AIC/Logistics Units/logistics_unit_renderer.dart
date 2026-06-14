@@ -30,6 +30,7 @@ class LogisticsUnitRenderer {
   static const Color _blockedOverlayColor = Color(0x40FF0000);
 
   static final Map<String, PictureInfo> _pictures = {};
+  static final Map<String, PictureInfo> _previewPictures = {};
   static bool _initialized = false;
   static bool _initializing = false;
   static int _cacheVersion = 0;
@@ -51,6 +52,9 @@ class LogisticsUnitRenderer {
         final cleaned = _cleanInkscapeSvg(raw);
         _pictures[entry.key] =
             await vg.loadPicture(SvgStringLoader(cleaned), null);
+        final previewCleaned = _makePreviewSvg(cleaned);
+        _previewPictures[entry.key] =
+            await vg.loadPicture(SvgStringLoader(previewCleaned), null);
       }
       _initialized = true;
       _cacheVersion++;
@@ -112,20 +116,21 @@ class LogisticsUnitRenderer {
     int rotation = 0,
     bool isBlocked = false,
     double canvasRotation = 0.0,
+    Color? previewColorOverride,
   }) {
     final x = gridX * cellSize;
     final y = gridY * cellSize;
     final w = building.gridWidth * cellSize;
     final h = building.gridHeight * cellSize;
-    final previewColor =
-        isBlocked ? const Color(0xFFFF4444) : const Color(0xFF44AAFF);
+    final previewColor = previewColorOverride ??
+        (isBlocked ? const Color(0xFFFF4444) : const Color(0xFF44AAFF));
 
     canvas.save();
     canvas.translate(x + w / 2, y + h / 2);
     canvas.rotate(rotation * math.pi / 2);
     canvas.translate(-w / 2, -h / 2);
 
-    final picture = _pictures[building.id];
+    final picture = _previewPictures[building.id] ?? _pictures[building.id];
     if (picture != null) {
       canvas.saveLayer(
         Rect.fromLTWH(0, 0, w, h),
@@ -231,5 +236,14 @@ class LogisticsUnitRenderer {
     result = result.replaceAll(RegExp(r'\s+xmlns:xlink="[^"]*"'), '');
 
     return result;
+  }
+
+  /// 生成预览用 SVG：将 BG 元素（fill:#e4e4e4）的 fill-opacity 降为 0.2，
+  /// 使预览时条纹/边框清晰可见而背景几乎透明。
+  static String _makePreviewSvg(String cleanedSvg) {
+    return cleanedSvg.replaceAll(
+      'fill:#e4e4e4;fill-opacity:1',
+      'fill:#e4e4e4;fill-opacity:0.2',
+    );
   }
 }
