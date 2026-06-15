@@ -10,6 +10,7 @@ import 'building_shared_widgets.dart';
 import 'building_resource_panel.dart';
 import 'building_depot_panel.dart';
 import 'building_synthesis_panel.dart';
+import 'building_logistics_bridge_panel.dart';
 
 class BuildingDetailDialog extends StatefulWidget {
   final PlacedBuilding placedBuilding;
@@ -91,6 +92,9 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
 
   bool get _isDepotLoader =>
       widget.placedBuilding.building.id == 'depot_loader_3x1';
+
+  bool get _isLogisticsBridge =>
+      widget.placedBuilding.building.id == 'belt_bridge_1x1';
 
   void _toggleDepotAddMode() {
     setState(() {
@@ -203,21 +207,24 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
               children: [
                 _buildWindowInfoBar(),
                 _buildSeparator(),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 20, top: 8, bottom: 4),
-                    child: _buildPowerSwitch(),
+                if (!_isLogisticsBridge)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 20, top: 8, bottom: 4),
+                      child: _buildPowerSwitch(),
+                    ),
                   ),
-                ),
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildResourcePanel(),
-                        const SizedBox(width: 20),
+                        if (!_isLogisticsBridge) ...[
+                          _buildResourcePanel(),
+                          const SizedBox(width: 20),
+                        ],
                         Expanded(
                           child: _isDepotUnloader
                               ? DepotUnloaderPanel(
@@ -235,15 +242,23 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                                       onMove: widget.onMove,
                                       onDelete: widget.onDelete,
                                     )
-                                  : DefaultSynthesisPanel(
-                                      placedBuilding: widget.placedBuilding,
-                                      dataLoader: widget.dataLoader,
-                                      conveyors: widget.conveyors,
-                                      recipes: recipes,
-                                      onMove: widget.onMove,
-                                      onDelete: widget.onDelete,
-                                      onInventoryChanged: widget.onInventoryChanged,
-                                    ),
+                                  : _isLogisticsBridge
+                                      ? LogisticsBridgePanel(
+                                          placedBuilding: widget.placedBuilding,
+                                          dataLoader: widget.dataLoader,
+                                          conveyors: widget.conveyors,
+                                          onMove: widget.onMove,
+                                          onDelete: widget.onDelete,
+                                        )
+                                      : DefaultSynthesisPanel(
+                                          placedBuilding: widget.placedBuilding,
+                                          dataLoader: widget.dataLoader,
+                                          conveyors: widget.conveyors,
+                                          recipes: recipes,
+                                          onMove: widget.onMove,
+                                          onDelete: widget.onDelete,
+                                          onInventoryChanged: widget.onInventoryChanged,
+                                        ),
                         ),
                       ],
                     ),
