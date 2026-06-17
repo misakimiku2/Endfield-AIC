@@ -101,18 +101,18 @@ class ResourceGridTileState extends State<ResourceGridTile> {
     return MouseRegion(
       onEnter: _onEnter,
       onExit: (_) => setState(() => _hovering = false),
-      child: AnimatedScale(
-        scale: _hovering ? 1.08 : 1.0,
-        duration: const Duration(milliseconds: 150),
-        child: Stack(
-          fit: StackFit.expand,
-          clipBehavior: Clip.none,
-          children: [
-            SvgPicture.string(
-              gridTileSvg(widget.item.level, isHovered: _hovering),
-              fit: BoxFit.fill,
-            ),
-            Center(
+      child: Stack(
+        fit: StackFit.expand,
+        clipBehavior: Clip.none,
+        children: [
+          SvgPicture.string(
+            gridTileSvg(widget.item.level, isHovered: _hovering),
+            fit: BoxFit.fill,
+          ),
+          Center(
+            child: AnimatedScale(
+              scale: _hovering ? 1.08 : 1.0,
+              duration: const Duration(milliseconds: 150),
               child: widget.item.imageAssetPath.isNotEmpty
                   ? Image.asset(
                       widget.item.imageAssetPath,
@@ -147,6 +147,7 @@ class ResourceGridTileState extends State<ResourceGridTile> {
                       ),
                     ),
             ),
+          ),
             if (widget.showAddIcon)
               Positioned(
                 right: 4,
@@ -210,7 +211,6 @@ class ResourceGridTileState extends State<ResourceGridTile> {
               ),
           ],
         ),
-      ),
     );
   }
 }

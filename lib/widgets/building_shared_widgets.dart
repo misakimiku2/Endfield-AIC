@@ -99,6 +99,36 @@ class _ActionButtonState extends State<ActionButton> {
   }
 }
 
+/// 弹窗背景花纹（endfield-industries logo，白色 10% 透明度）
+/// 用于所有弹窗背景装饰，定位在弹窗右上区域。
+/// 花纹距离窗口背景边框顶部 80px，距离左侧窗口背景边框 740px，大小 800px。
+class DialogBackgroundPattern extends StatelessWidget {
+  const DialogBackgroundPattern({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: 80,
+      left: 740,
+      child: IgnorePointer(
+        child: Opacity(
+          opacity: 0.02,
+          child: SvgPicture.asset(
+            'assets/png/window/endfield-industries.svg',
+            width: 800,
+            height: 800,
+            fit: BoxFit.contain,
+            colorFilter: const ColorFilter.mode(
+              Colors.white,
+              BlendMode.srcIn,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 悬停变色关闭按钮
 class HoverCloseButton extends StatefulWidget {
   final VoidCallback onTap;

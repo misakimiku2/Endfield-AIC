@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -140,7 +140,14 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
     final logoPath = widget.placedBuilding.building.logoAssetPath;
     if (logoPath.isEmpty) return;
     try {
-      final raw = await rootBundle.loadString(logoPath);
+      var raw = await rootBundle.loadString(logoPath);
+      // 物流桥的SVG包含实心BG背景元素，需要移除
+      if (_isLogisticsBridge) {
+        raw = raw.replaceAll(
+          RegExp(r'<rect[^>]*inkscape:label="BG"[^>]*/>'),
+          '',
+        );
+      }
       final white = raw
           .replaceAllMapped(
             RegExp(r'fill:\s*#[0-9a-fA-F]+'),
@@ -203,66 +210,71 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: const Color(0xFF444444)),
             ),
-            child: Column(
+            child: Stack(
               children: [
-                _buildWindowInfoBar(),
-                _buildSeparator(),
-                if (!_isLogisticsBridge)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 20, top: 8, bottom: 4),
-                      child: _buildPowerSwitch(),
-                    ),
-                  ),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (!_isLogisticsBridge) ...[
-                          _buildResourcePanel(),
-                          const SizedBox(width: 20),
-                        ],
-                        Expanded(
-                          child: _isDepotUnloader
-                              ? DepotUnloaderPanel(
-                                  placedBuilding: widget.placedBuilding,
-                                  dataLoader: widget.dataLoader,
-                                  onMove: widget.onMove,
-                                  onDelete: widget.onDelete,
-                                  onOutputItemSelected: widget.onOutputItemSelected,
-                                  isAddMode: _isAddMode,
-                                  selectedOutputItemId: _selectedOutputItemId,
-                                  onToggleAddMode: _toggleDepotAddMode,
-                                )
-                              : _isDepotLoader
-                                  ? DepotLoaderPanel(
+                const DialogBackgroundPattern(),
+                Column(
+                  children: [
+                    _buildWindowInfoBar(),
+                    _buildSeparator(),
+                    if (!_isLogisticsBridge)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 20, top: 8, bottom: 4),
+                          child: _buildPowerSwitch(),
+                        ),
+                      ),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (!_isLogisticsBridge) ...[
+                              _buildResourcePanel(),
+                              const SizedBox(width: 20),
+                            ],
+                            Expanded(
+                              child: _isDepotUnloader
+                                  ? DepotUnloaderPanel(
+                                      placedBuilding: widget.placedBuilding,
+                                      dataLoader: widget.dataLoader,
                                       onMove: widget.onMove,
                                       onDelete: widget.onDelete,
+                                      onOutputItemSelected: widget.onOutputItemSelected,
+                                      isAddMode: _isAddMode,
+                                      selectedOutputItemId: _selectedOutputItemId,
+                                      onToggleAddMode: _toggleDepotAddMode,
                                     )
-                                  : _isLogisticsBridge
-                                      ? LogisticsBridgePanel(
-                                          placedBuilding: widget.placedBuilding,
-                                          dataLoader: widget.dataLoader,
-                                          conveyors: widget.conveyors,
+                                  : _isDepotLoader
+                                      ? DepotLoaderPanel(
                                           onMove: widget.onMove,
                                           onDelete: widget.onDelete,
                                         )
-                                      : DefaultSynthesisPanel(
-                                          placedBuilding: widget.placedBuilding,
-                                          dataLoader: widget.dataLoader,
-                                          conveyors: widget.conveyors,
-                                          recipes: recipes,
-                                          onMove: widget.onMove,
-                                          onDelete: widget.onDelete,
-                                          onInventoryChanged: widget.onInventoryChanged,
-                                        ),
+                                      : _isLogisticsBridge
+                                          ? LogisticsBridgePanel(
+                                              placedBuilding: widget.placedBuilding,
+                                              dataLoader: widget.dataLoader,
+                                              conveyors: widget.conveyors,
+                                              onMove: widget.onMove,
+                                              onDelete: widget.onDelete,
+                                            )
+                                          : DefaultSynthesisPanel(
+                                              placedBuilding: widget.placedBuilding,
+                                              dataLoader: widget.dataLoader,
+                                              conveyors: widget.conveyors,
+                                              recipes: recipes,
+                                              onMove: widget.onMove,
+                                              onDelete: widget.onDelete,
+                                              onInventoryChanged: widget.onInventoryChanged,
+                                            ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ],
             ),
@@ -295,20 +307,22 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
               ),
             ),
           ),
-          _buildSeparatorVertical(),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 20),
-              child: Text(
-                '耗电功率值：${building.powerConsumption.toStringAsFixed(0)}W',
-                style: const TextStyle(
-                  color: Color(0xFFA6A6A6),
-                  fontSize: 16,
+          if (!_isLogisticsBridge) ...[
+            _buildSeparatorVertical(),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 20),
+                child: Text(
+                  '耗电功率值：${building.powerConsumption.toStringAsFixed(0)}W',
+                  style: const TextStyle(
+                    color: Color(0xFFA6A6A6),
+                    fontSize: 16,
+                  ),
                 ),
               ),
             ),
-          ),
+          ],
           const Spacer(),
           _buildCloseButton(),
           const SizedBox(width: 24),

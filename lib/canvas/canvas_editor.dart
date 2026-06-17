@@ -919,6 +919,7 @@ class CanvasEditorState extends State<CanvasEditor>
       onStoreSingle: () => _removeBeltCell(targetBeltId, clickedCell),
       onStoreLine: () => _storeBeltLineByIds(lineIds),
       onCollectAll: () => _collectAllFromLine(allLineBelts),
+      onCollectItem: (itemId) => _collectItemFromLine(allLineBelts, itemId),
     );
   }
 
@@ -1044,6 +1045,21 @@ class CanvasEditorState extends State<CanvasEditor>
       if (belt.itemId.isNotEmpty || belt.itemSegments.isNotEmpty) {
         setState(() {
           belt.itemSegments.clear();
+          belt.syncLegacyFromSegments();
+        });
+      }
+    }
+    widget.onProjectChanged(_project);
+  }
+
+  /// 收取产线上指定 itemId 的所有物品段
+  void _collectItemFromLine(List<ConveyorBelt> belts, String itemId) {
+    for (final belt in belts) {
+      final hasTarget =
+          belt.itemSegments.any((s) => s.itemId == itemId && s.hasItems);
+      if (hasTarget) {
+        setState(() {
+          belt.itemSegments.removeWhere((s) => s.itemId == itemId);
           belt.syncLegacyFromSegments();
         });
       }

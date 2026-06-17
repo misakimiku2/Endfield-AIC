@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import '../models/project.dart';
 import '../models/item.dart';
 import '../data/data_loader.dart';
@@ -54,6 +55,7 @@ class _LogisticsBridgePanelState extends State<LogisticsBridgePanel>
   static const double _trackLength = 480.0;
   static const double _trackWidth = 54.0;
   static const double _itemSize = 40.0;
+  static const double _slotSize = 96.0;
 
   // 等轴测角度：X轴30°，Y轴150°，两轴夹角120°
   static const double _trackAngleA = math.pi / 6;
@@ -245,60 +247,143 @@ class _LogisticsBridgePanelState extends State<LogisticsBridgePanel>
         ),
         const SizedBox(height: 20),
         Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final centerX = constraints.maxWidth / 2;
-              final centerY = constraints.maxHeight / 2;
-              final trackAConnected = _isTrackConnected(0);
-              final trackBConnected = _isTrackConnected(1);
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 左侧：设备文字说明 + 物流速度
+              _buildDescriptionPanel(),
+              const SizedBox(width: 20),
+              // 右侧：轨道组件
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final centerX = constraints.maxWidth / 2;
+                    final centerY = constraints.maxHeight / 2;
+                    final trackAConnected = _isTrackConnected(0);
+                    final trackBConnected = _isTrackConnected(1);
 
-              return Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  // 1. 下方轨道 B（先画，位于底层）
-                  AnimatedBuilder(
-                    animation: _arrowController,
-                    builder: (context, child) {
-                      return CustomPaint(
-                        size: Size(constraints.maxWidth, constraints.maxHeight),
-                        painter: _BridgeTrackPainter(
-                          trackType: _BridgeTrackType.b,
-                          isActive: trackBConnected,
-                          animationValue:
-                              trackBConnected ? _arrowController.value : 0,
-                          trackLength: _trackLength,
-                          trackWidth: _trackWidth,
+                    return Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        // 1. 下方轨道 B（先画，位于底层）
+                        AnimatedBuilder(
+                          animation: _arrowController,
+                          builder: (context, child) {
+                            return CustomPaint(
+                              size: Size(constraints.maxWidth, constraints.maxHeight),
+                              painter: _BridgeTrackPainter(
+                                trackType: _BridgeTrackType.b,
+                                isActive: trackBConnected,
+                                animationValue:
+                                    trackBConnected ? _arrowController.value : 0,
+                                trackLength: _trackLength,
+                                trackWidth: _trackWidth,
+                              ),
+                            );
+                          },
                         ),
-                      );
-                    },
-                  ),
-                  // 2. 轨道 B 的物品（位于轨道 B 之上，轨道 A 之下）
-                  ..._buildItemWidgetsForTrack(1, centerX, centerY),
-                  // 3. 上方轨道 A（后画，遮挡轨道 B 的物品）
-                  AnimatedBuilder(
-                    animation: _arrowController,
-                    builder: (context, child) {
-                      return CustomPaint(
-                        size: Size(constraints.maxWidth, constraints.maxHeight),
-                        painter: _BridgeTrackPainter(
-                          trackType: _BridgeTrackType.a,
-                          isActive: trackAConnected,
-                          animationValue:
-                              trackAConnected ? _arrowController.value : 0,
-                          trackLength: _trackLength,
-                          trackWidth: _trackWidth,
+                        // 2. 轨道 B 的物品（位于轨道 B 之上，轨道 A 之下）
+                        ..._buildItemWidgetsForTrack(1, centerX, centerY),
+                        // 3. 上方轨道 A（后画，遮挡轨道 B 的物品）
+                        AnimatedBuilder(
+                          animation: _arrowController,
+                          builder: (context, child) {
+                            return CustomPaint(
+                              size: Size(constraints.maxWidth, constraints.maxHeight),
+                              painter: _BridgeTrackPainter(
+                                trackType: _BridgeTrackType.a,
+                                isActive: trackAConnected,
+                                animationValue:
+                                    trackAConnected ? _arrowController.value : 0,
+                                trackLength: _trackLength,
+                                trackWidth: _trackWidth,
+                              ),
+                            );
+                          },
                         ),
-                      );
-                    },
-                  ),
-                  // 4. 轨道 A 的物品（位于最上层）
-                  ..._buildItemWidgetsForTrack(0, centerX, centerY),
-                ],
-              );
-            },
+                        // 4. 轨道 A 的物品（位于最上层）
+                        ..._buildItemWidgetsForTrack(0, centerX, centerY),
+                        // 5. 轨道两端的物品格子
+                        ..._buildTrackEndSlots(centerX, centerY),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildDescriptionPanel() {
+    return const SizedBox(
+      width: 440,
+      child: Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20),
+          child: Stack(
+            children: [
+              // 设备文字说明：底部留空给物流速度
+              Padding(
+                padding: EdgeInsets.only(bottom: 56),
+                child: Text(
+                  '可让多条（最多3条）分支传送带汇流传输到1条传送带的物流工具。',
+                  style: TextStyle(
+                    color: Color(0xFFDDDDDD),
+                    fontSize: 16,
+                    height: 1.6,
+                  ),
+                ),
+              ),
+              // 物流速度信息：定位到文字说明右下角
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '物流速度',
+                      style: TextStyle(
+                        color: Color(0xFF888888),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          '0.5',
+                          style: TextStyle(
+                            color: Color(0xFF888888),
+                            fontSize: 28,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          '单位/秒',
+                          style: TextStyle(
+                            color: Color(0xFF888888),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -386,6 +471,124 @@ class _LogisticsBridgePanelState extends State<LogisticsBridgePanel>
         ),
       ),
     );
+  }
+
+  /// 构建轨道两端的物品格子
+  List<Widget> _buildTrackEndSlots(double centerX, double centerY) {
+    final widgets = <Widget>[];
+    final trackAConnected = _isTrackConnected(0);
+    final trackBConnected = _isTrackConnected(1);
+
+    // Track A 两端 (角度 30°)
+    final aItemId = _pickItemIdForTrack(0);
+    final aItem = aItemId != null ? widget.dataLoader.getItem(aItemId) : null;
+    const halfLen = _trackLength / 2;
+    // 轨道 A 两端在屏幕上的位置
+    final aEnd1X = centerX + (-halfLen) * math.cos(_trackAngleA);
+    final aEnd1Y = centerY + (-halfLen) * math.sin(_trackAngleA);
+    final aEnd2X = centerX + halfLen * math.cos(_trackAngleA);
+    final aEnd2Y = centerY + halfLen * math.sin(_trackAngleA);
+
+    widgets.add(_buildSlotWidget(
+      aEnd1X, aEnd1Y, aItem, trackAConnected,
+    ));
+    widgets.add(_buildSlotWidget(
+      aEnd2X, aEnd2Y, aItem, trackAConnected,
+    ));
+
+    // Track B 两端 (角度 150°)
+    final bItemId = _pickItemIdForTrack(1);
+    final bItem = bItemId != null ? widget.dataLoader.getItem(bItemId) : null;
+    final bEnd1X = centerX + (-halfLen) * math.cos(_trackAngleB);
+    final bEnd1Y = centerY + (-halfLen) * math.sin(_trackAngleB);
+    final bEnd2X = centerX + halfLen * math.cos(_trackAngleB);
+    final bEnd2Y = centerY + halfLen * math.sin(_trackAngleB);
+
+    widgets.add(_buildSlotWidget(
+      bEnd1X, bEnd1Y, bItem, trackBConnected,
+    ));
+    widgets.add(_buildSlotWidget(
+      bEnd2X, bEnd2Y, bItem, trackBConnected,
+    ));
+
+    return widgets;
+  }
+
+  Widget _buildSlotWidget(
+      double x, double y, Item? dataItem, bool isActive) {
+    final level = dataItem?.level;
+    final hasItem = dataItem != null;
+
+    return Positioned(
+      left: x - _slotSize / 2,
+      top: y - _slotSize / 2,
+      child: SizedBox(
+        width: _slotSize,
+        height: _slotSize,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            SvgPicture.string(
+              _getGridSvg(level, isActive),
+              fit: BoxFit.fill,
+            ),
+            if (hasItem && dataItem.imageAssetPath.isNotEmpty)
+              Center(
+                child: AnimatedOpacity(
+                  opacity: isActive ? 1.0 : 0.3,
+                  duration: const Duration(milliseconds: 300),
+                  child: Image.asset(
+                    dataItem.imageAssetPath,
+                    width: _slotSize,
+                    height: _slotSize,
+                    cacheWidth: 192,
+                    cacheHeight: 192,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.medium,
+                    isAntiAlias: true,
+                    errorBuilder: (_, __, ___) =>
+                        _buildItemPlaceholder(dataItem),
+                  ),
+                ),
+              )
+            else if (hasItem)
+              Center(child: _buildItemPlaceholder(dataItem)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _getGridSvg(int? level, bool isActive) {
+    if (!isActive) {
+      return '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">'
+          '<rect x="0" y="0" width="128" height="128" rx="15" ry="15" fill="#4a4a4a"/>'
+          '</svg>';
+    }
+
+    const gradientEndColors = {
+      2: '#93e8a4',
+      3: '#6d9bf1',
+      4: '#b73cc5',
+    };
+    const tagColors = {
+      2: '#44aa00',
+      3: '#0082ea',
+      4: '#b73cc5',
+    };
+    final endColor = gradientEndColors[level] ?? '#dddddd';
+    final tagColor = tagColors[level] ?? '#ebebeb';
+    final hasItem = level != null;
+
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">'
+        '<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">'
+        '<stop offset="0" stop-color="#696969"/>'
+        '<stop offset="0.7" stop-color="#696969"/>'
+        '<stop offset="1" stop-color="$endColor"/>'
+        '</linearGradient></defs>'
+        '<rect x="0" y="0" width="128" height="128" rx="15" ry="15" fill="${hasItem ? "url(#g)" : "#696969"}"/>'
+        '${hasItem ? '<path d="m 1,118 c 2,5.8 7.6,10 14,10 h 98 c 6.4,0 12,-4.2 14,-10 z" fill="$tagColor"/>' : ''}'
+        '</svg>';
   }
 }
 
