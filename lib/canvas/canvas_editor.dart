@@ -1929,7 +1929,9 @@ class _EditorPainter extends CustomPainter {
         }
       }
       if (hidesTerminalCell) {
-        renderPath = belt.path.sublist(0, belt.path.length - 1);
+        // 不裁剪路径：保留完整路径以便物品能自然传输到终点格。
+        // 终点格的背景由预览覆盖，通过 hideTerminalBackground 标志
+        // 在渲染器中跳过背景绘制，但物品仍正常渲染。
       }
 
       if (renderPath.isEmpty) {
@@ -2034,7 +2036,8 @@ class _EditorPainter extends CustomPainter {
             detailLevel: detailLevel,
             arrowProgress: belt.animationProgress(beltArrowController.value),
             lastItem: lastItem,
-            allItems: dataLoader.items);
+            allItems: dataLoader.items,
+            hideTerminalBackground: hidesTerminalCell);
       }
     }
 

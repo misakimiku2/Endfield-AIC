@@ -443,6 +443,7 @@ class TransportBeltRenderer {
     double arrowProgress = 0.0,
     Item? lastItem,
     Map<String, Item>? allItems,
+    bool hideTerminalBackground = false,
   }) {
     if (belt.path.isEmpty) return;
 
@@ -590,6 +591,7 @@ class TransportBeltRenderer {
             belt.lastItemDrainCount.clamp(0, belt.path.length).toInt(),
         itemSegments: renderSegments,
         segmentImages: segmentImages,
+        hideTerminalBackground: hideTerminalBackground,
       );
     } else {
       for (int i = 0; i < belt.path.length; i++) {
@@ -677,9 +679,13 @@ class TransportBeltRenderer {
     int lastItemDrainCount = 0,
     List<ConveyorItemSegment>? itemSegments,
     Map<String, ui.Image?>? segmentImages,
+    bool hideTerminalBackground = false,
   }) {
     // 第一次绘制：只绘制背景（传送带）
+    // 当 hideTerminalBackground=true 时，跳过最后一格的背景绘制
+    // （该格由预览覆盖），但物品仍需在第二趟绘制中渲染
     for (int i = 0; i < path.length; i++) {
+      if (hideTerminalBackground && i == path.length - 1) continue;
       final cell = path[i];
       final cx = cell.dx * cellSize + cellSize / 2;
       final cy = cell.dy * cellSize + cellSize / 2;
@@ -796,7 +802,7 @@ class TransportBeltRenderer {
         incomingDirection: incomingDirection,
         arrowProgress: cellArrowProgress,
         drawBackground: false,
-        drawPointer: true,
+        drawPointer: !(hideTerminalBackground && i == path.length - 1),
         itemImage: cellItemImage,
       );
       canvas.restore();
