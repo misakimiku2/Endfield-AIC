@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_svg/flutter_svg.dart';
 import '../models/item.dart';
 import '../models/recipe.dart';
@@ -257,7 +258,7 @@ class MiniItemTile extends StatelessWidget {
                 cacheWidth: 162,
                 cacheHeight: 162,
                 fit: BoxFit.contain,
-                filterQuality: FilterQuality.medium,
+                filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
                 isAntiAlias: true,
                 errorBuilder: (_, __, ___) => Container(),
               ),

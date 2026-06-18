@@ -1,0 +1,113 @@
+══╡ EXCEPTION CAUGHT BY WIDGETS LIBRARY ╞═══════════════════════════════════════════════════════════
+The following TypeErrorImpl was thrown building ListenableBuilder(listenable:
+ScrollController#cd343(one client, offset 0.0), dirty, state: _AnimatedState#71d98):
+Unexpected null value.
+
+The relevant error-causing widget was:
+  ListenableBuilder
+  ListenableBuilder:file:///C:/Users/Misaki/Desktop/git/Endfield/lib/widgets/building_detail_dialog.dart:693:16
+
+When the exception was thrown, this was the stack:
+dart-sdk/lib/_internal/js_dev_runtime/private/ddc_runtime/errors.dart 266:3       throw_
+dart-sdk/lib/_internal/js_dev_runtime/private/profile.dart 117:39                 nullCheck
+package:flutter/src/widgets/scroll_position.dart 239:49                           get maxScrollExtent
+package:endfield_aic_planner/widgets/building_detail_dialog.dart 699:39           <fn>
+package:flutter/src/widgets/transitions.dart 1147:48                              build
+package:flutter/src/widgets/transitions.dart 139:48                               build
+package:flutter/src/widgets/framework.dart 5823:27                                build
+package:flutter/src/widgets/framework.dart 5715:15                                performRebuild
+package:flutter/src/widgets/framework.dart 5874:11                                performRebuild
+package:flutter/src/widgets/framework.dart 5427:7                                 rebuild
+package:flutter/src/widgets/framework.dart 5697:5                                 [_firstBuild]
+package:flutter/src/widgets/framework.dart 5865:11                                [_firstBuild]
+package:flutter/src/widgets/framework.dart 5691:5                                 mount
+...     Normal element mounting (24 frames)
+package:flutter/src/widgets/framework.dart 4539:15                                inflateWidget
+package:flutter/src/widgets/framework.dart 7159:36                                inflateWidget
+package:flutter/src/widgets/framework.dart 7175:32                                mount
+...     Normal element mounting (19 frames)
+package:flutter/src/widgets/framework.dart 4539:15                                inflateWidget
+package:flutter/src/widgets/framework.dart 7159:36                                inflateWidget
+package:flutter/src/widgets/framework.dart 7175:32                                mount
+...     Normal element mounting (10 frames)
+package:flutter/src/widgets/framework.dart 4539:15                                inflateWidget
+package:flutter/src/widgets/framework.dart 7159:36                                inflateWidget
+package:flutter/src/widgets/framework.dart 7175:32                                mount
+package:flutter/src/widgets/framework.dart 4539:15                                inflateWidget
+package:flutter/src/widgets/framework.dart 7159:36                                inflateWidget
+package:flutter/src/widgets/framework.dart 7175:32                                mount
+...     Normal element mounting (16 frames)
+package:flutter/src/widgets/framework.dart 4539:15                                inflateWidget
+package:flutter/src/widgets/framework.dart 4004:18                                updateChild
+package:flutter/src/widgets/layout_builder.dart 249:18                            updateChildCallback
+package:flutter/src/widgets/framework.dart 3046:11                                buildScope
+package:flutter/src/widgets/layout_builder.dart 272:5                             [_rebuildWithConstraints]
+dart-sdk/lib/_internal/js_dev_runtime/private/ddc_runtime/operations.dart 117:77  tear
+package:flutter/src/widgets/layout_builder.dart 335:28                            layoutCallback
+package:flutter/src/rendering/object.dart 4160:33                                 <fn>
+package:flutter/src/rendering/object.dart 2885:9                                  <fn>
+package:flutter/src/rendering/object.dart 1209:7                                  [_enableMutationsToDirtySubtrees]
+package:flutter/src/rendering/object.dart 2884:7                                  invokeLayoutCallback
+package:flutter/src/rendering/object.dart 4160:5                                  runLayoutCallback
+package:flutter/src/widgets/layout_builder.dart 449:5                             performLayout
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/proxy_box.dart 115:10                               <fn>
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/proxy_box.dart 115:10                               <fn>
+package:flutter/src/rendering/custom_paint.dart 574:11                            performLayout
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/proxy_box.dart 115:10                               <fn>
+package:flutter/src/rendering/proxy_box.dart 1483:11                              performLayout
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/proxy_box.dart 293:7                                performLayout
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/shifted_box.dart 465:7                              performLayout
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/shifted_box.dart 243:5                              performLayout
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/proxy_box.dart 115:10                               <fn>
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/shifted_box.dart 243:5                              performLayout
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/shifted_box.dart 243:5                              performLayout
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/proxy_box.dart 115:10                               <fn>
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/proxy_box.dart 115:10                               <fn>
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/proxy_box.dart 115:10                               <fn>
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/proxy_box.dart 115:10                               <fn>
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/proxy_box.dart 115:10                               <fn>
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/proxy_box.dart 115:10                               <fn>
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/proxy_box.dart 115:10                               <fn>
+package:flutter/src/rendering/proxy_box.dart 3857:13                              performLayout
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/rendering/proxy_box.dart 115:10                               <fn>
+package:flutter/src/rendering/object.dart 2766:7                                  layout
+package:flutter/src/widgets/overlay.dart 1085:12                                  layoutChild
+package:flutter/src/widgets/overlay.dart 1431:9                                   performLayout
+package:flutter/src/rendering/object.dart 2614:7                                  [_layoutWithoutResize]
+package:flutter/src/rendering/object.dart 1160:17                                 flushLayout
+package:flutter/src/rendering/object.dart 1173:14                                 flushLayout
+package:flutter/src/rendering/binding.dart 629:5                                  drawFrame
+package:flutter/src/widgets/binding.dart 1242:13                                  drawFrame
+package:flutter/src/rendering/binding.dart 495:5                                  [_handlePersistentFrameCallback]
+dart-sdk/lib/_internal/js_dev_runtime/private/ddc_runtime/operations.dart 117:77  tear
+package:flutter/src/scheduler/binding.dart 1438:7                                 [_invokeFrameCallback]
+package:flutter/src/scheduler/binding.dart 1351:9                                 handleDrawFrame
+package:flutter/src/scheduler/binding.dart 1204:5                                 [_handleDrawFrame]
+dart-sdk/lib/_internal/js_dev_runtime/private/ddc_runtime/operations.dart 117:77  tear
+lib/_engine/engine/platform_dispatcher.dart 1312:5                                invoke
+lib/_engine/engine/platform_dispatcher.dart 255:5                                 invokeOnDrawFrame
+lib/_engine/engine/frame_service.dart 189:32                                      [_renderFrame]
+lib/_engine/engine/frame_service.dart 101:9                                       <fn>
+dart-sdk/lib/async/zone.dart 1849:54                                              runUnary
+dart-sdk/lib/async/zone.dart 1804:26                                              <fn>
+dart-sdk/lib/_internal/js_dev_runtime/patch/js_allow_interop_patch.dart 224:27    _callDartFunctionFast1
+
+════════════════════════════════════════════════════════════════════════════════════════════════════
+unhandled element <style/>; Picture key: Svg loader

@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../models/project.dart';
@@ -39,7 +41,12 @@ class DefaultSynthesisPanel extends StatefulWidget {
 class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
   bool _isLiquidMode = false;
   bool _isLiquidHover = false;
-  String? _liquidSwitchSvgString;
+  Timer? _simTimer;
+  // 液体开关 4 种状态预生成的 SVG 缓存，避免每次 build 重新解析
+  SvgPicture? _liquidSwitchOn;
+  SvgPicture? _liquidSwitchOnHover;
+  SvgPicture? _liquidSwitchOff;
+  SvgPicture? _liquidSwitchOffHover;
 
   Recipe? get _activeRecipe {
     if (widget.placedBuilding.activeRecipeId == null) return null;
@@ -50,6 +57,17 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
   void initState() {
     super.initState();
     _loadLiquidSwitch();
+    // 局部 100ms 定时器：仅刷新合成面板的生产进度/库存数量，
+    // 不再波及左侧物品网格，保证滚动流畅。
+    _simTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _simTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadLiquidSwitch() async {
@@ -57,31 +75,32 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
       final raw =
           await rootBundle.loadString('assets/svg/liquid_icon_switch.svg');
       if (mounted) {
-        setState(() {
-          _liquidSwitchSvgString = raw;
-        });
+        _liquidSwitchOn = SvgPicture.string(
+          raw, width: 150, height: 43, fit: BoxFit.fill,
+        );
+        _liquidSwitchOnHover = SvgPicture.string(
+          raw.replaceAll('#03a9ff', '#227aa8'),
+          width: 150, height: 43, fit: BoxFit.fill,
+        );
+        _liquidSwitchOff = SvgPicture.string(
+          raw.replaceAll('#03a9ff', '#b2b2b2'),
+          width: 150, height: 43, fit: BoxFit.fill,
+        );
+        _liquidSwitchOffHover = SvgPicture.string(
+          raw.replaceAll('#03a9ff', '#636363'),
+          width: 150, height: 43, fit: BoxFit.fill,
+        );
+        setState(() {});
       }
     } catch (_) {}
   }
 
   Widget _buildLiquidModeSwitch() {
-    if (_liquidSwitchSvgString == null) {
+    final svg = _isLiquidMode
+        ? (_isLiquidHover ? _liquidSwitchOnHover : _liquidSwitchOn)
+        : (_isLiquidHover ? _liquidSwitchOffHover : _liquidSwitchOff);
+    if (svg == null) {
       return const SizedBox.shrink();
-    }
-
-    String currentSvg;
-    if (_isLiquidMode) {
-      if (_isLiquidHover) {
-        currentSvg = _liquidSwitchSvgString!.replaceAll('#03a9ff', '#227aa8');
-      } else {
-        currentSvg = _liquidSwitchSvgString!;
-      }
-    } else {
-      if (_isLiquidHover) {
-        currentSvg = _liquidSwitchSvgString!.replaceAll('#03a9ff', '#636363');
-      } else {
-        currentSvg = _liquidSwitchSvgString!.replaceAll('#03a9ff', '#b2b2b2');
-      }
     }
 
     return MouseRegion(
@@ -101,17 +120,12 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              SvgPicture.string(
-                currentSvg,
-                width: 150,
-                height: 43,
-                fit: BoxFit.fill,
-              ),
+              svg,
               Text(
                 _isLiquidMode ? '液体模式' : '关闭模式',
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 12,
+                  fontSize: 16,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -385,7 +399,7 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
                                                     cacheHeight: 168,
                                                     fit: BoxFit.contain,
                                                     filterQuality:
-                                                        FilterQuality.medium,
+                                                        kIsWeb ? FilterQuality.high : FilterQuality.medium,
                                                     isAntiAlias: true,
                                                   ),
                                                 );
@@ -428,7 +442,7 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
                                                     cacheHeight: 168,
                                                     fit: BoxFit.contain,
                                                     filterQuality:
-                                                        FilterQuality.medium,
+                                                        kIsWeb ? FilterQuality.high : FilterQuality.medium,
                                                     isAntiAlias: true,
                                                   ),
                                                 );

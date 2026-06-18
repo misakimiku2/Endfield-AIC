@@ -4,9 +4,9 @@
 <svg
    version="1.1"
    id="svg1"
-   width="93.440002"
-   height="93.621429"
-   viewBox="0 0 93.440002 93.621429"
+   width="94"
+   height="94"
+   viewBox="0 0 94 94"
    sodipodi:docname="objective_case.svg"
    xml:space="preserve"
    inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
@@ -34,7 +34,8 @@
        y1="521.9364"
        x2="902.41162"
        y2="649.9364"
-       gradientUnits="userSpaceOnUse" /></defs><sodipodi:namedview
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(0.73437494,0,0,0.73295176,-615.70848,-382.46312)" /></defs><sodipodi:namedview
      id="namedview1"
      pagecolor="#ffffff"
      bordercolor="#000000"
@@ -44,9 +45,9 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      showgrid="false"
-     inkscape:zoom="2.291026"
-     inkscape:cx="-10.03917"
-     inkscape:cy="8.0749848"
+     inkscape:zoom="9.164104"
+     inkscape:cx="95.153874"
+     inkscape:cy="29.2991"
      inkscape:window-width="3440"
      inkscape:window-height="1369"
      inkscape:window-x="-8"
@@ -55,8 +56,8 @@
      inkscape:current-layer="svg1"><inkscape:page
        x="0"
        y="0"
-       width="93.440002"
-       height="93.621429"
+       width="94"
+       height="94"
        id="page1"
        margin="0"
        bleed="0" /></sodipodi:namedview><style
@@ -64,17 +65,15 @@
      id="style1">
 	.st0{fill-rule:evenodd;clip-rule:evenodd;}
 </style><rect
-     style="display:inline;fill:url(#linearGradient44);fill-opacity:1;stroke:none;stroke-width:1.98144;stroke-linecap:round;stroke-dasharray:none;stroke-opacity:1"
+     style="display:inline;fill:url(#linearGradient44);fill-opacity:1;stroke:none;stroke-width:1.45371;stroke-linecap:round;stroke-dasharray:none;stroke-opacity:1"
      id="rect42"
-     width="128"
-     height="128.24855"
-     x="838.41162"
-     y="521.81213"
-     rx="15"
-     ry="15"
-     transform="matrix(0.73,0,0,0.73,-612.04048,-380.92286)"
+     width="94"
+     height="94"
+     x="3.3984375e-06"
+     y="-2.3339844e-06"
+     rx="11"
+     ry="11"
      inkscape:label="rect42" /><path
      id="grid_tag"
-     style="fill:#ebebeb;fill-opacity:1;stroke:none;stroke-width:1.98144;stroke-linecap:round;stroke-dasharray:none;stroke-opacity:1"
-     d="m 839.25977,640.06055 c 2.04818,5.83068 7.58515,9.99081 14.13085,10 h 98.04297 c 6.54571,-0.009 12.08268,-4.16932 14.13086,-10 z"
-     transform="matrix(0.73,0,0,0.73,-612.04048,-380.92286)" /></svg>
+     style="fill:#ebebeb;fill-opacity:1;stroke:none;stroke-width:1.45371;stroke-linecap:round;stroke-dasharray:none;stroke-opacity:1"
+     d="M 0.62286269,86.67038 C 2.1269947,90.943986 6.1932067,93.993161 11.000205,93.999896 h 72.000299 c 4.807005,-0.0066 8.873217,-3.05591 10.377348,-7.329516 z" /></svg>

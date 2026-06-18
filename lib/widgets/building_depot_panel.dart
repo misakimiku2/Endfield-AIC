@@ -8,6 +8,8 @@ class DepotLoaderPanel extends StatelessWidget {
   final VoidCallback? onMove;
   final VoidCallback? onDelete;
 
+  static void _noop() {}
+
   const DepotLoaderPanel({
     super.key,
     this.onMove,
@@ -41,20 +43,15 @@ class DepotLoaderPanel extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 20),
-        Expanded(
-          child: Container(
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E1E1E),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF333333)),
-            ),
-            child: Center(
-              child: DepotGridTile(
-                item: null,
-                isInput: true,
-                showNoIcon: true,
-              ),
+        const Expanded(
+          child: Center(
+            child: DepotGridTile(
+              item: null,
+              isInput: true,
+              showNoIcon: true,
+              hasItemForButton: false,
+              isAddMode: false,
+              onToggleAddMode: _noop,
             ),
           ),
         ),
@@ -118,30 +115,14 @@ class DepotUnloaderPanel extends StatelessWidget {
         ),
         const SizedBox(height: 20),
         Expanded(
-          child: Container(
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E1E1E),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF333333)),
-            ),
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  DepotGridTile(
-                    item: selectedItem,
-                    isInput: false,
-                    showNoIcon: false,
-                  ),
-                  const SizedBox(height: 16),
-                  DepotCapsuleButton(
-                    hasItem: selectedOutputItemId != null,
-                    isAddMode: isAddMode,
-                    onToggleAddMode: onToggleAddMode,
-                  ),
-                ],
-              ),
+          child: Center(
+            child: DepotGridTile(
+              item: selectedItem,
+              isInput: false,
+              showNoIcon: false,
+              hasItemForButton: selectedOutputItemId != null,
+              isAddMode: isAddMode,
+              onToggleAddMode: onToggleAddMode,
             ),
           ),
         ),

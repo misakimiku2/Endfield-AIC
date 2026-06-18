@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_svg/flutter_svg.dart';
 import '../models/project.dart';
 import '../models/item.dart';
@@ -406,7 +407,7 @@ class _LogisticsBridgePanelState extends State<LogisticsBridgePanel>
               cacheWidth: 120,
               cacheHeight: 120,
               fit: BoxFit.contain,
-              filterQuality: FilterQuality.medium,
+              filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
               isAntiAlias: true,
               errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
             )
@@ -544,7 +545,7 @@ class _LogisticsBridgePanelState extends State<LogisticsBridgePanel>
                     cacheWidth: 192,
                     cacheHeight: 192,
                     fit: BoxFit.contain,
-                    filterQuality: FilterQuality.medium,
+                    filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
                     isAntiAlias: true,
                     errorBuilder: (_, __, ___) =>
                         _buildItemPlaceholder(dataItem),

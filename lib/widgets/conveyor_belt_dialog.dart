@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_svg/flutter_svg.dart';
 import '../models/project.dart';
 import '../models/item.dart';
@@ -425,7 +426,7 @@ class _ConveyorBeltDialogState extends State<ConveyorBeltDialog>
                   cacheWidth: 120,
                   cacheHeight: 120,
                   fit: BoxFit.contain,
-                  filterQuality: FilterQuality.medium,
+                  filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
                   isAntiAlias: true,
                   errorBuilder: (_, __, ___) =>
                       _buildItemPlaceholder(dataItem),
@@ -671,7 +672,7 @@ class _ItemSlotState extends State<_ItemSlot> {
                           cacheWidth: 192,
                           cacheHeight: 192,
                           fit: BoxFit.contain,
-                          filterQuality: FilterQuality.medium,
+                          filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
                           isAntiAlias: true,
                           errorBuilder: (_, __, ___) =>
                               _buildItemPlaceholder(dataItem),

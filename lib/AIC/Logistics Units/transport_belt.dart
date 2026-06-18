@@ -45,6 +45,9 @@ class TransportBeltController {
   String? _committedBeltId;
   int _lastCommittedPathLength = 0;
 
+  /// 截断创建时，原传送带截断点之后的剩余格子（应视为阻挡）
+  List<Offset> _truncatedBeltTail = [];
+
   /// 当前创建中传送带首格的入方向（用于预览渲染转角）
   String? get incomingDirection => _incomingDirection;
   bool get hasCommittedPath => _committedBeltId != null;
@@ -68,6 +71,7 @@ class TransportBeltController {
     _incomingDirection = null;
     _committedBeltId = null;
     _lastCommittedPathLength = 0;
+    _truncatedBeltTail = [];
   }
 
   /// 返回 true 表示点击已被处理
@@ -134,6 +138,13 @@ class TransportBeltController {
         }
       }
       fullPath = _traceBeltToCell(belt, gridPos);
+      // 记录截断点之后的剩余格子，作为阻挡防止顺着原传送带方向重复创建
+      final clickIdx = belt.path.indexWhere((c) =>
+          c.dx.toInt() == gridPos.dx.toInt() &&
+          c.dy.toInt() == gridPos.dy.toInt());
+      _truncatedBeltTail = (clickIdx >= 0 && clickIdx + 1 < belt.path.length)
+          ? belt.path.sublist(clickIdx + 1)
+          : [];
       anchors.add(gridPos);
       _startingPortDirection = null;
       // 继承旧传送带首格的入方向，用于预览渲染转角
@@ -593,6 +604,7 @@ class TransportBeltController {
         _committedBeltId = belt.id;
         _lastCommittedPathLength = fullPath.length;
         _mergeTarget = null;
+        _truncatedBeltTail = [];
         if (fullPath.length >= 2) {
           _incomingDirection =
               _directionBetween(fullPath[fullPath.length - 2], fullPath.last);
@@ -674,21 +686,28 @@ class TransportBeltController {
     return _findBeltAtCell(segment[1]) != null;
   }
 
-  /// 检查给定方向是否与传送带的出方向一致
-  bool _directionMatchesBeltOutgoing(int dx, int dy, ConveyorBelt belt) {
-    int beltDx, beltDy;
+  /// 获取传送带的方向向量 (dx, dy)，如果无法确定则返回 null
+  (int, int)? _getBeltDirectionVector(ConveyorBelt belt) {
     if (belt.path.length >= 2) {
       final beltStart = belt.path.first;
       final beltNext = belt.path[1];
-      beltDx = (beltNext.dx - beltStart.dx).toInt();
-      beltDy = (beltNext.dy - beltStart.dy).toInt();
+      final beltDx = (beltNext.dx - beltStart.dx).toInt();
+      final beltDy = (beltNext.dy - beltStart.dy).toInt();
+      return (beltDx, beltDy);
     } else if (belt.forcedDirection != null) {
       final dir = belt.forcedDirection!;
-      beltDx = switch (dir) { 'right' => 1, 'left' => -1, _ => 0 };
-      beltDy = switch (dir) { 'down' => 1, 'up' => -1, _ => 0 };
-    } else {
-      return false;
+      final beltDx = switch (dir) { 'right' => 1, 'left' => -1, _ => 0 };
+      final beltDy = switch (dir) { 'down' => 1, 'up' => -1, _ => 0 };
+      return (beltDx, beltDy);
     }
+    return null;
+  }
+
+  /// 检查给定方向是否与传送带的出方向一致
+  bool _directionMatchesBeltOutgoing(int dx, int dy, ConveyorBelt belt) {
+    final direction = _getBeltDirectionVector(belt);
+    if (direction == null) return false;
+    final (beltDx, beltDy) = direction;
     return dx == beltDx && dy == beltDy;
   }
 
@@ -744,28 +763,9 @@ class TransportBeltController {
     final newDy = lastCell.dy - prevCell.dy;
 
     // 目标传送带在起点处的方向
-    int beltDx, beltDy;
-    if (targetBelt.path.length >= 2) {
-      final beltStart = targetBelt.path.first;
-      final beltNext = targetBelt.path[1];
-      beltDx = (beltNext.dx - beltStart.dx).toInt();
-      beltDy = (beltNext.dy - beltStart.dy).toInt();
-    } else if (targetBelt.forcedDirection != null) {
-      // 单格传送带：使用 forcedDirection 推断方向
-      final dir = targetBelt.forcedDirection!;
-      beltDx = switch (dir) {
-        'right' => 1,
-        'left' => -1,
-        _ => 0,
-      };
-      beltDy = switch (dir) {
-        'down' => 1,
-        'up' => -1,
-        _ => 0,
-      };
-    } else {
-      return false;
-    }
+    final direction = _getBeltDirectionVector(targetBelt);
+    if (direction == null) return false;
+    final (beltDx, beltDy) = direction;
 
     // 方向兼容：不允许反方向合并（新路径到达方向与目标传送带出方向相反）
     // 直线合并和转角合并都允许
@@ -995,6 +995,11 @@ class TransportBeltController {
     final blocked = _getOccupiedCellSet();
 
     for (final cell in fullPath) {
+      blocked.add('${cell.dx.toInt()}_${cell.dy.toInt()}');
+    }
+
+    // 截断创建时，原传送带截断点之后的剩余格子视为阻挡
+    for (final cell in _truncatedBeltTail) {
       blocked.add('${cell.dx.toInt()}_${cell.dy.toInt()}');
     }
 

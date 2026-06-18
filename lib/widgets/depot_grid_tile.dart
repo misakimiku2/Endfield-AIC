@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_svg/flutter_svg.dart';
 import '../models/item.dart';
 import 'building_shared_widgets.dart';
@@ -10,12 +11,18 @@ class DepotGridTile extends StatefulWidget {
   final Item? item;
   final bool isInput;
   final bool showNoIcon;
+  final bool hasItemForButton;
+  final bool isAddMode;
+  final VoidCallback onToggleAddMode;
 
   const DepotGridTile({
     super.key,
     required this.item,
     required this.isInput,
     this.showNoIcon = false,
+    this.hasItemForButton = false,
+    this.isAddMode = false,
+    required this.onToggleAddMode,
   });
 
   @override
@@ -72,66 +79,118 @@ class _DepotGridTileState extends State<DepotGridTile>
     final level = widget.item?.level;
     final hasItem = widget.item != null;
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // 网格 + 5px边框（圆角与SVG rx=15 完全对齐）
-        Container(
-          width: 128,
-          height: 128,
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: const Color(0xFF7F7F7F),
-              width: 5,
+    const cardWidth = 265.0;
+    const connectorWidth = 75.0;
+    const gridWidth = 128.0;
+    const trackWidth = 168.0;
+    const trackHeight = 54.0;
+    const buttonGap = 16.0;
+    const buttonHeight = 40.0; // 胶囊按钮约40px高
+    final totalWidth = cardWidth + connectorWidth + gridWidth + trackWidth;
+    final totalHeight = 128.0 + buttonGap + buttonHeight;
+
+    return SizedBox(
+      width: totalWidth,
+      height: totalHeight,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          // 仓库卡片
+          Positioned(
+            left: 0,
+            top: 0,
+            child: DepotWarehouseCard(
+              item: widget.item,
+              isInput: widget.isInput,
             ),
-            borderRadius: BorderRadius.circular(15),
-            color: const Color(0xFF696969),
           ),
-          clipBehavior: Clip.antiAlias,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              SvgPicture.string(
-                _getGridSvg(level),
-                fit: BoxFit.fill,
-              ),
-              if (hasItem && widget.item!.imageAssetPath.isNotEmpty)
-                Center(
-                  child: Image.asset(
-                    widget.item!.imageAssetPath,
-                    width: 128,
-                    height: 128,
-                    cacheWidth: 384,
-                    cacheHeight: 384,
-                    fit: BoxFit.contain,
-                    filterQuality: FilterQuality.medium,
-                    isAntiAlias: true,
-                    errorBuilder: (_, __, ___) => _buildItemPlaceholder(),
-                  ),
-                )
-              else if (hasItem)
-                Center(child: _buildItemPlaceholder())
-              else if (widget.showNoIcon)
-                Center(
-                  child: SvgPicture.asset(
-                    'assets/svg/No.svg',
-                    width: 60,
-                    height: 60,
-                    colorFilter: const ColorFilter.mode(
-                      Color(0xFF808080),
-                      BlendMode.srcIn,
-                    ),
-                  ),
+          // 网格 + 5px边框（圆角与SVG rx=15 完全对齐）
+          Positioned(
+            left: cardWidth + connectorWidth,
+            top: 0,
+            child: Container(
+              width: 128,
+              height: 128,
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: const Color(0xFF7F7F7F),
+                  width: 5,
                 ),
-            ],
+                borderRadius: BorderRadius.circular(15),
+                color: const Color(0xFF696969),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  SvgPicture.string(
+                    _getGridSvg(level),
+                    fit: BoxFit.fill,
+                  ),
+                  if (hasItem && widget.item!.imageAssetPath.isNotEmpty)
+                    Center(
+                      child: Image.asset(
+                        widget.item!.imageAssetPath,
+                        width: 128,
+                        height: 128,
+                        cacheWidth: 384,
+                        cacheHeight: 384,
+                        fit: BoxFit.contain,
+                        filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
+                        isAntiAlias: true,
+                        errorBuilder: (_, __, ___) => _buildItemPlaceholder(),
+                      ),
+                    )
+                  else if (hasItem)
+                    Center(child: _buildItemPlaceholder())
+                  else if (widget.showNoIcon)
+                    Center(
+                      child: SvgPicture.asset(
+                        'assets/svg/No.svg',
+                        width: 60,
+                        height: 60,
+                        colorFilter: const ColorFilter.mode(
+                          Color(0xFF808080),
+                          BlendMode.srcIn,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ),
-        ),
-        // 轨道 + 箭头动画 + 遮罩
-        DepotTrackWithArrows(
-          controller: _arrowController,
-          isInput: widget.isInput,
-        ),
-      ],
+          // 轨道 + 箭头动画 + 遮罩
+          Positioned(
+            left: cardWidth + connectorWidth + gridWidth,
+            top: (128 - trackHeight) / 2,
+            child: DepotTrackWithArrows(
+              controller: _arrowController,
+              isInput: widget.isInput,
+            ),
+          ),
+          // 连接线（最后渲染，处于最上层，不被物品格遮挡）
+          Positioned(
+            left: cardWidth,
+            top: 0,
+            child: DepotCardConnector(hasItem: hasItem),
+          ),
+          // 添加/移除物品按钮（位于物品格下方水平居中）
+          Positioned(
+            left: cardWidth + connectorWidth,
+            top: 128 + buttonGap,
+            child: SizedBox(
+              width: gridWidth,
+              child: Center(
+                child: DepotCapsuleButton(
+                  hasItem: widget.hasItemForButton,
+                  isAddMode: widget.isAddMode,
+                  onToggleAddMode: widget.onToggleAddMode,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -296,6 +355,7 @@ class DepotCapsuleButton extends StatefulWidget {
 class _DepotCapsuleButtonState extends State<DepotCapsuleButton>
     with SingleTickerProviderStateMixin {
   late AnimationController _iconRotationController;
+  bool _isHovered = false;
 
   @override
   void initState() {
@@ -329,45 +389,230 @@ class _DepotCapsuleButtonState extends State<DepotCapsuleButton>
 
   @override
   Widget build(BuildContext context) {
-    final label = widget.hasItem ? '移除物品' : '添加物品';
+    // 三种状态：
+    // 1. 有物品 → 红色背景 + 白色文字 "移除物品"
+    // 2. 无物品且选择中(isAddMode) → 灰白背景 + 白色文字 "取消选择"
+    // 3. 无物品未选择 → 白色背景 + 深色文字 "添加物品"
+    final bool isRemoving = widget.hasItem && !widget.isAddMode;
+    final bool isCancelling = !widget.hasItem && widget.isAddMode;
 
-    return GestureDetector(
-      onTap: widget.onToggleAddMode,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(
-                color: Color(0xFF212121),
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(width: 6),
-            RotationTransition(
-              turns: Tween<double>(begin: 0.0, end: 0.125).animate(
-                _iconRotationController,
-              ),
-              child: SvgPicture.asset(
-                'assets/svg/add.svg',
-                width: 16,
-                height: 16,
-                colorFilter: const ColorFilter.mode(
-                  Color(0xFF212121),
-                  BlendMode.srcIn,
+    String label;
+    Color bgColor;
+    Color bgColorHover;
+    Color textColor;
+
+    if (isRemoving) {
+      label = '移除物品';
+      bgColor = const Color(0xFFE53935);
+      bgColorHover = const Color(0xFF8A1717);
+      textColor = Colors.white;
+    } else if (isCancelling) {
+      label = '取消选择';
+      bgColor = const Color(0xFFCCCCCC);
+      bgColorHover = const Color(0xFF777777);
+      textColor = Colors.white;
+    } else {
+      label = '添加物品';
+      bgColor = Colors.white;
+      bgColorHover = const Color(0xFFA3A3A3);
+      textColor = const Color(0xFF212121);
+    }
+
+    final effectiveBgColor = _isHovered ? bgColorHover : bgColor;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTap: widget.onToggleAddMode,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          decoration: BoxDecoration(
+            color: effectiveBgColor,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-            ),
-          ],
+              const SizedBox(width: 6),
+              RotationTransition(
+                turns: Tween<double>(begin: 0.0, end: 0.125).animate(
+                  _iconRotationController,
+                ),
+                child: SvgPicture.asset(
+                  'assets/svg/add.svg',
+                  width: 16,
+                  height: 16,
+                  colorFilter: ColorFilter.mode(textColor, BlendMode.srcIn),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
+  }
+}
+
+/// 仓库卡片 — 显示当前正在输入/输出的物品信息
+/// 圆角矩形，265×128，无描边
+/// 左上角：物品名称；左下角：仓库图标 + 数量；右侧：物品图片（340px背景图，30%透明度）
+class DepotWarehouseCard extends StatelessWidget {
+  final Item? item;
+  final bool isInput;
+
+  const DepotWarehouseCard({
+    super.key,
+    required this.item,
+    required this.isInput,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasItem = item != null;
+    final displayName = hasItem ? item!.name : '——';
+    final displayQuantity = hasItem ? '99999' : '——';
+
+    // Depot_icon.svg 原始尺寸：10.243302mm × 9.0025673mm
+    // 1mm = 96/25.4 px ≈ 3.7795 px
+    const iconWidth = 10.243302 * 96 / 25.4; // ≈ 38.72
+    const iconHeight = 9.0025673 * 96 / 25.4; // ≈ 34.03
+
+    return Container(
+      width: 265,
+      height: 128,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(15),
+        color: const Color(0xFF696969),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          // 背景图片（340px原始尺寸，30%透明度，超出部分由外层Container裁剪）
+          if (hasItem && item!.imageAssetPath.isNotEmpty)
+            Positioned(
+              left: 80,
+              top: -60,
+              child: Opacity(
+                opacity: 0.3,
+                child: Image.asset(
+                  item!.imageAssetPath,
+                  width: 256,
+                  height: 256,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          // 左上角：物品名称
+          Positioned(
+            top: 10,
+            left: 10,
+            child: Text(
+              displayName,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          // 左下角：仓库图标 + 数量（文字高度与图标一致）
+          Positioned(
+            bottom: 10,
+            left: 10,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SvgPicture.asset(
+                  'assets/svg/Depot_icon.svg',
+                  width: iconWidth,
+                  height: iconHeight,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  displayQuantity,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: iconHeight,
+                    height: 1.0,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 仓库卡片与物品格之间的连接线
+/// 75px宽，水平线 + 两端圆圈，风格同普通设备 TrackJointsPainter
+/// 有物品传输时金色；无物品时灰白色
+class DepotCardConnector extends StatelessWidget {
+  final bool hasItem;
+
+  const DepotCardConnector({super.key, required this.hasItem});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 75,
+      height: 128,
+      child: CustomPaint(
+        painter: DepotCardConnectorPainter(hasItem: hasItem),
+      ),
+    );
+  }
+}
+
+class DepotCardConnectorPainter extends CustomPainter {
+  final bool hasItem;
+
+  const DepotCardConnectorPainter({required this.hasItem});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final color =
+        hasItem ? const Color(0xFFEBAD26) : const Color(0xFFCCCCCC);
+
+    final linePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0
+      ..strokeCap = StrokeCap.round
+      ..color = color;
+
+    final circlePaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = color;
+
+    final centerY = size.height / 2;
+
+    // 水平连接线
+    canvas.drawLine(Offset(0, centerY), Offset(size.width, centerY), linePaint);
+
+    // 左端点圆圈（靠近仓库卡片）
+    canvas.drawCircle(Offset(0, centerY), 6.0, circlePaint);
+
+    // 右端点圆圈（靠近物品格）
+    canvas.drawCircle(Offset(size.width, centerY), 6.0, circlePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant DepotCardConnectorPainter oldDelegate) {
+    return oldDelegate.hasItem != hasItem;
   }
 }

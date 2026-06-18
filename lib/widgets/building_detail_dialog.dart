@@ -72,6 +72,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   };
 
   late final List<ResourceItem> _allItems;
+  List<ResourceItem> _cachedFilteredItems = [];
   String? _logoSvgString;
 
   final ScrollController _gridScrollController = ScrollController();
@@ -85,7 +86,6 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   // 仓库取货口专用状态
   bool _isAddMode = false;
   String? _selectedOutputItemId;
-  Timer? _simTimer;
 
   bool get _isDepotUnloader =>
       widget.placedBuilding.building.id == 'depot_unloader_3x1';
@@ -114,15 +114,31 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
     super.initState();
     _selectedOutputItemId = widget.placedBuilding.depotOutputItemId;
     _allItems = _buildResourceList();
+    _refreshFilteredItems();
     _loadLogo();
-    _simTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
-      if (mounted) setState(() {});
+    debugPrint('[BuildingDetailDialog] initState: ${widget.placedBuilding.building.name}, '
+        '物品总数=${_allItems.length}, 当前标签物品数=${_cachedFilteredItems.length}');
+    // 预缓存所有物品图片（使用与 ResourceGridTile 相同的 ResizeImage 尺寸 279x279），
+    // 避免滚动/切换标签时从磁盘加载导致空白→图片的延迟。
+    // 注意：必须使用 ResizeImage 匹配 Image.asset(cacheWidth:279, cacheHeight:279) 的缓存键。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final cache = PaintingBinding.instance.imageCache;
+      debugPrint('[BuildingDetailDialog] 预缓存前 imageCache: ${cache.currentSize} entries / '
+          '${(cache.currentSizeBytes / 1024 / 1024).toStringAsFixed(1)}MB');
+      for (final item in _allItems) {
+        if (item.imageAssetPath.isNotEmpty) {
+          precacheImage(
+            ResizeImage(AssetImage(item.imageAssetPath), width: 279, height: 279),
+            context,
+          );
+        }
+      }
     });
   }
 
   @override
   void dispose() {
-    _simTimer?.cancel();
     _scrollbarFadeTimer?.cancel();
     _gridScrollController.dispose();
     super.dispose();
@@ -184,9 +200,12 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
     return items;
   }
 
-  List<ResourceItem> get _filteredItems {
+  void _refreshFilteredItems() {
     final tabCategory = _tabLabels[_resourceTabIndex];
-    return _allItems.where((item) => item.category == tabCategory).toList();
+    _cachedFilteredItems =
+        _allItems.where((item) => item.category == tabCategory).toList();
+    debugPrint('[BuildingDetailDialog] 切换标签 -> $tabCategory, '
+        '物品数=${_cachedFilteredItems.length}');
   }
 
   @override
@@ -307,7 +326,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
               ),
             ),
           ),
-          if (!_isLogisticsBridge) ...[
+          if (!_isLogisticsBridge && !_isDepotLoader && !_isDepotUnloader) ...[
             _buildSeparatorVertical(),
             Align(
               alignment: Alignment.bottomCenter,
@@ -548,7 +567,10 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                   width: tabWidth,
                   height: 32,
                   child: GestureDetector(
-                    onTap: () => setState(() => _resourceTabIndex = index),
+                    onTap: () => setState(() {
+                      _resourceTabIndex = index;
+                      _refreshFilteredItems();
+                    }),
                     behavior: HitTestBehavior.opaque,
                     child: isSelected
                         ? Row(
@@ -637,7 +659,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
           child: ScrollConfiguration(
             behavior:
                 ScrollConfiguration.of(context).copyWith(scrollbars: false),
-            child: GridView.builder(
+            child: RepaintBoundary(
+              child: GridView.builder(
               controller: _gridScrollController,
               padding: EdgeInsets.zero,
               physics: const NeverScrollableScrollPhysics(),
@@ -647,25 +670,28 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                 crossAxisSpacing: 7.3,
                 childAspectRatio: 93.44 / 93.62,
               ),
-              itemCount: _filteredItems.length,
+              itemCount: _cachedFilteredItems.length,
               itemBuilder: (context, index) {
-                final item = _filteredItems[index];
-                return ResourceGridTile(
-                  item: item,
-                  gridContainerKey: _gridContainerKey,
-                  showAddIcon: _isDepotUnloader && _isAddMode,
-                  onAddItem: _isDepotUnloader && _isAddMode
-                      ? () {
-                          setState(() {
-                            _selectedOutputItemId = item.id;
-                            _isAddMode = false;
-                          });
-                          widget.placedBuilding.depotOutputItemId = item.id;
-                          widget.onOutputItemSelected?.call(item.id);
-                        }
-                      : null,
+                final item = _cachedFilteredItems[index];
+                return RepaintBoundary(
+                  child: ResourceGridTile(
+                    item: item,
+                    gridContainerKey: _gridContainerKey,
+                    showAddIcon: _isDepotUnloader && _isAddMode,
+                    onAddItem: _isDepotUnloader && _isAddMode
+                        ? () {
+                            setState(() {
+                              _selectedOutputItemId = item.id;
+                              _isAddMode = false;
+                            });
+                            widget.placedBuilding.depotOutputItemId = item.id;
+                            widget.onOutputItemSelected?.call(item.id);
+                          }
+                        : null,
+                  ),
                 );
               },
+            ),
             ),
           ),
         ),
@@ -686,6 +712,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
             if (!_gridScrollController.hasClients)
               return const SizedBox.shrink();
             final position = _gridScrollController.position;
+            if (!position.hasContentDimensions)
+              return const SizedBox.shrink();
             final maxExtent = position.maxScrollExtent;
             if (maxExtent <= 0) return const SizedBox.shrink();
 

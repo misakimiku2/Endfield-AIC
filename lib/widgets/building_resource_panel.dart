@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_svg/flutter_svg.dart';
 
 class ResourceItem {
@@ -54,21 +55,36 @@ String gridTileSvg(int level, {bool isHovered = false}) {
 
   final stopColor = isHovered ? '#252525' : '#696969';
 
-  return '<svg xmlns="http://www.w3.org/2000/svg" width="93.44" height="93.621" viewBox="0 0 93.44 93.621">'
-      '<defs><linearGradient id="g" x1="902.412" y1="521.936" x2="902.412" y2="649.936" gradientUnits="userSpaceOnUse">'
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="94" height="94" viewBox="0 0 94 94">'
+      '<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="94" gradientUnits="userSpaceOnUse">'
       '<stop offset="0" stop-color="$stopColor"/>'
       '<stop offset="0.7" stop-color="$stopColor"/>'
       '<stop offset="1" stop-color="$endColor"/>'
       '</linearGradient></defs>'
-      '<g transform="matrix(0.73,0,0,0.73,-610.056,-380.923)">'
-      '<rect x="838.412" y="521.812" width="128" height="128.249" rx="15" ry="15" fill="url(#g)"/>'
-      '<path d="m 839.26,640.061 c 2.048,5.831 7.585,9.991 14.131,10 h 98.043 c 6.546,-0.009 12.083,-4.169 14.131,-10 z" fill="$tagColor"/>'
-      '</g></svg>';
+      '<rect x="0" y="0" width="94" height="94" rx="11" ry="11" fill="url(#g)"/>'
+      '<path d="M 0.62286269,86.67038 C 2.1269947,90.943986 6.1932067,93.993161 11.000205,93.999896 h 72.000299 c 4.807005,-0.0066 8.873217,-3.05591 10.377348,-7.329516 z" fill="$tagColor"/>'
+      '</svg>';
 }
 
 class ResourceGridTileState extends State<ResourceGridTile> {
   bool _hovering = false;
   double _tooltipBottomOffset = 8.0;
+  late final SvgPicture _normalBg;
+  late final SvgPicture _hoveredBg;
+  bool _imageLogged = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _normalBg = SvgPicture.string(
+      gridTileSvg(widget.item.level, isHovered: false),
+      fit: BoxFit.fill,
+    );
+    _hoveredBg = SvgPicture.string(
+      gridTileSvg(widget.item.level, isHovered: true),
+      fit: BoxFit.fill,
+    );
+  }
 
   void _onEnter(PointerEnterEvent _) {
     double bottomOffset = 8.0;
@@ -98,17 +114,14 @@ class ResourceGridTileState extends State<ResourceGridTile> {
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
+    final gridContent = MouseRegion(
       onEnter: _onEnter,
       onExit: (_) => setState(() => _hovering = false),
       child: Stack(
         fit: StackFit.expand,
-        clipBehavior: Clip.none,
+        clipBehavior: Clip.antiAlias,
         children: [
-          SvgPicture.string(
-            gridTileSvg(widget.item.level, isHovered: _hovering),
-            fit: BoxFit.fill,
-          ),
+          _hovering ? _hoveredBg : _normalBg,
           Center(
             child: AnimatedScale(
               scale: _hovering ? 1.08 : 1.0,
@@ -121,8 +134,18 @@ class ResourceGridTileState extends State<ResourceGridTile> {
                       cacheWidth: 279,
                       cacheHeight: 279,
                       fit: BoxFit.contain,
-                      filterQuality: FilterQuality.medium,
+                      filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
                       isAntiAlias: true,
+                      frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                        if (!_imageLogged) {
+                          _imageLogged = true;
+                          debugPrint('[ResourceGridTile] 图片显示: '
+                              '${widget.item.name}, '
+                              '同步加载=$wasSynchronouslyLoaded, '
+                              '有帧=${frame != null}');
+                        }
+                        return child;
+                      },
                       errorBuilder: (_, __, ___) => Container(
                         width: 40,
                         height: 40,
@@ -148,40 +171,39 @@ class ResourceGridTileState extends State<ResourceGridTile> {
                     ),
             ),
           ),
-            if (widget.showAddIcon)
-              Positioned(
-                right: 4,
-                top: 4,
-                child: GestureDetector(
-                  onTap: widget.onAddItem,
+          if (widget.showAddIcon)
+            GestureDetector(
+              onTap: widget.onAddItem,
+              behavior: HitTestBehavior.opaque,
+              child: Opacity(
+                opacity: _hovering ? 0.6 : 0.4,
+                child: SizedBox.expand(
                   child: Container(
-                    width: 21.9,
-                    height: 21.9,
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.3),
-                          blurRadius: 3,
-                          offset: const Offset(0, 1),
-                        ),
-                      ],
+                      color:
+                          _hovering ? Colors.white : const Color(0xFF181818),
+                      borderRadius: BorderRadius.circular(11),
                     ),
                     child: Center(
-                      child: SvgPicture.asset(
-                        'assets/svg/add.svg',
-                        width: 12,
-                        height: 12,
-                        colorFilter: const ColorFilter.mode(
-                          Color(0xFF212121),
-                          BlendMode.srcIn,
+                      child: Opacity(
+                        opacity: 0.8,
+                        child: SvgPicture.asset(
+                          'assets/svg/add.svg',
+                          width: 40,
+                          height: 40,
+                          colorFilter: ColorFilter.mode(
+                            _hovering
+                                ? const Color(0xFF212121)
+                                : Colors.white,
+                            BlendMode.srcIn,
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
               ),
+            ),
             if (_hovering)
               Positioned(
                 bottom: _tooltipBottomOffset,
@@ -212,5 +234,15 @@ class ResourceGridTileState extends State<ResourceGridTile> {
           ],
         ),
     );
+
+    // 添加模式下，整个网格区域均可点击
+    if (widget.showAddIcon) {
+      return GestureDetector(
+        onTap: widget.onAddItem,
+        behavior: HitTestBehavior.opaque,
+        child: gridContent,
+      );
+    }
+    return gridContent;
   }
 }

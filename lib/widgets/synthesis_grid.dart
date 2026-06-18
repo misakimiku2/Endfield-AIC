@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_svg/flutter_svg.dart';
 import '../models/project.dart';
 import '../models/item.dart';
@@ -45,6 +46,9 @@ class SynthesisGridState extends State<SynthesisGrid>
   int _previousCount = -1;
   DateTime? _lastCountChangeTime;
   final List<ItemTrackAnim> _itemAnims = [];
+  // 网格背景 SVG 缓存：仅在 level 变化时重新生成，避免每次 build 重新解析
+  SvgPicture? _cachedGridSvg;
+  int? _cachedGridLevel = -999;
 
   @override
   void initState() {
@@ -128,7 +132,7 @@ class SynthesisGridState extends State<SynthesisGrid>
                       cacheWidth: 210,
                       cacheHeight: 210,
                       fit: BoxFit.contain,
-                      filterQuality: FilterQuality.medium,
+                      filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
                       isAntiAlias: true,
                       errorBuilder: (_, __, ___) =>
                           _buildItemPlaceholder(dataItem),
@@ -162,6 +166,11 @@ class SynthesisGridState extends State<SynthesisGrid>
             ? widget.dataLoader.getItem(outputItemId)
             : null);
     final level = dataItem?.level;
+    // 仅在 level 变化时重新生成 SVG，避免每次 build 重新解析
+    if (level != _cachedGridLevel) {
+      _cachedGridLevel = level;
+      _cachedGridSvg = SvgPicture.string(_getGridSvg(level), fit: BoxFit.fill);
+    }
     final totalAmount = widget.isInput ? inventoryCount : outputCount;
 
     final solidPorts = (widget.isInput
@@ -203,10 +212,7 @@ class SynthesisGridState extends State<SynthesisGrid>
       child: Stack(
         fit: StackFit.expand,
         children: [
-          SvgPicture.string(
-            _getGridSvg(level),
-            fit: BoxFit.fill,
-          ),
+          _cachedGridSvg!,
           if (dataItem != null && dataItem.imageAssetPath.isNotEmpty)
             Center(
               child: AnimatedOpacity(
@@ -223,7 +229,7 @@ class SynthesisGridState extends State<SynthesisGrid>
                   cacheWidth: 384,
                   cacheHeight: 384,
                   fit: BoxFit.contain,
-                  filterQuality: FilterQuality.medium,
+                  filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
                   isAntiAlias: true,
                   errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
                 ),
@@ -477,7 +483,7 @@ class SynthesisGridState extends State<SynthesisGrid>
                           cacheWidth: 120,
                           cacheHeight: 120,
                           fit: BoxFit.contain,
-                          filterQuality: FilterQuality.medium,
+                          filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
                           isAntiAlias: true,
                           errorBuilder: (_, __, ___) =>
                               _buildItemPlaceholder(dataItem),
