@@ -825,7 +825,88 @@ class TransportBeltController {
         return pb;
       }
     }
+
     return null;
+  }
+
+  /// 查找指定格子上的传送带方向向量（排除物流桥、已提交传送带、合并目标）。
+  /// 用于检测路径是否与现有传送带平行重叠或在交叉点转弯。
+  /// 返回 (dx, dy) 方向向量，如果格子不在任何传送带上则返回 null。
+  (int, int)? _getCrossingBeltDirectionAtCell(Offset gridPos) {
+    final gx = gridPos.dx.toInt();
+    final gy = gridPos.dy.toInt();
+    for (final belt in project.conveyors) {
+      if (_committedBeltId != null && belt.id == _committedBeltId) continue;
+      if (_mergeTarget != null && identical(belt, _mergeTarget)) continue;
+      for (int j = 0; j < belt.path.length; j++) {
+        if (belt.path[j].dx.toInt() == gx &&
+            belt.path[j].dy.toInt() == gy) {
+          final dir = _getBeltDirectionAtCell(belt, j);
+          if (dir == null) return null;
+          final dx = switch (dir) { 'right' => 1, 'left' => -1, _ => 0 };
+          final dy = switch (dir) { 'down' => 1, 'up' => -1, _ => 0 };
+          return (dx, dy);
+        }
+      }
+    }
+    return null;
+  }
+
+  /// 验证路径不与现有传送带平行重叠，且在交叉点处保持直线（不能转弯）。
+  /// 跳过起点（分叉/延长点）。
+  /// 终点格子若为合并候选（传送带起点）则允许平行方向（合并连接）。
+  bool _isPathValidAtBeltCrossings(List<Offset> path) {
+    for (int i = 1; i < path.length; i++) {
+      final cell = path[i];
+      // 物流桥格子由 _isPathValidAtBridges 处理
+      if (_findBeltBridgeAtCell(cell) != null) continue;
+
+      final beltDir = _getCrossingBeltDirectionAtCell(cell);
+      if (beltDir == null) continue; // 不在任何传送带上
+
+      final (beltDx, _) = beltDir;
+      final dirIn = _directionBetween(path[i - 1], path[i]);
+      final dirOut = i + 1 < path.length
+          ? _directionBetween(path[i], path[i + 1])
+          : null;
+      if (dirIn == null) continue;
+
+      final pathDx = switch (dirIn) { 'right' => 1, 'left' => -1, _ => 0 };
+      final isPathDirVertical = pathDx == 0;
+      final isBeltDirVertical = beltDx == 0;
+
+      // 平行重叠检查
+      if (isPathDirVertical == isBeltDirVertical) {
+        // 终点格子若为合并候选（传送带起点）则允许
+        if (i == path.length - 1 && _isMergeCandidateCell(cell)) {
+          // 允许合并连接
+        } else {
+          return false;
+        }
+      }
+
+      // 交叉点处必须直线通过（不能转弯）
+      if (dirOut != null && dirIn != dirOut) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// 检查格子是否为合并候选（传送带起点，排除已提交传送带和合并目标）
+  bool _isMergeCandidateCell(Offset gridPos) {
+    final gx = gridPos.dx.toInt();
+    final gy = gridPos.dy.toInt();
+    for (final belt in project.conveyors) {
+      if (_committedBeltId != null && belt.id == _committedBeltId) continue;
+      if (_mergeTarget != null && identical(belt, _mergeTarget)) continue;
+      if (belt.path.isNotEmpty &&
+          belt.path.first.dx.toInt() == gx &&
+          belt.path.first.dy.toInt() == gy) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// 判断两个方向是否垂直交叉（一个水平一个垂直）
@@ -1284,6 +1365,10 @@ class TransportBeltController {
     if (momentumValid && !_isPathValidAtBridges(momentumPath)) {
       momentumValid = false;
     }
+    // 验证 momentum path 不与现有传送带平行重叠，且在交叉点处保持直线
+    if (momentumValid && !_isPathValidAtBeltCrossings(momentumPath)) {
+      momentumValid = false;
+    }
     if (momentumValid) return _deduplicatePath(momentumPath);
 
     final bfsPath =
@@ -1417,10 +1502,14 @@ class TransportBeltController {
       if (nodeKey == endKey) {
         // 回溯路径
         final path = <Offset>[];
-        String? vKey = node.incomingDir >= 0 &&
-                _findBeltBridgeAtCell(
-                        Offset(node.x.toDouble(), node.y.toDouble())) !=
-                    null
+        final endCellPos = Offset(node.x.toDouble(), node.y.toDouble());
+        final endIsBridge = _findBeltBridgeAtCell(endCellPos) != null;
+        final endBeltDir = endIsBridge
+            ? null
+            : _getCrossingBeltDirectionAtCell(endCellPos);
+        final endUseDirKey = node.incomingDir >= 0 &&
+            (endIsBridge || endBeltDir != null);
+        String? vKey = endUseDirKey
             ? '${node.x}_${node.y}_${node.incomingDir}'
             : nodeKey;
         while (vKey != null) {
@@ -1438,11 +1527,21 @@ class TransportBeltController {
       if (nodeKey == startKey && firstStepDirection != null) {
         final idx = dirNameToIndex(firstStepDirection);
         allowedDirIndices = idx != null ? [idx] : [0, 1, 2, 3];
-      } else if (node.incomingDir >= 0 &&
-          _findBeltBridgeAtCell(Offset(node.x.toDouble(), node.y.toDouble())) !=
-              null) {
-        // 物流桥格子：只允许沿入方向直线通过
-        allowedDirIndices = [node.incomingDir];
+      } else if (node.incomingDir >= 0) {
+        final cellPos = Offset(node.x.toDouble(), node.y.toDouble());
+        final isBridge = _findBeltBridgeAtCell(cellPos) != null;
+        if (isBridge) {
+          // 物流桥格子：只允许沿入方向直线通过
+          allowedDirIndices = [node.incomingDir];
+        } else {
+          final beltDir = _getCrossingBeltDirectionAtCell(cellPos);
+          if (beltDir != null) {
+            // 传送带交叉点：只允许沿入方向直线通过（不能转弯）
+            allowedDirIndices = [node.incomingDir];
+          } else {
+            allowedDirIndices = [0, 1, 2, 3];
+          }
+        }
       } else {
         allowedDirIndices = [0, 1, 2, 3];
       }
@@ -1454,18 +1553,53 @@ class TransportBeltController {
         final nKey = '${nx}_$ny';
         if (blocked.contains(nKey) && nKey != startKey) continue;
 
-        // 如果邻居是物流桥格子，visited key 包含方向信息
-        final isNeighborBridge =
-            _findBeltBridgeAtCell(Offset(nx.toDouble(), ny.toDouble())) != null;
-        final visitKey = isNeighborBridge ? '${nx}_${ny}_$dirIdx' : nKey;
+        final neighborPos = Offset(nx.toDouble(), ny.toDouble());
+        final isNeighborBridge = _findBeltBridgeAtCell(neighborPos) != null;
+
+        // 检查是否与现有传送带平行重叠
+        // 终点格子若为合并候选（传送带起点）则允许平行方向（合并连接）
+        final isEndCell = nKey == endKey;
+        if (!isNeighborBridge) {
+          final neighborBeltDir =
+              _getCrossingBeltDirectionAtCell(neighborPos);
+          if (neighborBeltDir != null) {
+            final (beltDx, _) = neighborBeltDir;
+            final isNewDirVertical = d[0] == 0;
+            final isBeltDirVertical = beltDx == 0;
+            if (isNewDirVertical == isBeltDirVertical) {
+              // 平行重叠
+              if (isEndCell && _isMergeCandidateCell(neighborPos)) {
+                // 终点是合并候选（传送带起点）：允许
+              } else {
+                continue; // 阻止
+              }
+            }
+          }
+        }
+
+        // 物流桥或传送带交叉点：visited key 包含方向信息
+        final neighborBeltDirForVisit = isNeighborBridge
+            ? null
+            : _getCrossingBeltDirectionAtCell(neighborPos);
+        final useDirVisitKey =
+            isNeighborBridge || neighborBeltDirForVisit != null;
+        final visitKey =
+            useDirVisitKey ? '${nx}_${ny}_$dirIdx' : nKey;
 
         if (visited.containsKey(visitKey)) continue;
 
         // 父节点的 visit key
-        final parentVisitKey = node.incomingDir >= 0 &&
-                _findBeltBridgeAtCell(
-                        Offset(node.x.toDouble(), node.y.toDouble())) !=
-                    null
+        final parentCellPos =
+            Offset(node.x.toDouble(), node.y.toDouble());
+        final parentIsBridge =
+            _findBeltBridgeAtCell(parentCellPos) != null;
+        final parentBeltDir = parentIsBridge
+            ? null
+            : _getCrossingBeltDirectionAtCell(parentCellPos);
+        final parentUseDirKey =
+            node.incomingDir >= 0 &&
+                (parentIsBridge || parentBeltDir != null);
+        final parentVisitKey = parentUseDirKey
             ? '${node.x}_${node.y}_${node.incomingDir}'
             : nodeKey;
 

@@ -738,6 +738,33 @@ class ConveyorBelt {
     return changed;
   }
 
+  /// 冻结死胡同传送带中已到达各自极限的物品段。
+  /// 直接在实际传送带的 segments 上设置冻结值 0.5，
+  /// 确保创建过程中（hidesTerminalCell）裁剪副本能通过 clippedItemSegments 继承冻结状态，
+  /// 避免物品在末端反复跳转。
+  /// 使用 0.5 而非 -1.0（等待状态），因为渲染器的 -1.0→0.5 推进只作用于裁剪副本，
+  /// 实际传送带会停留在 -1.0 导致冻结状态在帧间振荡。
+  void freezeDeadEndSegments() {
+    ensureItemSegmentsFromLegacy();
+    if (itemSegments.isEmpty) {
+      syncLegacyFromSegments();
+      return;
+    }
+    _sortItemSegments();
+    final endLimit = path.length;
+    for (int i = 0; i < itemSegments.length; i++) {
+      final segment = itemSegments[i];
+      if (!segment.hasItems) continue;
+      final limit = i + 1 < itemSegments.length
+          ? itemSegments[i + 1].drainCount.clamp(0, endLimit).toInt()
+          : endLimit;
+      if (segment.fillCount >= limit) {
+        segment.freezeProgress = 0.5;
+      }
+    }
+    syncLegacyFromSegments();
+  }
+
   void _sortItemSegments() {
     itemSegments.sort((a, b) {
       final byDrain = a.drainCount.compareTo(b.drainCount);

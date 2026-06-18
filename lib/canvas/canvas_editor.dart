@@ -457,6 +457,11 @@ class CanvasEditorState extends State<CanvasEditor>
         belt,
         limit: terminalLimit ?? belt.path.length,
       );
+    } else if (isDeadEnd) {
+      // 死胡同传送带：物品到达各自极限后在实际传送带上设置冻结，
+      // 确保创建过程中（hidesTerminalCell）裁剪副本能继承冻结状态，
+      // 避免物品在末端反复跳转。
+      belt.freezeDeadEndSegments();
     }
     _prevBeltItemIds[belt.id] = belt.itemId;
     _prevBeltLastItemIds[belt.id] = belt.lastItemId;
@@ -1817,23 +1822,13 @@ class _EditorPainter extends CustomPainter {
 
     // 获取当前正在绘制的新传送带的分叉点（用于旧道动态裁剪）
     // 使用 anchors.first（用户实际点击的位置），而非路径的 first
-    // 如果当前路径有效，才需要对原传送带进行裁剪来建立连接。
-    // 如果新传送带路径无效，不应对旧传送带进行裁剪，以保持已有样式的完整性。
-    final hasConfirmedForkHandoff = !conveyorHasCommittedPath &&
-        !conveyorPathInvalid &&
-        conveyorForkCell != null &&
-        (conveyorConfirmedPath
-                .any((cell) => _sameCell(cell, conveyorForkCell!)) ||
-            (conveyorPreviewPath?.any(
-                  (cell) => _sameCell(cell, conveyorForkCell!),
-                ) ??
-                false));
-    final Offset? startCell = hasConfirmedForkHandoff ? conveyorForkCell : null;
+    // 创建过程中不打断原传送带的物品动画：不裁剪原传送带、不清空物品、不渲染已确认段预览
+    const hasConfirmedForkHandoff = false;
+    const Offset? startCell = null;
 
     // 构建 fullPathContext（已确认段 + 实时段的完整路径）
     // 不论路径有效还是无效都构建上下文，这样即使渲染红色错误预览时，转角处的纹理也能计算正确
     List<Offset>? fullPathContext;
-    int confirmedStartIndex = 0;
     int previewStartIndex = conveyorConfirmedPath.length;
 
     if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
@@ -1996,24 +1991,18 @@ class _EditorPainter extends CustomPainter {
           lastItemId: belt.lastItemId,
           itemSegments: hidesTerminalCell
               ? belt.clippedItemSegments(0, renderPath.length)
-              : hasConfirmedForkHandoff && forkIdx >= 0
-                  ? <ConveyorItemSegment>[]
-                  : forkIdx >= 0
-                      ? belt.clippedItemSegments(forkIdx + 1, belt.path.length)
-                      : belt.shiftedItemSegments(0),
+              : forkIdx >= 0
+                  ? belt.clippedItemSegments(forkIdx + 1, belt.path.length)
+                  : belt.shiftedItemSegments(0),
           itemFillCount: hidesTerminalCell
               ? math.min(belt.itemFillCount, renderPath.length)
               : forkIdx >= 0
-                  ? hasConfirmedForkHandoff
-                      ? 0
-                      : math.max(0, belt.itemFillCount - (forkIdx + 1))
+                  ? math.max(0, belt.itemFillCount - (forkIdx + 1))
                   : belt.itemFillCount,
           itemDrainCount: hidesTerminalCell
               ? math.min(belt.itemDrainCount, renderPath.length)
               : forkIdx >= 0
-                  ? hasConfirmedForkHandoff
-                      ? 0
-                      : math.max(0, belt.itemDrainCount - (forkIdx + 1))
+                  ? math.max(0, belt.itemDrainCount - (forkIdx + 1))
                   : belt.itemDrainCount,
           isBlocked: belt.isBlocked,
           forcedDirection: forcedDir,
@@ -2022,16 +2011,12 @@ class _EditorPainter extends CustomPainter {
           lastItemFillCount: hidesTerminalCell
               ? math.min(belt.lastItemFillCount, renderPath.length)
               : belt.lastItemFillCount > 0 && forkIdx >= 0
-                  ? hasConfirmedForkHandoff
-                      ? 0
-                      : math.max(0, belt.lastItemFillCount - (forkIdx + 1))
+                  ? math.max(0, belt.lastItemFillCount - (forkIdx + 1))
                   : belt.lastItemFillCount,
           lastItemDrainCount: hidesTerminalCell
               ? math.min(belt.lastItemDrainCount, renderPath.length)
               : belt.lastItemFillCount > 0 && forkIdx >= 0
-                  ? hasConfirmedForkHandoff
-                      ? 0
-                      : math.max(0, belt.lastItemDrainCount - (forkIdx + 1))
+                  ? math.max(0, belt.lastItemDrainCount - (forkIdx + 1))
                   : belt.lastItemDrainCount,
           deadEndFreezeProgress: belt.deadEndFreezeProgress,
           lastItemFreezeProgress: belt.lastItemFreezeProgress,
@@ -2066,23 +2051,7 @@ class _EditorPainter extends CustomPainter {
       }
     }
 
-    // 已确认段始终使用传送带本色渲染（不论有效还是无效） - (放到建筑下方渲染)
-    if (!conveyorHasCommittedPath && conveyorConfirmedPath.isNotEmpty) {
-      TransportBeltRenderer.renderConfirmedPreviewPath(
-        canvas,
-        conveyorConfirmedPath,
-        cellSize,
-        project.buildings,
-        fullPathContext: fullPathContext,
-        contextStartIndex: confirmedStartIndex,
-        incomingDirection: conveyorIncomingDirection,
-        arrowProgress: beltArrowController.value,
-        itemSegments: previewItemSegments,
-        allItems: dataLoader.items,
-        opaqueItems: hasConfirmedForkHandoff,
-        itemArrowProgress: 0.5,
-      );
-    }
+    // 已确认段不单独渲染预览，原传送带在创建过程中保持完整渲染，动画不中断
 
     // 实时段根据有效/无效状态分别渲染 - (放到建筑下方渲染)
     if (conveyorPathInvalid) {
