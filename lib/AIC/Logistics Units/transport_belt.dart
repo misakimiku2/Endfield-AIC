@@ -205,6 +205,38 @@ class TransportBeltController {
       return false;
     }
 
+    // 检查是否点击了某条传送带的中间格子（非起点），进行截断连接
+    final midBelt = _findBeltAtCellExcluding(gridPos, _committedBeltId);
+    if (midBelt != null) {
+      // 排除首格（已由 mergeBelt 处理）和已在路径中的格子
+      final isFirstCell = midBelt.path.isNotEmpty &&
+          midBelt.path.first.dx == gridPos.dx &&
+          midBelt.path.first.dy == gridPos.dy;
+      final alreadyInPath =
+          fullPath.any((c) => c.dx == gridPos.dx && c.dy == gridPos.dy);
+      if (!isFirstCell && !alreadyInPath) {
+        final blocked = _buildBlockedSet(excludeCell: gridPos);
+        final verticalFirst = _isIncomingVertical();
+        final segment = _findPath(anchors.last, gridPos, blocked,
+            verticalFirst: verticalFirst);
+        if (segment != null && segment.length >= 2) {
+          if (fullPath.isEmpty) {
+            fullPath.addAll(segment);
+          } else {
+            if (segment.length > 1) {
+              fullPath.addAll(segment.sublist(1));
+            }
+          }
+          anchors.add(gridPos);
+          _finish(); // 截断连接时自动完成创建
+          notifyListeners();
+          return true;
+        }
+      }
+      // 路径不通或格子不合法，返回 false 让预览显示红色
+      return false;
+    }
+
     // 允许设备输入端口的格子作为传送带终点
     final isInputPort = _isCellDeviceInputPort(gridPos);
     // 物流桥格子允许作为传送带路径的一部分
@@ -323,6 +355,54 @@ class TransportBeltController {
             }
           }
           if (forkSourceBelt != null) break;
+        }
+      }
+
+      // 检查新传送带的终点是否在某条旧传送带的中间格子上
+      // 如果方向兼容，追加下游部分到 fullPath（类似合并目标）
+      ConveyorBelt? endCellBelt;
+      int endCellIdx = -1;
+      {
+        final endCell = fullPath.last;
+        for (final oldBelt in project.conveyors) {
+          if (_committedBeltId != null && oldBelt.id == _committedBeltId) {
+            continue;
+          }
+          if (_mergeTarget != null && identical(oldBelt, _mergeTarget)) continue;
+          if (startsAtBridge &&
+              bridgeSourceBelt != null &&
+              identical(oldBelt, bridgeSourceBelt)) {
+            continue;
+          }
+          if (forkSourceBelt != null && identical(oldBelt, forkSourceBelt)) {
+            continue;
+          }
+          for (int i = 1; i < oldBelt.path.length; i++) {
+            if (oldBelt.path[i].dx == endCell.dx &&
+                oldBelt.path[i].dy == endCell.dy) {
+              endCellBelt = oldBelt;
+              endCellIdx = i;
+              break;
+            }
+          }
+          if (endCellBelt != null) break;
+        }
+      }
+      // 方向兼容时追加下游部分到 fullPath
+      bool endCellDownstreamMerged = false;
+      int endCellDownstreamOffset = 0;
+      if (endCellBelt != null &&
+          endCellIdx >= 0 &&
+          endCellIdx + 1 < endCellBelt.path.length &&
+          fullPath.length >= 2) {
+        final newEndDir = _directionBetween(
+            fullPath[fullPath.length - 2], fullPath.last);
+        final oldOutDir = _directionBetween(endCellBelt.path[endCellIdx],
+            endCellBelt.path[endCellIdx + 1]);
+        if (newEndDir == oldOutDir) {
+          endCellDownstreamOffset = fullPath.length;
+          fullPath.addAll(endCellBelt.path.sublist(endCellIdx + 1));
+          endCellDownstreamMerged = true;
         }
       }
 
@@ -459,6 +539,39 @@ class TransportBeltController {
         }
       }
 
+      // 终点截断下游合并时，继承下游部分的物品状态
+      if (endCellDownstreamMerged && endCellBelt != null) {
+        final eb = endCellBelt;
+        final offset = endCellDownstreamOffset;
+        newItemSegments.addAll(
+          eb.clippedItemSegments(
+            endCellIdx + 1,
+            eb.path.length,
+            clearFreezeProgress: true,
+          ).map((seg) => seg.shifted(offset)),
+        );
+        if (eb.itemId.isNotEmpty) {
+          final downstreamFill = eb.itemFillCount > endCellIdx + 1
+              ? eb.itemFillCount - (endCellIdx + 1)
+              : 0;
+          final downstreamDrain = eb.itemDrainCount > endCellIdx + 1
+              ? eb.itemDrainCount - (endCellIdx + 1)
+              : 0;
+          if (downstreamFill > 0) {
+            if (newItemId.isNotEmpty || eb.lastItemFillCount > 0) {
+              // 新传送带已有物品，下游物品转为残留
+              newLastItemId = eb.itemId;
+              newLastItemFillCount = downstreamFill + offset;
+              newLastItemDrainCount = downstreamDrain + offset;
+            } else {
+              newItemId = eb.itemId;
+              newItemFillCount = downstreamFill + offset;
+              newItemDrainCount = downstreamDrain + offset;
+            }
+          }
+        }
+      }
+
       final belt = ConveyorBelt(
         id: 'belt_${DateTime.now().millisecondsSinceEpoch}',
         path: List<Offset>.from(fullPath),
@@ -583,6 +696,133 @@ class TransportBeltController {
       // 移除合并目标
       if (_mergeTarget != null) {
         toRemove.add(_mergeTarget!);
+      }
+
+      // 截断终点所在的旧传送带：创建上游部分为独立传送带
+      if (endCellBelt != null && endCellIdx >= 0) {
+        final eb = endCellBelt;
+        toRemove.add(eb);
+        // 创建上游部分（0 到 endCellIdx-1，不含终点格子）
+        if (endCellIdx > 0) {
+          final upstream = eb.path.sublist(0, endCellIdx);
+          final isDanglingInputPortStub = upstream.length == 1 &&
+              _isCellDeviceInputPort(upstream.single);
+          if (upstream.isNotEmpty && !isDanglingInputPortStub) {
+            String? forcedDir;
+            if (upstream.length == 1) {
+              final dx = eb.path[endCellIdx].dx -
+                  eb.path[endCellIdx - 1].dx;
+              final dy = eb.path[endCellIdx].dy -
+                  eb.path[endCellIdx - 1].dy;
+              if (dx > 0) {
+                forcedDir = 'right';
+              } else if (dx < 0) {
+                forcedDir = 'left';
+              } else if (dy > 0) {
+                forcedDir = 'down';
+              } else if (dy < 0) {
+                forcedDir = 'up';
+              }
+            }
+            toAdd.add(ConveyorBelt(
+              id:
+                  'belt_${DateTime.now().millisecondsSinceEpoch}_upstream_${eb.id}',
+              path: upstream,
+              itemId: eb.itemId,
+              lastItemId: eb.lastItemId,
+              itemSegments: eb.clippedItemSegments(
+                0,
+                endCellIdx,
+                clearFreezeProgress: true,
+              ),
+              isBlocked: eb.isBlocked,
+              forcedDirection: forcedDir,
+              incomingDirection: eb.incomingDirection,
+              phaseOffset: eb.phaseOffset,
+              itemFillCount:
+                  eb.itemFillCount.clamp(0, endCellIdx).toInt(),
+              itemDrainCount:
+                  eb.itemDrainCount.clamp(0, endCellIdx).toInt(),
+              lastItemFillCount: eb.lastItemFillCount > 0
+                  ? eb.lastItemFillCount
+                      .clamp(0, endCellIdx)
+                      .toInt()
+                  : 0,
+              lastItemDrainCount: eb.lastItemFillCount > 0
+                  ? eb.lastItemDrainCount
+                      .clamp(0, endCellIdx)
+                      .toInt()
+                  : 0,
+            ));
+          }
+        }
+        // 下游部分未合并到 fullPath 时，创建为独立传送带
+        if (!endCellDownstreamMerged &&
+            endCellIdx + 1 < eb.path.length) {
+          final downstream = eb.path.sublist(endCellIdx + 1);
+          final isDanglingInputPortStub = downstream.length == 1 &&
+              _isCellDeviceInputPort(downstream.single);
+          if (downstream.isNotEmpty && !isDanglingInputPortStub) {
+            String? forcedDir;
+            if (downstream.length == 1) {
+              final dx = eb.path[endCellIdx + 1].dx -
+                  eb.path[endCellIdx].dx;
+              final dy = eb.path[endCellIdx + 1].dy -
+                  eb.path[endCellIdx].dy;
+              if (dx > 0) {
+                forcedDir = 'right';
+              } else if (dx < 0) {
+                forcedDir = 'left';
+              } else if (dy > 0) {
+                forcedDir = 'down';
+              } else if (dy < 0) {
+                forcedDir = 'up';
+              }
+            }
+            String? incomingDir;
+            final dx = eb.path[endCellIdx + 1].dx -
+                eb.path[endCellIdx].dx;
+            final dy = eb.path[endCellIdx + 1].dy -
+                eb.path[endCellIdx].dy;
+            if (dx > 0) {
+              incomingDir = 'right';
+            } else if (dx < 0) {
+              incomingDir = 'left';
+            } else if (dy > 0) {
+              incomingDir = 'down';
+            } else if (dy < 0) {
+              incomingDir = 'up';
+            }
+            toAdd.add(ConveyorBelt(
+              id:
+                  'belt_${DateTime.now().millisecondsSinceEpoch}_enddown_${eb.id}',
+              path: downstream,
+              itemId: eb.itemId,
+              lastItemId: eb.lastItemId,
+              itemSegments: eb.clippedItemSegments(
+                endCellIdx + 1,
+                eb.path.length,
+                clearFreezeProgress: true,
+              ),
+              isBlocked: eb.isBlocked,
+              forcedDirection: forcedDir,
+              incomingDirection: incomingDir,
+              phaseOffset: eb.phaseOffset,
+              itemFillCount: _clampDownstreamCount(
+                  eb.itemFillCount, endCellIdx + 1),
+              itemDrainCount: _clampDownstreamCount(
+                  eb.itemDrainCount, endCellIdx + 1),
+              lastItemFillCount: eb.lastItemFillCount > 0
+                  ? _clampDownstreamCount(
+                      eb.lastItemFillCount, endCellIdx + 1)
+                  : 0,
+              lastItemDrainCount: eb.lastItemFillCount > 0
+                  ? _clampDownstreamCount(
+                      eb.lastItemDrainCount, endCellIdx + 1)
+                  : 0,
+            ));
+          }
+        }
       }
 
       for (final old in toRemove) {
@@ -783,6 +1023,19 @@ class TransportBeltController {
     return null;
   }
 
+  /// 查找包含指定格子的传送带，排除指定 ID 的传送带
+  ConveyorBelt? _findBeltAtCellExcluding(Offset gridPos, String? excludeId) {
+    final gx = gridPos.dx.toInt();
+    final gy = gridPos.dy.toInt();
+    for (final belt in project.conveyors) {
+      if (excludeId != null && belt.id == excludeId) continue;
+      for (final cell in belt.path) {
+        if (cell.dx.toInt() == gx && cell.dy.toInt() == gy) return belt;
+      }
+    }
+    return null;
+  }
+
   List<Offset> _traceBeltToCell(ConveyorBelt belt, Offset cell) {
     final result = <Offset>[];
     final cx = cell.dx.toInt();
@@ -864,6 +1117,9 @@ class TransportBeltController {
       final beltDir = _getCrossingBeltDirectionAtCell(cell);
       if (beltDir == null) continue; // 不在任何传送带上
 
+      // 物流桥不能在转角传送带格子上创建：穿过转角格子则路径无效
+      if (_isCrossingBeltCellTurn(cell)) return false;
+
       final (beltDx, _) = beltDir;
       final dirIn = _directionBetween(path[i - 1], path[i]);
       final dirOut = i + 1 < path.length
@@ -929,6 +1185,57 @@ class TransportBeltController {
     return null;
   }
 
+  /// 判断已有传送带的指定格子是否是转角（与 canvas_editor 中 _isStraightBeltCell 相反）
+  /// 物流桥不能在转角传送带格子上创建
+  bool _isBeltCellTurn(ConveyorBelt belt, int cellIndex) {
+    final path = belt.path;
+    if (path.isEmpty || cellIndex < 0 || cellIndex >= path.length) {
+      return false;
+    }
+
+    // 单格路径：仅当入方向与强制方向都存在且不同时为转角
+    if (path.length == 1) {
+      final incoming = belt.incomingDirection;
+      final forced = belt.forcedDirection;
+      return incoming != null && forced != null && incoming != forced;
+    }
+
+    // 首格：需要 incomingDirection 与出方向比较
+    if (cellIndex == 0) {
+      final incoming = belt.incomingDirection;
+      if (incoming == null) return false;
+      final outgoing = _directionBetween(path[0], path[1]);
+      if (outgoing == null) return false;
+      return incoming != outgoing;
+    }
+
+    // 末格：与 _isStraightBeltCell 一致，末格不算转角
+    if (cellIndex == path.length - 1) return false;
+
+    // 中间格：入方向与出方向不同则为转角
+    final dirIn = _directionBetween(path[cellIndex - 1], path[cellIndex]);
+    final dirOut = _directionBetween(path[cellIndex], path[cellIndex + 1]);
+    if (dirIn == null || dirOut == null) return false;
+    return dirIn != dirOut;
+  }
+
+  /// 检查指定格子处的已有传送带格子是否是转角（排除已提交传送带和合并目标）
+  bool _isCrossingBeltCellTurn(Offset gridPos) {
+    final gx = gridPos.dx.toInt();
+    final gy = gridPos.dy.toInt();
+    for (final belt in project.conveyors) {
+      if (_committedBeltId != null && belt.id == _committedBeltId) continue;
+      if (_mergeTarget != null && identical(belt, _mergeTarget)) continue;
+      for (int j = 0; j < belt.path.length; j++) {
+        if (belt.path[j].dx.toInt() == gx &&
+            belt.path[j].dy.toInt() == gy) {
+          return _isBeltCellTurn(belt, j);
+        }
+      }
+    }
+    return false;
+  }
+
   /// 获取路径在指定索引处的移动方向
   String? _getPathDirectionAtIndex(List<Offset> path, int index) {
     if (path.length < 2) return null;
@@ -963,6 +1270,8 @@ class TransportBeltController {
             if (_isPerpendicularCrossing(newDir, beltDir)) {
               // Check if there's already a bridge at this cell
               if (_findBeltBridgeAtCell(cell) != null) continue;
+              // 物流桥不能在转角传送带格子上创建
+              if (_isBeltCellTurn(belt, j)) continue;
               crossings.add(cell);
             }
           }
@@ -1022,6 +1331,8 @@ class TransportBeltController {
             final beltDir = _getBeltDirectionAtCell(belt, j);
             if (_isPerpendicularCrossing(newDir, beltDir)) {
               if (_findBeltBridgeAtCell(cell) != null) continue;
+              // 物流桥不能在转角传送带格子上创建
+              if (_isBeltCellTurn(belt, j)) continue;
               if (crossings.any((c) =>
                   c.dx.toInt() == cell.dx.toInt() &&
                   c.dy.toInt() == cell.dy.toInt())) {

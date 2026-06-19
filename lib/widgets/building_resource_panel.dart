@@ -176,12 +176,12 @@ class ResourceGridTileState extends State<ResourceGridTile> {
               onTap: widget.onAddItem,
               behavior: HitTestBehavior.opaque,
               child: Opacity(
-                opacity: _hovering ? 0.6 : 0.4,
+                opacity: _hovering ? 0.3 : 0.4,
                 child: SizedBox.expand(
                   child: Container(
                     decoration: BoxDecoration(
                       color:
-                          _hovering ? Colors.white : const Color(0xFF181818),
+                          _hovering ? const Color(0xFF000000) : const Color(0xFFFFFFFF),
                       borderRadius: BorderRadius.circular(11),
                     ),
                     child: Center(
@@ -193,8 +193,8 @@ class ResourceGridTileState extends State<ResourceGridTile> {
                           height: 40,
                           colorFilter: ColorFilter.mode(
                             _hovering
-                                ? const Color(0xFF212121)
-                                : Colors.white,
+                                ? const Color(0xFFFFFFFF)
+                                : const Color(0xFF000000),
                             BlendMode.srcIn,
                           ),
                         ),

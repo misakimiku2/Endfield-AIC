@@ -444,6 +444,7 @@ class TransportBeltRenderer {
     Item? lastItem,
     Map<String, Item>? allItems,
     bool hideTerminalBackground = false,
+    Set<Offset>? hiddenBackgroundCells,
   }) {
     if (belt.path.isEmpty) return;
 
@@ -592,6 +593,7 @@ class TransportBeltRenderer {
         itemSegments: renderSegments,
         segmentImages: segmentImages,
         hideTerminalBackground: hideTerminalBackground,
+        hiddenBackgroundCells: hiddenBackgroundCells,
       );
     } else {
       for (int i = 0; i < belt.path.length; i++) {
@@ -680,13 +682,54 @@ class TransportBeltRenderer {
     List<ConveyorItemSegment>? itemSegments,
     Map<String, ui.Image?>? segmentImages,
     bool hideTerminalBackground = false,
+    Set<Offset>? hiddenBackgroundCells,
   }) {
     // 第一次绘制：只绘制背景（传送带）
     // 当 hideTerminalBackground=true 时，跳过最后一格的背景绘制
     // （该格由预览覆盖），但物品仍需在第二趟绘制中渲染
+    // 当 hiddenBackgroundCells 包含某格子时，跳过该格背景（物品仍渲染）
     for (int i = 0; i < path.length; i++) {
       if (hideTerminalBackground && i == path.length - 1) continue;
       final cell = path[i];
+      final isHiddenCell = hiddenBackgroundCells != null && hiddenBackgroundCells.contains(cell);
+      if (isHiddenCell) {
+        // 半透明绘制：用 saveLayer + 半透明 Paint 实现整体透明度
+        final cx = cell.dx * cellSize + cellSize / 2;
+        final cy = cell.dy * cellSize + cellSize / 2;
+        canvas.saveLayer(
+          Rect.fromCenter(center: Offset(cx, cy), width: cellSize, height: cellSize),
+          Paint()..color = const Color(0x66FFFFFF), // 40% 不透明度
+        );
+        canvas.translate(cx, cy);
+        final clip = getLocalClipRect(
+          path: path,
+          index: i,
+          cellSize: cellSize,
+          buildings: buildings,
+          fullPathContext: fullPathContext,
+          contextStartIndex: contextStartIndex,
+          forcedDirection: forcedDirection,
+          incomingDirection: incomingDirection,
+        );
+        if (clip != null) {
+          canvas.clipRect(clip);
+        }
+        _drawSvgCellAtOrigin(
+          canvas,
+          path,
+          i,
+          cellSize,
+          fullPathContext: fullPathContext,
+          contextStartIndex: contextStartIndex,
+          forcedDirection: forcedDirection,
+          incomingDirection: incomingDirection,
+          arrowProgress: arrowProgress,
+          drawBackground: true,
+          drawPointer: false,
+        );
+        canvas.restore();
+        continue;
+      }
       final cx = cell.dx * cellSize + cellSize / 2;
       final cy = cell.dy * cellSize + cellSize / 2;
 

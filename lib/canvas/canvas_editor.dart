@@ -152,6 +152,9 @@ class CanvasEditorState extends State<CanvasEditor>
   double _movingOriginalGridX = 0;
   double _movingOriginalGridY = 0;
 
+  // 物流桥移动时需要隐藏背景的传送带格子
+  Offset? _bridgeMoveHiddenCell;
+
   // 移动模式下：端口传送带快照（用于取消移动时恢复）
 
   // 端口连接缓存：building id -> port key -> 是否连接
@@ -478,6 +481,8 @@ class CanvasEditorState extends State<CanvasEditor>
       return outputDirection != null &&
           building.canAcceptBridgeInputItem(itemId, outputDirection);
     }
+    // 仓库存货口始终可以接收物品（直接进入全局仓库库存）
+    if (building.building.id == DepotLoaderConfig.id) return true;
     return building.canAcceptInputItem(itemId);
   }
 
@@ -545,6 +550,12 @@ class CanvasEditorState extends State<CanvasEditor>
       belt.removeOutputReadyItem();
       return true;
     }
+    // 仓库存货口：直接增加全局仓库库存，不受 inputItemCount 限制
+    if (building.building.id == DepotLoaderConfig.id) {
+      _project.incrementWarehouseItem(itemId);
+      belt.removeOutputReadyItem();
+      return true;
+    }
     if (!building.acceptInputItem(itemId)) return false;
     // 自动匹配配方：当建筑没有激活配方时，根据输入物品自动选择匹配的配方
     if (building.activeRecipeId == null) {
@@ -599,7 +610,10 @@ class CanvasEditorState extends State<CanvasEditor>
 
       if (pb.building.id == DepotUnloaderConfig.id) {
         final itemId = pb.depotOutputItemId;
-        return itemId == null || itemId.isEmpty ? null : itemId;
+        if (itemId == null || itemId.isEmpty) return null;
+        // 仓库库存为 0 时不再输出物品
+        if (_project.getWarehouseItemCount(itemId) <= 0) return null;
+        return itemId;
       }
 
       final recipe = pb.activeRecipeId != null
@@ -629,7 +643,11 @@ class CanvasEditorState extends State<CanvasEditor>
       if (LogisticsUnitRenderer.isLogisticsUnit(pb.building.id)) {
         return pb.consumeInputItems(itemId, 1);
       }
-      if (pb.building.id == DepotUnloaderConfig.id) return false;
+      if (pb.building.id == DepotUnloaderConfig.id) {
+        // 仓库取货口输出物品时减少全局仓库库存
+        _project.decrementWarehouseItem(itemId);
+        return false;
+      }
       return pb.consumeOutputItem(itemId, 1);
     }
     return false;
@@ -680,6 +698,14 @@ class CanvasEditorState extends State<CanvasEditor>
     _movingRotation = pb.rotation;
     _movingOriginalGridX = pb.gridX;
     _movingOriginalGridY = pb.gridY;
+
+    // 物流桥移动时，记录其网格位置以隐藏下方传送带背景
+    if (pb.isBeltBridge) {
+      _bridgeMoveHiddenCell = Offset(
+        pb.gridX.toDouble(),
+        pb.gridY.toDouble(),
+      );
+    }
 
     widget.onProjectChanged(_project);
     setState(() {});
@@ -1172,6 +1198,14 @@ class CanvasEditorState extends State<CanvasEditor>
     _movingOriginalGridX = _longPressTargetBuilding!.gridX;
     _movingOriginalGridY = _longPressTargetBuilding!.gridY;
 
+    // 物流桥移动时，记录其网格位置以隐藏下方传送带背景
+    if (_movingBuilding!.isBeltBridge) {
+      _bridgeMoveHiddenCell = Offset(
+        _movingBuilding!.gridX.toDouble(),
+        _movingBuilding!.gridY.toDouble(),
+      );
+    }
+
     _longPressTargetBuilding = null;
     _longPressStartTime = null;
     _longPressScreenPos = null;
@@ -1425,6 +1459,7 @@ class CanvasEditorState extends State<CanvasEditor>
     if (_movingBuilding == null) return false;
     _movingBuilding = null;
     _movingRotation = 0;
+    _bridgeMoveHiddenCell = null;
 
     setState(() {});
     return true;
@@ -1461,6 +1496,7 @@ class CanvasEditorState extends State<CanvasEditor>
 
     _movingBuilding = null;
     _movingRotation = 0;
+    _bridgeMoveHiddenCell = null;
 
     _project.offsetX = _targetOffsetX;
     _project.offsetY = _targetOffsetY;
@@ -1710,6 +1746,7 @@ class CanvasEditorState extends State<CanvasEditor>
                 longPressProgress: _longPressProgress,
                 movingBuilding: _movingBuilding,
                 movingRotation: _movingRotation,
+                bridgeMoveHiddenCell: _bridgeMoveHiddenCell,
                 beltArrowController: _beltArrowController,
               ),
               size: Size.infinite,
@@ -1750,6 +1787,7 @@ class _EditorPainter extends CustomPainter {
   final double longPressProgress;
   final PlacedBuilding? movingBuilding;
   final int movingRotation;
+  final Offset? bridgeMoveHiddenCell;
   final AnimationController beltArrowController;
 
   // 预渲染缓存: key = "buildingId_rotation_detailLevel_portsHash" -> Picture
@@ -1790,6 +1828,7 @@ class _EditorPainter extends CustomPainter {
     this.longPressProgress = 0.0,
     this.movingBuilding,
     this.movingRotation = 0,
+    this.bridgeMoveHiddenCell,
     required this.beltArrowController,
   }) : super(repaint: Listenable.merge([beltArrowController]));
 
@@ -1876,6 +1915,11 @@ class _EditorPainter extends CustomPainter {
         conveyorPreviewPath != null && conveyorPreviewPath!.length > 1
             ? conveyorPreviewPath!.first
             : null;
+
+    // 物流桥移动时，隐藏其下方传送带格子的背景
+    final bridgeHiddenCells = bridgeMoveHiddenCell != null
+        ? <Offset>{bridgeMoveHiddenCell!}
+        : null;
 
     // 检查分叉点是否在物流桥上：如果是，则不应裁剪只是穿过物流桥的传送带
     // （传送带从物流桥开始创建，并非从穿过物流桥的传送带分叉）
@@ -2029,7 +2073,8 @@ class _EditorPainter extends CustomPainter {
             arrowProgress:
                 clippedBelt.animationProgress(beltArrowController.value),
             lastItem: lastItem,
-            allItems: dataLoader.items);
+            allItems: dataLoader.items,
+            hiddenBackgroundCells: bridgeHiddenCells);
       } else {
         TransportBeltRenderer.renderConveyorPath(
             canvas, belt, item, cellSize, project.buildings,
@@ -2037,7 +2082,8 @@ class _EditorPainter extends CustomPainter {
             arrowProgress: belt.animationProgress(beltArrowController.value),
             lastItem: lastItem,
             allItems: dataLoader.items,
-            hideTerminalBackground: hidesTerminalCell);
+            hideTerminalBackground: hidesTerminalCell,
+            hiddenBackgroundCells: bridgeHiddenCells);
       }
     }
 

@@ -102,62 +102,132 @@ class _ProcessingIndicatorState extends State<ProcessingIndicator>
 }
 
 /// 生产进度条
-class ProductionProgressBar extends StatelessWidget {
+class ProductionProgressBar extends StatefulWidget {
   final double progress;
 
   const ProductionProgressBar({super.key, required this.progress});
 
   @override
-  Widget build(BuildContext context) {
-    final clamped = progress.clamp(0.0, 1.0).toDouble();
-    return SizedBox(
-      width: 156,
-      height: 14,
-      child: TweenAnimationBuilder<double>(
-        tween: Tween<double>(end: clamped),
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
-        builder: (context, animatedProgress, child) {
-          return Stack(
-            alignment: Alignment.centerLeft,
-            children: [
-              Positioned(
-                left: 8,
-                right: 8,
-                child: Container(
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFBFBFBF),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 8,
-                child: Container(
-                  width: 140 * animatedProgress,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-              ),
-              const Positioned(
-                right: 2,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                  ),
-                  child: SizedBox(width: 12, height: 12),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
+  State<ProductionProgressBar> createState() => _ProductionProgressBarState();
+}
+
+class _ProductionProgressBarState extends State<ProductionProgressBar>
+    with TickerProviderStateMixin {
+  late AnimationController _rippleController;
+  late Animation<double> _rippleAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _rippleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
     );
+    _rippleAnimation = CurvedAnimation(
+      parent: _rippleController,
+      curve: Curves.easeOut,
+    );
+  }
+
+  @override
+  void didUpdateWidget(ProductionProgressBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 生产周期完成时 progress 会从较高值突然回落，以此触发涟漪
+    if (oldWidget.progress > 0.5 && widget.progress < oldWidget.progress) {
+      _rippleController.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _rippleController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final clamped = widget.progress.clamp(0.0, 1.0).toDouble();
+    return AnimatedBuilder(
+      animation: _rippleAnimation,
+      builder: (context, child) {
+        return TweenAnimationBuilder<double>(
+          tween: Tween<double>(end: clamped),
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOutCubic,
+          builder: (context, animatedProgress, child) {
+            return CustomPaint(
+              size: const Size(156, 14),
+              painter: _ProductionProgressBarPainter(
+                animatedProgress,
+                _rippleAnimation.value,
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _ProductionProgressBarPainter extends CustomPainter {
+  final double progress;
+  final double rippleProgress;
+
+  _ProductionProgressBarPainter(this.progress, this.rippleProgress);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final centerY = size.height / 2;
+    final trackWidth = size.width - 16;
+
+    // 背景条
+    final trackRect = Rect.fromLTWH(8, centerY - 2, trackWidth, 4);
+    final trackRRect = RRect.fromRectAndRadius(
+      trackRect,
+      const Radius.circular(2),
+    );
+    canvas.drawRRect(
+      trackRRect,
+      Paint()..color = const Color(0xFFBFBFBF),
+    );
+
+    // 白色进度条，终点位于圆形中心（size.width - 8）
+    final fillWidth = trackWidth * progress;
+    final fillRect = Rect.fromLTWH(8, centerY - 4, fillWidth, 8);
+    final fillRRect = RRect.fromRectAndRadius(
+      fillRect,
+      const Radius.circular(4),
+    );
+    canvas.drawRRect(
+      fillRRect,
+      Paint()..color = Colors.white,
+    );
+
+    // 白色圆形绘制在进度条之上，覆盖末端；圆心向右偏移一个半径，
+    // 使进度条实体恰好填充到圆形的左边缘（即原中心位置）。
+    final circleCenter = Offset(size.width - 14, centerY);
+
+    // 涟漪：进度条到达终点时触发，白色圆从基础大小放大并逐渐透明
+    if (rippleProgress > 0) {
+      final rippleRadius = 6 + 16 * rippleProgress;
+      final alpha = ((1 - rippleProgress) * 255).round();
+      canvas.drawCircle(
+        circleCenter,
+        rippleRadius,
+        Paint()..color = Colors.white.withAlpha(alpha),
+      );
+    }
+
+    canvas.drawCircle(
+      circleCenter,
+      6,
+      Paint()..color = Colors.white,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ProductionProgressBarPainter old) {
+    return old.progress != progress || old.rippleProgress != rippleProgress;
   }
 }
 

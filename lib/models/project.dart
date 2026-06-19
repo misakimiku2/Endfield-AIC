@@ -804,6 +804,13 @@ class ProjectState {
   double offsetY;
   double scale;
 
+  /// 全局仓库物品库存：记录每个物品在仓库中的数量。
+  /// 作为后续玩法更新的地基，初始值暂时设置为 [defaultWarehouseItemCount]。
+  final Map<String, int> warehouseInventory = {};
+
+  /// 仓库物品默认初始数量（暂定 99999，后续玩法更新时调整）。
+  static const int defaultWarehouseItemCount = 99999;
+
   ProjectState({
     List<PlacedBuilding>? buildings,
     List<ConveyorBelt>? conveyors,
@@ -812,4 +819,26 @@ class ProjectState {
     this.scale = 1.0,
   })  : buildings = buildings ?? [],
         conveyors = conveyors ?? [];
+
+  /// 获取指定物品的仓库库存数量。
+  /// 若该物品尚未被记录，返回默认初始数量 [defaultWarehouseItemCount]。
+  int getWarehouseItemCount(String itemId) {
+    if (itemId.isEmpty) return 0;
+    return warehouseInventory[itemId] ?? defaultWarehouseItemCount;
+  }
+
+  /// 仓库取货口输出物品时减少库存（不低于 0）。
+  void decrementWarehouseItem(String itemId) {
+    if (itemId.isEmpty) return;
+    final current = getWarehouseItemCount(itemId);
+    final next = current - 1;
+    warehouseInventory[itemId] = next < 0 ? 0 : next;
+  }
+
+  /// 仓库存货口接收物品时增加库存。
+  void incrementWarehouseItem(String itemId) {
+    if (itemId.isEmpty) return;
+    final current = getWarehouseItemCount(itemId);
+    warehouseInventory[itemId] = current + 1;
+  }
 }

@@ -136,6 +136,16 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
     );
   }
 
+  /// 检测设备是否有连接的输出传送带
+  bool _hasConnectedOutputBelt() {
+    final conveyors = widget.conveyors;
+    if (conveyors == null || conveyors.isEmpty) return false;
+    final connections =
+        widget.placedBuilding.conveyorPortConnections(conveyors);
+    return widget.placedBuilding.outputPorts
+        .any((p) => connections['output_${p.index}'] == true);
+  }
+
   void _showRecipeListDialog() {
     showDialog<void>(
       context: context,
@@ -170,8 +180,6 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
     final activeRecipe = _activeRecipe;
     final productionProgress =
         widget.placedBuilding.productionProgress.clamp(0.0, 1.0);
-    final isProductionRunning =
-        activeRecipe != null && widget.placedBuilding.productionProgress > 0;
     final isInputFull =
         widget.placedBuilding.inputItemCount >=
             PlacedBuilding.maxInputItemCount;
@@ -180,6 +188,8 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
             PlacedBuilding.maxOutputItemCount;
     final isBlocked = isInputFull || isOutputFull;
     final isPaused = widget.placedBuilding.isPaused;
+    final isProductionActive =
+        activeRecipe != null && !isPaused && !isBlocked;
     final remainingSeconds = activeRecipe == null
         ? 0
         : (activeRecipe.processTimeSeconds * (1.0 - productionProgress))
@@ -267,16 +277,14 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
                                           : (isBlocked
                                               ? BlockedIndicator()
                                               : ProcessingIndicator(
-                                                  isRunning: isProductionRunning,
+                                                  isRunning: isProductionActive,
                                                 )),
                                     ),
                                   ),
                                   Text(
-                                    isPaused || isBlocked
-                                        ? ''
-                                        : (isProductionRunning
-                                            ? '$remainingSeconds秒'
-                                            : ''),
+                                    isProductionActive
+                                        ? '${remainingSeconds.clamp(0, 999)}秒'
+                                        : '',
                                     style: const TextStyle(
                                       color: Color(0xFFEDEDED),
                                       fontSize: 24,
@@ -289,7 +297,7 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
                                       : (isBlocked
                                           ? BlockedProgressBar()
                                           : ProductionProgressBar(
-                                              progress: isProductionRunning
+                                              progress: isProductionActive
                                                   ? productionProgress.toDouble()
                                                   : 0,
                                             )),
@@ -319,8 +327,13 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
         Builder(
           builder: (context) {
             final isProducing = _activeRecipe != null;
-            final hasCollectableOutput =
-                widget.placedBuilding.totalOutputCount > 0;
+            // 当有连接的输出传送带时，物品会被自动传输走；
+            // 只有物品堆积（>=2）时才启用按钮，避免单个物品被传输走时按钮闪烁。
+            // 没有连接传送带时，只要有产出即可收取。
+            final hasConnectedOutputBelt = _hasConnectedOutputBelt();
+            final hasCollectableOutput = hasConnectedOutputBelt
+                ? widget.placedBuilding.totalOutputCount >= 2
+                : widget.placedBuilding.totalOutputCount > 0;
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,

@@ -15,6 +15,7 @@ import 'building_logistics_bridge_panel.dart';
 class BuildingDetailDialog extends StatefulWidget {
   final PlacedBuilding placedBuilding;
   final DataLoader dataLoader;
+  final ProjectState project;
   final List<ConveyorBelt>? conveyors;
   final VoidCallback? onMove;
   final VoidCallback? onDelete;
@@ -25,6 +26,7 @@ class BuildingDetailDialog extends StatefulWidget {
     super.key,
     required this.placedBuilding,
     required this.dataLoader,
+    required this.project,
     this.conveyors,
     this.onMove,
     this.onDelete,
@@ -36,6 +38,7 @@ class BuildingDetailDialog extends StatefulWidget {
     BuildContext context, {
     required PlacedBuilding placedBuilding,
     required DataLoader dataLoader,
+    required ProjectState project,
     List<ConveyorBelt>? conveyors,
     VoidCallback? onMove,
     VoidCallback? onDelete,
@@ -48,6 +51,7 @@ class BuildingDetailDialog extends StatefulWidget {
       builder: (_) => BuildingDetailDialog(
         placedBuilding: placedBuilding,
         dataLoader: dataLoader,
+        project: project,
         conveyors: conveyors,
         onMove: onMove,
         onDelete: onDelete,
@@ -240,7 +244,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                       Align(
                         alignment: Alignment.centerLeft,
                         child: Padding(
-                          padding: const EdgeInsets.only(left: 20, top: 8, bottom: 4),
+                          padding: const EdgeInsets.only(left: 20, top: 37, bottom: 4),
                           child: _buildPowerSwitch(),
                         ),
                       ),
@@ -248,7 +252,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
                         child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             if (!_isLogisticsBridge) ...[
                               _buildResourcePanel(),
@@ -259,6 +263,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                                   ? DepotUnloaderPanel(
                                       placedBuilding: widget.placedBuilding,
                                       dataLoader: widget.dataLoader,
+                                      project: widget.project,
                                       onMove: widget.onMove,
                                       onDelete: widget.onDelete,
                                       onOutputItemSelected: widget.onOutputItemSelected,
@@ -268,6 +273,10 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                                     )
                                   : _isDepotLoader
                                       ? DepotLoaderPanel(
+                                          placedBuilding: widget.placedBuilding,
+                                          project: widget.project,
+                                          dataLoader: widget.dataLoader,
+                                          conveyors: widget.conveyors ?? [],
                                           onMove: widget.onMove,
                                           onDelete: widget.onDelete,
                                         )

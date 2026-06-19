@@ -122,6 +122,7 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
         context,
         placedBuilding: pb,
         dataLoader: widget.dataLoader,
+        project: _project,
         conveyors: _project.conveyors,
         onMove: () {
           _canvasKey.currentState?.startMoveFromDialog(pb);

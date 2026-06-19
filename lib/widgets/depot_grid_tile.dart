@@ -2,17 +2,33 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_svg/flutter_svg.dart';
 import '../models/item.dart';
-import 'building_shared_widgets.dart';
+
+/// 仓库轨道物品动画数据
+class _DepotItemAnim {
+  final AnimationController controller;
+  final Animation<double> curveAnim;
+  final String itemId;
+
+  _DepotItemAnim({
+    required this.controller,
+    required this.curveAnim,
+    required this.itemId,
+  });
+}
 
 /// 仓库存取口 - 网格+轨道+箭头动画
 /// [isInput] true=输入网格(存货口)，false=输出网格(取货口)
 /// [showNoIcon] true=空网格显示No.svg
+/// [showButton] true=显示添加/移除物品按钮（仅仓库取货口）
+/// [warehouseQuantity] 当前物品的全局仓库数量，null 表示无物品
 class DepotGridTile extends StatefulWidget {
   final Item? item;
   final bool isInput;
   final bool showNoIcon;
   final bool hasItemForButton;
   final bool isAddMode;
+  final bool showButton;
+  final int? warehouseQuantity;
   final VoidCallback onToggleAddMode;
 
   const DepotGridTile({
@@ -22,6 +38,8 @@ class DepotGridTile extends StatefulWidget {
     this.showNoIcon = false,
     this.hasItemForButton = false,
     this.isAddMode = false,
+    this.showButton = true,
+    this.warehouseQuantity,
     required this.onToggleAddMode,
   });
 
@@ -30,8 +48,11 @@ class DepotGridTile extends StatefulWidget {
 }
 
 class _DepotGridTileState extends State<DepotGridTile>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late AnimationController _arrowController;
+  final List<_DepotItemAnim> _itemAnims = [];
+  int? _previousQuantity;
+  DateTime? _lastQuantityChangeTime;
 
   @override
   void initState() {
@@ -40,12 +61,174 @@ class _DepotGridTileState extends State<DepotGridTile>
       vsync: this,
       duration: const Duration(milliseconds: 2000),
     )..repeat();
+    _previousQuantity = widget.warehouseQuantity;
+  }
+
+  @override
+  void didUpdateWidget(DepotGridTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _maybeCreateItemAnimations();
   }
 
   @override
   void dispose() {
     _arrowController.dispose();
+    for (final anim in _itemAnims) {
+      anim.controller.dispose();
+    }
     super.dispose();
+  }
+
+  /// 检测仓库数量变化并创建物品动画
+  void _maybeCreateItemAnimations() {
+    final currentQty = widget.warehouseQuantity;
+    if (currentQty == null || widget.item == null) {
+      _previousQuantity = currentQty;
+      return;
+    }
+
+    final prevQty = _previousQuantity;
+    if (prevQty == null) {
+      _previousQuantity = currentQty;
+      return;
+    }
+
+    // 仓库取货口(isInput=false)：数量减少时触发动画（物品从仓库流出）
+    // 仓库存货口(isInput=true)：数量增加时触发动画（物品流入仓库）
+    final bool shouldAnimate = widget.isInput
+        ? currentQty > prevQty
+        : currentQty < prevQty;
+
+    if (shouldAnimate) {
+      final delta = (currentQty - prevQty).abs();
+      _createItemAnimations(delta, widget.item!.id);
+    }
+
+    _previousQuantity = currentQty;
+  }
+
+  void _createItemAnimations(int delta, String itemId) {
+    if (itemId.isEmpty) return;
+
+    final now = DateTime.now();
+    int durationMs = 1500;
+    if (_lastQuantityChangeTime != null) {
+      final interval = now.difference(_lastQuantityChangeTime!).inMilliseconds;
+      if (interval > 0) {
+        durationMs = interval.clamp(300, 5000);
+      }
+    }
+    _lastQuantityChangeTime = now;
+
+    for (int i = 0; i < delta; i++) {
+      final controller = AnimationController(
+        vsync: this,
+        duration: Duration(milliseconds: durationMs),
+      );
+      final curveAnim = CurvedAnimation(
+        parent: controller,
+        curve: Curves.easeInOutCubic,
+      );
+      final anim = _DepotItemAnim(
+        controller: controller,
+        curveAnim: curveAnim,
+        itemId: itemId,
+      );
+      _itemAnims.add(anim);
+      controller.forward().then((_) {
+        if (mounted) {
+          _itemAnims.remove(anim);
+          controller.dispose();
+        }
+      });
+    }
+  }
+
+  /// 构建轨道上的物品动画 widget 列表
+  List<Widget> _buildItemAnimWidgets() {
+    if (_itemAnims.isEmpty || widget.item == null) return [];
+
+    const double itemSize = 40.0;
+    const double trackWidth = 168.0;
+    const double trackHeight = 54.0;
+    const double entryOffset = itemSize;
+
+    // 完整移动路径：从轨道外一侧进入，到另一侧
+    const double totalTravel = trackWidth + entryOffset;
+
+    // 渐变遮罩方向：
+    // 仓库取货口(isInput=false)：物品从左向右，渐变从透明→不透明
+    // 仓库存货口(isInput=true)：物品从右向左，渐变从不透明→透明
+    final trackGradient = widget.isInput
+        ? const LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [Color(0xFFFFFFFF), Color(0x00FFFFFF)],
+          )
+        : const LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [Color(0x00FFFFFF), Color(0xFFFFFFFF)],
+          );
+
+    const trackRectInMask = Rect.fromLTWH(
+      entryOffset, 0, trackWidth, trackHeight,
+    );
+
+    final List<Widget> widgets = [];
+    for (final anim in _itemAnims) {
+      const double itemY = (trackHeight - itemSize) / 2;
+
+      widgets.add(
+        Positioned(
+          left: -entryOffset,
+          top: 0,
+          width: totalTravel,
+          height: trackHeight,
+          child: ClipRect(
+            child: ShaderMask(
+              shaderCallback: (_) =>
+                  trackGradient.createShader(trackRectInMask),
+              child: AnimatedBuilder(
+                animation: anim.curveAnim,
+                builder: (context, child) {
+                  // 仓库取货口：从左向右移动 (x: -entryOffset → trackWidth)
+                  // 仓库存货口：从右向左移动 (x: trackWidth → -entryOffset)
+                  final double progress = anim.curveAnim.value;
+                  final double x = widget.isInput
+                      ? trackWidth - progress * totalTravel
+                      : progress * totalTravel - entryOffset;
+                  return Transform.translate(
+                    offset: Offset(x, itemY),
+                    child: child,
+                  );
+                },
+                child: Opacity(
+                  opacity: 0.9,
+                  child: widget.item!.imageAssetPath.isNotEmpty
+                      ? Image.asset(
+                          widget.item!.imageAssetPath,
+                          width: itemSize,
+                          height: itemSize,
+                          cacheWidth: 120,
+                          cacheHeight: 120,
+                          fit: BoxFit.contain,
+                          filterQuality: kIsWeb
+                              ? FilterQuality.high
+                              : FilterQuality.medium,
+                          isAntiAlias: true,
+                          errorBuilder: (_, __, ___) =>
+                              _buildItemPlaceholder(),
+                        )
+                      : _buildItemPlaceholder(),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return widgets;
   }
 
   String _getGridSvg(int? level) {
@@ -86,8 +269,10 @@ class _DepotGridTileState extends State<DepotGridTile>
     const trackHeight = 54.0;
     const buttonGap = 16.0;
     const buttonHeight = 40.0; // 胶囊按钮约40px高
-    final totalWidth = cardWidth + connectorWidth + gridWidth + trackWidth;
-    final totalHeight = 128.0 + buttonGap + buttonHeight;
+    const totalWidth = cardWidth + connectorWidth + gridWidth + trackWidth;
+    final totalHeight = widget.showButton
+        ? 128.0 + buttonGap + buttonHeight
+        : 128.0;
 
     return SizedBox(
       width: totalWidth,
@@ -102,6 +287,7 @@ class _DepotGridTileState extends State<DepotGridTile>
             child: DepotWarehouseCard(
               item: widget.item,
               isInput: widget.isInput,
+              quantity: widget.warehouseQuantity,
             ),
           ),
           // 网格 + 5px边框（圆角与SVG rx=15 完全对齐）
@@ -159,13 +345,23 @@ class _DepotGridTileState extends State<DepotGridTile>
               ),
             ),
           ),
-          // 轨道 + 箭头动画 + 遮罩
+          // 轨道 + 箭头动画 + 物品动画
           Positioned(
             left: cardWidth + connectorWidth + gridWidth,
             top: (128 - trackHeight) / 2,
-            child: DepotTrackWithArrows(
-              controller: _arrowController,
-              isInput: widget.isInput,
+            child: SizedBox(
+              width: trackWidth,
+              height: trackHeight,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  DepotTrackWithArrows(
+                    controller: _arrowController,
+                    isInput: widget.isInput,
+                  ),
+                  ..._buildItemAnimWidgets(),
+                ],
+              ),
             ),
           ),
           // 连接线（最后渲染，处于最上层，不被物品格遮挡）
@@ -174,21 +370,22 @@ class _DepotGridTileState extends State<DepotGridTile>
             top: 0,
             child: DepotCardConnector(hasItem: hasItem),
           ),
-          // 添加/移除物品按钮（位于物品格下方水平居中）
-          Positioned(
-            left: cardWidth + connectorWidth,
-            top: 128 + buttonGap,
-            child: SizedBox(
-              width: gridWidth,
-              child: Center(
-                child: DepotCapsuleButton(
-                  hasItem: widget.hasItemForButton,
-                  isAddMode: widget.isAddMode,
-                  onToggleAddMode: widget.onToggleAddMode,
+          // 添加/移除物品按钮（仅仓库取货口显示）
+          if (widget.showButton)
+            Positioned(
+              left: cardWidth + connectorWidth,
+              top: 128 + buttonGap,
+              child: SizedBox(
+                width: gridWidth,
+                child: Center(
+                  child: DepotCapsuleButton(
+                    hasItem: widget.hasItemForButton,
+                    isAddMode: widget.isAddMode,
+                    onToggleAddMode: widget.onToggleAddMode,
+                  ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -267,7 +464,7 @@ class DepotTrackPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.6;
 
-    final gradient = const LinearGradient(
+    const gradient = LinearGradient(
       begin: Alignment.centerLeft,
       end: Alignment.centerRight,
       colors: [
@@ -278,7 +475,7 @@ class DepotTrackPainter extends CustomPainter {
     activeTrackPaint.shader = gradient.createShader(rect);
     canvas.drawRect(rect, activeTrackPaint);
 
-    final borderGradient = const LinearGradient(
+    const borderGradient = LinearGradient(
       begin: Alignment.centerLeft,
       end: Alignment.centerRight,
       colors: [
@@ -288,9 +485,9 @@ class DepotTrackPainter extends CustomPainter {
     );
     borderPaint.shader = borderGradient.createShader(rect);
 
-    final double strokeHalf = 1.6 / 2;
+    const double strokeHalf = 1.6 / 2;
     canvas.drawLine(
-        Offset(0, strokeHalf), Offset(size.width, strokeHalf), borderPaint);
+        const Offset(0, strokeHalf), Offset(size.width, strokeHalf), borderPaint);
     canvas.drawLine(Offset(0, size.height - strokeHalf),
         Offset(size.width, size.height - strokeHalf), borderPaint);
 
@@ -470,18 +667,22 @@ class _DepotCapsuleButtonState extends State<DepotCapsuleButton>
 class DepotWarehouseCard extends StatelessWidget {
   final Item? item;
   final bool isInput;
+  final int? quantity;
 
   const DepotWarehouseCard({
     super.key,
     required this.item,
     required this.isInput,
+    this.quantity,
   });
 
   @override
   Widget build(BuildContext context) {
     final hasItem = item != null;
     final displayName = hasItem ? item!.name : '——';
-    final displayQuantity = hasItem ? '99999' : '——';
+    final displayQuantity = hasItem
+        ? (quantity != null ? quantity.toString() : '——')
+        : '——';
 
     // Depot_icon.svg 原始尺寸：10.243302mm × 9.0025673mm
     // 1mm = 96/25.4 px ≈ 3.7795 px
