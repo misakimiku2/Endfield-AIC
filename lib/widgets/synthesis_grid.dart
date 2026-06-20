@@ -7,6 +7,7 @@ import '../models/project.dart';
 import '../models/item.dart';
 import '../models/recipe.dart';
 import '../data/data_loader.dart';
+import 'item_description_dialog.dart';
 
 class ItemTrackAnim {
   final AnimationController controller;
@@ -48,7 +49,9 @@ class SynthesisGridState extends State<SynthesisGrid>
   final List<ItemTrackAnim> _itemAnims = [];
   // 网格背景 SVG 缓存：仅在 level 变化时重新生成，避免每次 build 重新解析
   SvgPicture? _cachedGridSvg;
+  SvgPicture? _cachedHoveredGridSvg;
   int? _cachedGridLevel = -999;
+  bool _hovering = false;
 
   @override
   void initState() {
@@ -68,7 +71,7 @@ class SynthesisGridState extends State<SynthesisGrid>
     super.dispose();
   }
 
-  String _getGridSvg(int? level) {
+  String _getGridSvg(int? level, {bool isHovered = false}) {
     const gradientEndColors = {
       2: '#93e8a4',
       3: '#6d9bf1',
@@ -82,11 +85,12 @@ class SynthesisGridState extends State<SynthesisGrid>
     final endColor = gradientEndColors[level] ?? '#dddddd';
     final tagColor = tagColors[level] ?? '#ebebeb';
     final hasItem = level != null;
+    final stopColor = isHovered ? '#252525' : '#696969';
 
     return '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">'
         '<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">'
-        '<stop offset="0" stop-color="#696969"/>'
-        '<stop offset="0.7" stop-color="#696969"/>'
+        '<stop offset="0" stop-color="$stopColor"/>'
+        '<stop offset="0.7" stop-color="$stopColor"/>'
         '<stop offset="1" stop-color="$endColor"/>'
         '</linearGradient></defs>'
         '<rect x="0" y="0" width="128" height="128" rx="15" ry="15" fill="${hasItem ? "url(#g)" : "#696969"}"/>'
@@ -170,6 +174,8 @@ class SynthesisGridState extends State<SynthesisGrid>
     if (level != _cachedGridLevel) {
       _cachedGridLevel = level;
       _cachedGridSvg = SvgPicture.string(_getGridSvg(level), fit: BoxFit.fill);
+      _cachedHoveredGridSvg =
+          SvgPicture.string(_getGridSvg(level, isHovered: true), fit: BoxFit.fill);
     }
     final totalAmount = widget.isInput ? inventoryCount : outputCount;
 
@@ -209,35 +215,82 @@ class SynthesisGridState extends State<SynthesisGrid>
     final gridBox = Container(
       width: 128,
       height: 128,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          _cachedGridSvg!,
-          if (dataItem != null && dataItem.imageAssetPath.isNotEmpty)
-            Center(
-              child: AnimatedOpacity(
-                opacity: totalAmount == 0
-                    ? 0.3
-                    : totalAmount == 1
-                        ? 0.5
-                        : 1.0,
-                duration: const Duration(milliseconds: 300),
-                child: Image.asset(
-                  dataItem.imageAssetPath,
-                  width: 128,
-                  height: 128,
-                  cacheWidth: 384,
-                  cacheHeight: 384,
-                  fit: BoxFit.contain,
-                  filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
-                  isAntiAlias: true,
-                  errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
+      child: MouseRegion(
+        cursor: dataItem != null
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.basic,
+        onEnter: dataItem != null ? (_) => setState(() => _hovering = true) : null,
+        onExit: (_) => setState(() => _hovering = false),
+        child: GestureDetector(
+          onTap: dataItem != null
+              ? () => ItemDescriptionDialog.show(context, item: dataItem)
+              : null,
+          behavior: HitTestBehavior.opaque,
+          child: Stack(
+            fit: StackFit.expand,
+            clipBehavior: Clip.antiAlias,
+            children: [
+              _hovering && _cachedHoveredGridSvg != null
+                  ? _cachedHoveredGridSvg!
+                  : _cachedGridSvg!,
+              if (dataItem != null && dataItem.imageAssetPath.isNotEmpty)
+                Center(
+                  child: AnimatedScale(
+                    scale: _hovering ? 1.08 : 1.0,
+                    duration: const Duration(milliseconds: 150),
+                    child: AnimatedOpacity(
+                      opacity: totalAmount == 0
+                          ? 0.3
+                          : totalAmount == 1
+                              ? 0.5
+                              : 1.0,
+                      duration: const Duration(milliseconds: 300),
+                      child: Image.asset(
+                        dataItem.imageAssetPath,
+                        width: 128,
+                        height: 128,
+                        cacheWidth: 384,
+                        cacheHeight: 384,
+                        fit: BoxFit.contain,
+                        filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
+                        isAntiAlias: true,
+                        errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
+                      ),
+                    ),
+                  ),
+                )
+              else if (dataItem != null)
+                Center(child: _buildItemPlaceholder(dataItem)),
+              if (_hovering && dataItem != null)
+                Positioned(
+                  bottom: 8,
+                  left: 0,
+                  right: 0,
+                  child: IgnorePointer(
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[900]?.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          dataItem.name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                          ),
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            )
-          else if (dataItem != null)
-            Center(child: _buildItemPlaceholder(dataItem)),
-        ],
+            ],
+          ),
+        ),
       ),
     );
 

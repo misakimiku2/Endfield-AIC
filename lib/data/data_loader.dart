@@ -48,6 +48,31 @@ class DataLoader {
     _items = itemsMap.map(
       (k, v) => MapEntry(k, Item.fromJson(v as Map<String, dynamic>)),
     );
+    await _loadItemDescriptions();
+  }
+
+  Future<void> _loadItemDescriptions() async {
+    try {
+      final jsonStr =
+          await rootBundle.loadString('assets/data/item_descriptions.json');
+      final data = json.decode(jsonStr) as Map<String, dynamic>;
+      final descriptions = data['descriptions'] as Map<String, dynamic>;
+      final updated = <String, Item>{};
+      _items.forEach((id, item) {
+        final desc = descriptions[id] as Map<String, dynamic>?;
+        if (desc != null) {
+          updated[id] = item.copyWith(
+            description: desc['description'] as String? ?? '',
+            secondaryDescription: desc['secondary_description'] as String? ?? '',
+          );
+        } else {
+          updated[id] = item;
+        }
+      });
+      _items = updated;
+    } catch (_) {
+      // 描述文件不存在时静默忽略，物品描述默认为空
+    }
   }
 
   Future<void> loadRecipes() async {

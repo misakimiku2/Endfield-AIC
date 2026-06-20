@@ -8,6 +8,7 @@ import '../models/project.dart';
 import '../models/item.dart';
 import '../data/data_loader.dart';
 import 'building_shared_widgets.dart';
+import 'item_description_dialog.dart';
 import 'synthesis_grid.dart';
 
 class ConveyorBeltDialog extends StatefulWidget {
@@ -643,71 +644,80 @@ class _ItemSlotState extends State<_ItemSlot> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        MouseRegion(
-          onEnter: (_) => setState(() => _hovering = true),
-          onExit: (_) => setState(() => _hovering = false),
-          child: SizedBox(
-            width: slotSize,
-            height: slotSize,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                SvgPicture.string(
-                  widget.getGridSvg(level, widget.isActive,
-                      isHovered: _hovering),
-                  fit: BoxFit.fill,
-                ),
-                if (dataItem != null && dataItem.imageAssetPath.isNotEmpty)
-                  Center(
-                    child: AnimatedScale(
-                      scale: _hovering ? 1.08 : 1.0,
-                      duration: const Duration(milliseconds: 150),
-                      child: AnimatedOpacity(
-                        opacity: widget.isActive ? 1.0 : 0.3,
-                        duration: const Duration(milliseconds: 300),
-                        child: Image.asset(
-                          dataItem.imageAssetPath,
-                          width: slotSize,
-                          height: slotSize,
-                          cacheWidth: 192,
-                          cacheHeight: 192,
-                          fit: BoxFit.contain,
-                          filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
-                          isAntiAlias: true,
-                          errorBuilder: (_, __, ___) =>
-                              _buildItemPlaceholder(dataItem),
-                        ),
-                      ),
-                    ),
+        GestureDetector(
+          onTap: dataItem != null
+              ? () => ItemDescriptionDialog.show(context, item: dataItem)
+              : null,
+          behavior: HitTestBehavior.opaque,
+          child: MouseRegion(
+            cursor: dataItem != null
+                ? SystemMouseCursors.click
+                : SystemMouseCursors.basic,
+            onEnter: (_) => setState(() => _hovering = true),
+            onExit: (_) => setState(() => _hovering = false),
+            child: SizedBox(
+              width: slotSize,
+              height: slotSize,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  SvgPicture.string(
+                    widget.getGridSvg(level, widget.isActive,
+                        isHovered: _hovering),
+                    fit: BoxFit.fill,
                   ),
-                if (_hovering && dataItem != null)
-                  Positioned(
-                    bottom: 8,
-                    left: 0,
-                    right: 0,
-                    child: IgnorePointer(
-                      child: Center(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[900]?.withValues(alpha: 0.9),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            dataItem.name,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                            ),
-                            textAlign: TextAlign.center,
-                            overflow: TextOverflow.ellipsis,
+                  if (dataItem != null && dataItem.imageAssetPath.isNotEmpty)
+                    Center(
+                      child: AnimatedScale(
+                        scale: _hovering ? 1.08 : 1.0,
+                        duration: const Duration(milliseconds: 150),
+                        child: AnimatedOpacity(
+                          opacity: widget.isActive ? 1.0 : 0.3,
+                          duration: const Duration(milliseconds: 300),
+                          child: Image.asset(
+                            dataItem.imageAssetPath,
+                            width: slotSize,
+                            height: slotSize,
+                            cacheWidth: 192,
+                            cacheHeight: 192,
+                            fit: BoxFit.contain,
+                            filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
+                            isAntiAlias: true,
+                            errorBuilder: (_, __, ___) =>
+                                _buildItemPlaceholder(dataItem),
                           ),
                         ),
                       ),
                     ),
-                  )
-              ],
+                  if (_hovering && dataItem != null)
+                    Positioned(
+                      bottom: 8,
+                      left: 0,
+                      right: 0,
+                      child: IgnorePointer(
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[900]?.withValues(alpha: 0.9),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              dataItem.name,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                              ),
+                              textAlign: TextAlign.center,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ),
+                    )
+                ],
+              ),
             ),
           ),
         ),

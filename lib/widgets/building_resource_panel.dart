@@ -2,6 +2,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_svg/flutter_svg.dart';
+import '../models/item.dart';
+import 'item_description_dialog.dart';
 
 class ResourceItem {
   final String id;
@@ -10,6 +12,8 @@ class ResourceItem {
   final Color color;
   final String imageAssetPath;
   final int level;
+  final String description;
+  final String secondaryDescription;
 
   ResourceItem({
     required this.id,
@@ -18,6 +22,8 @@ class ResourceItem {
     required this.color,
     required this.imageAssetPath,
     required this.level,
+    this.description = '',
+    this.secondaryDescription = '',
   });
 }
 
@@ -243,6 +249,26 @@ class ResourceGridTileState extends State<ResourceGridTile> {
         child: gridContent,
       );
     }
-    return gridContent;
+    // 普通模式下，点击弹出物品说明弹窗
+    return GestureDetector(
+      onTap: () => ItemDescriptionDialog.show(context,
+          item: Item(
+            id: widget.item.id,
+            name: widget.item.name,
+            category: widget.item.category,
+            subType: widget.item.category,
+            color: widget.item.color,
+            iconSvg: '',
+            imageAssetPath: widget.item.imageAssetPath,
+            level: widget.item.level,
+            description: widget.item.description,
+            secondaryDescription: widget.item.secondaryDescription,
+          )),
+      behavior: HitTestBehavior.opaque,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: gridContent,
+      ),
+    );
   }
 }

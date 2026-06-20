@@ -198,6 +198,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
           color: item.color,
           imageAssetPath: item.imageAssetPath,
           level: item.level,
+          description: item.description,
+          secondaryDescription: item.secondaryDescription,
         ));
       }
     }

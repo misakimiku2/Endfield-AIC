@@ -9,6 +9,8 @@ class Item {
   final String iconSvg;
   final String imageAssetPath;
   final int level;
+  final String description;
+  final String secondaryDescription;
 
   const Item({
     required this.id,
@@ -19,7 +21,27 @@ class Item {
     required this.iconSvg,
     required this.imageAssetPath,
     required this.level,
+    this.description = '',
+    this.secondaryDescription = '',
   });
+
+  Item copyWith({
+    String? description,
+    String? secondaryDescription,
+  }) {
+    return Item(
+      id: id,
+      name: name,
+      category: category,
+      subType: subType,
+      color: color,
+      iconSvg: iconSvg,
+      imageAssetPath: imageAssetPath,
+      level: level,
+      description: description ?? this.description,
+      secondaryDescription: secondaryDescription ?? this.secondaryDescription,
+    );
+  }
 
   factory Item.fromJson(Map<String, dynamic> json) {
     final hex = json['color'] as String;
@@ -35,6 +57,8 @@ class Item {
       iconSvg: json['icon_svg'] as String? ?? '',
       imageAssetPath: json['image_asset_path'] as String? ?? '',
       level: json['level'] as int? ?? 1,
+      description: json['description'] as String? ?? '',
+      secondaryDescription: json['secondary_description'] as String? ?? '',
     );
   }
 }
