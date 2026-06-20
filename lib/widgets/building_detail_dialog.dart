@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -65,8 +66,11 @@ class BuildingDetailDialog extends StatefulWidget {
   State<BuildingDetailDialog> createState() => _BuildingDetailDialogState();
 }
 
-class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
+class _BuildingDetailDialogState extends State<BuildingDetailDialog>
+    with TickerProviderStateMixin {
   int _resourceTabIndex = 0;
+  InventoryDragSource? _activeDragSource;
+  late final AnimationController _rippleController;
   static const List<String> _tabLabels = ['植物', '矿物', '可用物品', '产物'];
   static const Map<String, String> _categoryToTabLabel = {
     'plant': '植物',
@@ -100,6 +104,9 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   bool get _isLogisticsBridge =>
       widget.placedBuilding.building.id == 'belt_bridge_1x1';
 
+  bool get _isSynthesisBuilding =>
+      !_isDepotUnloader && !_isDepotLoader && !_isLogisticsBridge;
+
   void _toggleDepotAddMode() {
     setState(() {
       if (_selectedOutputItemId != null) {
@@ -116,6 +123,10 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   @override
   void initState() {
     super.initState();
+    _rippleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2500),
+    )..repeat();
     _selectedOutputItemId = widget.placedBuilding.depotOutputItemId;
     _allItems = _buildResourceList();
     _refreshFilteredItems();
@@ -143,6 +154,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
 
   @override
   void dispose() {
+    _rippleController.dispose();
     _scrollbarFadeTimer?.cancel();
     _gridScrollController.dispose();
     super.dispose();
@@ -298,6 +310,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                                               onMove: widget.onMove,
                                               onDelete: widget.onDelete,
                                               onInventoryChanged: widget.onInventoryChanged,
+                                              forceInputGridHighlight: _activeDragSource == InventoryDragSource.itemPanel,
+                                              onDragStateChanged: (source) => setState(() => _activeDragSource = source),
                                             ),
                             ),
                           ],
@@ -415,6 +429,37 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
   }
 
   Widget _buildResourcePanel() {
+    if (!_isSynthesisBuilding) return _buildResourcePanelContent();
+
+    return DragTarget<InventoryDragData>(
+      builder: (context, candidate, rejected) {
+        final isTargeted = candidate.isNotEmpty ||
+            _activeDragSource == InventoryDragSource.inputGrid ||
+            _activeDragSource == InventoryDragSource.outputGrid;
+        return _buildResourcePanelContent(
+          isHovered: isTargeted,
+          isDropHovered: candidate.isNotEmpty,
+        );
+      },
+      onWillAcceptWithDetails: (details) {
+        return details.data.source == InventoryDragSource.inputGrid ||
+            details.data.source == InventoryDragSource.outputGrid;
+      },
+      onAcceptWithDetails: (details) {
+        setState(() {
+          if (details.data.source == InventoryDragSource.inputGrid) {
+            widget.placedBuilding.inputItemId = null;
+            widget.placedBuilding.inputItemCount = 0;
+          } else if (details.data.source == InventoryDragSource.outputGrid) {
+            widget.placedBuilding.outputItems.clear();
+          }
+        });
+        widget.onInventoryChanged?.call();
+      },
+    );
+  }
+
+  Widget _buildResourcePanelContent({bool isHovered = false, bool isDropHovered = false}) {
     return Container(
       width: 440,
       height: 520,
@@ -441,6 +486,95 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
               child: _buildGridScrollbar(),
             ),
           ),
+          if (isHovered)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(15),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                    child: Container(
+                      color: Colors.white.withValues(alpha: 0.5),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          // 涟漪动画（位于图标下方）
+                          AnimatedBuilder(
+                            animation: _rippleController,
+                            builder: (context, _) {
+                              final progress = _rippleController.value;
+                              return CustomPaint(
+                                size: const Size(160, 160),
+                                painter: _RipplePainter(
+                                  progress: progress,
+                                  color: const Color(0xFF666666),
+                                ),
+                              );
+                            },
+                          ),
+                          // add.svg 图标（旋转+放大+颜色渐变）
+                          AnimatedRotation(
+                            turns: isDropHovered ? 0.25 : 0.0,
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeInOut,
+                            child: AnimatedScale(
+                              scale: isDropHovered ? 1.15 : 1.0,
+                              duration: const Duration(milliseconds: 300),
+                              curve: Curves.easeInOut,
+                              child: TweenAnimationBuilder<Color?>(
+                                tween: ColorTween(
+                                  begin: const Color(0xFF555555),
+                                  end: isDropHovered
+                                      ? const Color(0xFF222222)
+                                      : const Color(0xFF555555),
+                                ),
+                                duration: const Duration(milliseconds: 300),
+                                curve: Curves.easeInOut,
+                                builder: (context, color, child) {
+                                  return SvgPicture.asset(
+                                    'assets/svg/add.svg',
+                                    width: 90,
+                                    height: 90,
+                                    colorFilter: ColorFilter.mode(
+                                      color!,
+                                      BlendMode.srcIn,
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                          // 文字（向下移动+淡出动画）
+                          Positioned(
+                            bottom: 100,
+                            child: AnimatedSlide(
+                              offset: isDropHovered
+                                  ? const Offset(0, 0.8)
+                                  : Offset.zero,
+                              duration: const Duration(milliseconds: 300),
+                              curve: Curves.easeInOut,
+                              child: AnimatedOpacity(
+                                opacity: isDropHovered ? 0.0 : 1.0,
+                                duration: const Duration(milliseconds: 300),
+                                curve: Curves.easeInOut,
+                                child: const Text(
+                                  '拖动到此收纳物品',
+                                  style: TextStyle(
+                                    color: Color(0xFF333333),
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -689,6 +823,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                     item: item,
                     gridContainerKey: _gridContainerKey,
                     showAddIcon: _isDepotUnloader && _isAddMode,
+                    enableDrag: _isSynthesisBuilding,
                     onAddItem: _isDepotUnloader && _isAddMode
                         ? () {
                             setState(() {
@@ -698,6 +833,12 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
                             widget.placedBuilding.depotOutputItemId = item.id;
                             widget.onOutputItemSelected?.call(item.id);
                           }
+                        : null,
+                    onDragStarted: _isSynthesisBuilding
+                        ? () => setState(() => _activeDragSource = InventoryDragSource.itemPanel)
+                        : null,
+                    onDragEnd: _isSynthesisBuilding
+                        ? () => setState(() => _activeDragSource = null)
                         : null,
                   ),
                 );
@@ -782,5 +923,36 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog> {
       ),
     );
   }
+}
+
+/// 拖拽目标区域的涟漪动画画笔
+class _RipplePainter extends CustomPainter {
+  final double progress;
+  final Color color;
+
+  const _RipplePainter({
+    required this.progress,
+    required this.color,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final maxRadius = size.width / 2;
+
+    for (int i = 0; i < 2; i++) {
+      final t = (progress + i * 0.5) % 1.0;
+      final radius = t * maxRadius;
+      final opacity = (1.0 - t) * 0.3;
+      final paint = Paint()
+        ..color = color.withValues(alpha: opacity)
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(center, radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _RipplePainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }
 

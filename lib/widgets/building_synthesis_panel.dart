@@ -22,6 +22,8 @@ class DefaultSynthesisPanel extends StatefulWidget {
   final VoidCallback? onMove;
   final VoidCallback? onDelete;
   final VoidCallback? onInventoryChanged;
+  final bool forceInputGridHighlight;
+  final ValueChanged<InventoryDragSource?>? onDragStateChanged;
 
   const DefaultSynthesisPanel({
     super.key,
@@ -32,6 +34,8 @@ class DefaultSynthesisPanel extends StatefulWidget {
     this.onMove,
     this.onDelete,
     this.onInventoryChanged,
+    this.forceInputGridHighlight = false,
+    this.onDragStateChanged,
   });
 
   @override
@@ -41,6 +45,7 @@ class DefaultSynthesisPanel extends StatefulWidget {
 class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
   bool _isLiquidMode = false;
   bool _isLiquidHover = false;
+  bool _isInputGridDropTarget = false;
   Timer? _simTimer;
   // 液体开关 4 种状态预生成的 SVG 缓存，避免每次 build 重新解析
   SvgPicture? _liquidSwitchOn;
@@ -190,6 +195,8 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
     final isPaused = widget.placedBuilding.isPaused;
     final isProductionActive =
         activeRecipe != null && !isPaused && !isBlocked;
+    final isReady = activeRecipe != null && !isPaused && !isBlocked &&
+        widget.placedBuilding.inputItemCount == 0;
     final remainingSeconds = activeRecipe == null
         ? 0
         : (activeRecipe.processTimeSeconds * (1.0 - productionProgress))
@@ -240,6 +247,92 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
                 final double rowTop =
                     (containerH / 2.0) - (productionRowH / 2.0);
 
+                // 计算输入格物品信息（用于拖拽）
+                final inputItemId = widget.placedBuilding.inputItemId;
+                final inputItem = inputItemId != null && inputItemId.isNotEmpty
+                    ? widget.dataLoader.getItem(inputItemId)
+                    : null;
+
+                // 计算输出格物品信息（用于拖拽）
+                final outputRecipeItem =
+                    _activeRecipe?.outputs.isNotEmpty == true
+                        ? _activeRecipe!.outputs.first
+                        : null;
+                final outputItemId = outputRecipeItem?.itemId;
+                final outputItem = outputItemId != null
+                    ? widget.dataLoader.getItem(outputItemId)
+                    : null;
+
+                // 构建输入格（DragTarget 已内置于 SynthesisGrid）
+                Widget inputGrid = SynthesisGrid(
+                  items: _activeRecipe?.inputs ?? [],
+                  isInput: true,
+                  dataLoader: widget.dataLoader,
+                  placedBuilding: widget.placedBuilding,
+                  conveyors: widget.conveyors ?? [],
+                  isLiquidMode: _isLiquidMode,
+                  isDropTarget: _isInputGridDropTarget || widget.forceInputGridHighlight,
+                  isDropHovered: _isInputGridDropTarget,
+                  enableDrag: widget.placedBuilding.inputItemCount > 0 && inputItem != null,
+                  dragData: widget.placedBuilding.inputItemCount > 0 && inputItem != null
+                      ? InventoryDragData(
+                          source: InventoryDragSource.inputGrid,
+                          itemId: inputItem.id,
+                          itemName: inputItem.name,
+                          imageAssetPath: inputItem.imageAssetPath,
+                          color: inputItem.color,
+                          level: inputItem.level,
+                        )
+                      : null,
+                  onDragStarted: () => widget.onDragStateChanged?.call(InventoryDragSource.inputGrid),
+                  onDragEnd: () => widget.onDragStateChanged?.call(null),
+                  onDropHoverChanged: (isHovering) {
+                    setState(() => _isInputGridDropTarget = isHovering);
+                  },
+                  onDropAccept: (data) {
+                    setState(() {
+                      widget.placedBuilding.inputItemId = data.itemId;
+                      widget.placedBuilding.inputItemCount =
+                          PlacedBuilding.maxInputItemCount;
+                      _isInputGridDropTarget = false;
+                      // 当输出格为空时，自动切换到匹配新输入物品的配方
+                      if (widget.placedBuilding.totalOutputCount == 0) {
+                        final matchingRecipe = widget.recipes
+                            .where((r) => r.inputs.any(
+                                (input) => input.itemId == data.itemId))
+                            .firstOrNull;
+                        if (matchingRecipe != null) {
+                          widget.placedBuilding.activeRecipeId = matchingRecipe.id;
+                        }
+                      }
+                    });
+                    widget.onInventoryChanged?.call();
+                  },
+                );
+
+                // 构建输出格（仅拖拽源，不可作为拖入目标）
+                Widget outputGrid = SynthesisGrid(
+                  items: _activeRecipe?.outputs ?? [],
+                  isInput: false,
+                  dataLoader: widget.dataLoader,
+                  placedBuilding: widget.placedBuilding,
+                  conveyors: widget.conveyors ?? [],
+                  isLiquidMode: _isLiquidMode,
+                  enableDrag: widget.placedBuilding.totalOutputCount > 0 && outputItem != null,
+                  dragData: widget.placedBuilding.totalOutputCount > 0 && outputItem != null
+                      ? InventoryDragData(
+                          source: InventoryDragSource.outputGrid,
+                          itemId: outputItem.id,
+                          itemName: outputItem.name,
+                          imageAssetPath: outputItem.imageAssetPath,
+                          color: outputItem.color,
+                          level: outputItem.level,
+                        )
+                      : null,
+                  onDragStarted: () => widget.onDragStateChanged?.call(InventoryDragSource.outputGrid),
+                  onDragEnd: () => widget.onDragStateChanged?.call(null),
+                );
+
                 return Stack(
                   clipBehavior: Clip.none,
                   children: [
@@ -254,14 +347,7 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            SynthesisGrid(
-                              items: _activeRecipe?.inputs ?? [],
-                              isInput: true,
-                              dataLoader: widget.dataLoader,
-                              placedBuilding: widget.placedBuilding,
-                              conveyors: widget.conveyors ?? [],
-                              isLiquidMode: _isLiquidMode,
-                            ),
+                            inputGrid,
                             const SizedBox(width: 11),
                             SizedBox(
                               width: 112,
@@ -282,12 +368,14 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
                                     ),
                                   ),
                                   Text(
-                                    isProductionActive
+                                    isProductionActive && !isReady
                                         ? '${remainingSeconds.clamp(0, 999)}秒'
-                                        : '',
+                                        : isReady
+                                            ? '就绪'
+                                            : '',
                                     style: const TextStyle(
                                       color: Color(0xFFEDEDED),
-                                      fontSize: 24,
+                                      fontSize: 18,
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
@@ -305,14 +393,7 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
                               ),
                             ),
                             const SizedBox(width: 11),
-                            SynthesisGrid(
-                              items: _activeRecipe?.outputs ?? [],
-                              isInput: false,
-                              dataLoader: widget.dataLoader,
-                              placedBuilding: widget.placedBuilding,
-                              conveyors: widget.conveyors ?? [],
-                              isLiquidMode: _isLiquidMode,
-                            ),
+                            outputGrid,
                           ],
                         ),
                       ),

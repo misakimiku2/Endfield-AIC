@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -7,6 +9,7 @@ import '../models/project.dart';
 import '../models/item.dart';
 import '../models/recipe.dart';
 import '../data/data_loader.dart';
+import 'building_shared_widgets.dart';
 import 'item_description_dialog.dart';
 
 class ItemTrackAnim {
@@ -27,6 +30,14 @@ class SynthesisGrid extends StatefulWidget {
   final PlacedBuilding placedBuilding;
   final List<ConveyorBelt> conveyors;
   final bool isLiquidMode;
+  final bool isDropTarget;
+  final bool isDropHovered;
+  final bool enableDrag;
+  final InventoryDragData? dragData;
+  final VoidCallback? onDragStarted;
+  final VoidCallback? onDragEnd;
+  final ValueChanged<InventoryDragData>? onDropAccept;
+  final ValueChanged<bool>? onDropHoverChanged;
 
   const SynthesisGrid({
     required this.items,
@@ -35,6 +46,14 @@ class SynthesisGrid extends StatefulWidget {
     required this.placedBuilding,
     required this.conveyors,
     this.isLiquidMode = false,
+    this.isDropTarget = false,
+    this.isDropHovered = false,
+    this.enableDrag = false,
+    this.dragData,
+    this.onDragStarted,
+    this.onDragEnd,
+    this.onDropAccept,
+    this.onDropHoverChanged,
   });
 
   @override
@@ -44,6 +63,8 @@ class SynthesisGrid extends StatefulWidget {
 class SynthesisGridState extends State<SynthesisGrid>
     with TickerProviderStateMixin {
   late AnimationController _animationController;
+  late AnimationController _rippleController;
+  late AnimationController _longPressController;
   int _previousCount = -1;
   DateTime? _lastCountChangeTime;
   final List<ItemTrackAnim> _itemAnims = [];
@@ -52,6 +73,10 @@ class SynthesisGridState extends State<SynthesisGrid>
   SvgPicture? _cachedHoveredGridSvg;
   int? _cachedGridLevel = -999;
   bool _hovering = false;
+  // 长按进度动画
+  bool _isLongPressing = false;
+  bool _dragStarted = false;
+  Timer? _longPressDelayTimer;
 
   @override
   void initState() {
@@ -60,15 +85,56 @@ class SynthesisGridState extends State<SynthesisGrid>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat();
+    _rippleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2500),
+    )..repeat();
+    _longPressController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
   }
 
   @override
   void dispose() {
+    _longPressDelayTimer?.cancel();
     _animationController.dispose();
+    _rippleController.dispose();
+    _longPressController.dispose();
     for (final anim in _itemAnims) {
       anim.controller.dispose();
     }
     super.dispose();
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    if (!widget.enableDrag) return;
+    _dragStarted = false;
+    // 延迟150ms后启动圆形动画，快速点击不会触发
+    _longPressDelayTimer?.cancel();
+    _longPressDelayTimer = Timer(const Duration(milliseconds: 150), () {
+      if (!mounted) return;
+      _isLongPressing = true;
+      _longPressController.forward(from: 0);
+      setState(() {});
+    });
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    _longPressDelayTimer?.cancel();
+    if (!_isLongPressing) return;
+    _isLongPressing = false;
+    _longPressController.reverse();
+    setState(() {});
+  }
+
+  void _onDragStarted() {
+    _dragStarted = true;
+    _isLongPressing = false;
+    // 拖拽开始后立即重置圆形动画，不播放回退
+    _longPressController.value = 0;
+    setState(() {});
+    widget.onDragStarted?.call();
   }
 
   String _getGridSvg(int? level, {bool isHovered = false}) {
@@ -212,79 +278,231 @@ class SynthesisGridState extends State<SynthesisGrid>
     // 直接显示实际数量
     final displayCount = totalAmount;
 
-    final gridBox = Container(
+    // 提取网格内部内容
+    final gridStack = Stack(
+      fit: StackFit.expand,
+      clipBehavior: Clip.antiAlias,
+      children: [
+        _hovering && _cachedHoveredGridSvg != null
+            ? _cachedHoveredGridSvg!
+            : _cachedGridSvg!,
+        if (dataItem != null && dataItem.imageAssetPath.isNotEmpty)
+          Center(
+            child: AnimatedScale(
+              scale: _hovering ? 1.08 : 1.0,
+              duration: const Duration(milliseconds: 150),
+              child: AnimatedOpacity(
+                opacity: totalAmount == 0
+                    ? 0.3
+                    : totalAmount == 1
+                        ? 0.5
+                        : 1.0,
+                duration: const Duration(milliseconds: 300),
+                child: Image.asset(
+                  dataItem.imageAssetPath,
+                  width: 128,
+                  height: 128,
+                  cacheWidth: 384,
+                  cacheHeight: 384,
+                  fit: BoxFit.contain,
+                  filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
+                  isAntiAlias: true,
+                  errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
+                ),
+              ),
+            ),
+          )
+        else if (dataItem != null)
+          Center(child: _buildItemPlaceholder(dataItem)),
+        if (_hovering && dataItem != null)
+          Positioned(
+            bottom: 8,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[900]?.withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    dataItem.name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                    ),
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        if (widget.isDropTarget)
+          IgnorePointer(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(15),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                child: Container(
+                  color: Colors.white.withValues(alpha: 0.5),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // 涟漪动画（位于图标下方）
+                      AnimatedBuilder(
+                        animation: _rippleController,
+                        builder: (context, _) {
+                          final progress = _rippleController.value;
+                          return CustomPaint(
+                            size: const Size(120, 120),
+                            painter: _RipplePainter(
+                              progress: progress,
+                              color: const Color(0xFF666666),
+                            ),
+                          );
+                        },
+                      ),
+                      // add.svg 图标（旋转+放大+颜色渐变）
+                      AnimatedRotation(
+                        turns: widget.isDropHovered ? 0.25 : 0.0,
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeInOut,
+                        child: AnimatedScale(
+                          scale: widget.isDropHovered ? 1.15 : 1.0,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                          child: TweenAnimationBuilder<Color?>(
+                            tween: ColorTween(
+                              begin: const Color(0xFF555555),
+                              end: widget.isDropHovered
+                                  ? const Color(0xFF222222)
+                                  : const Color(0xFF555555),
+                            ),
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeInOut,
+                            builder: (context, color, child) {
+                              return SvgPicture.asset(
+                                'assets/svg/add.svg',
+                                width: 40,
+                                height: 40,
+                                colorFilter: ColorFilter.mode(
+                                  color!,
+                                  BlendMode.srcIn,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                      // 文字（向下移动+淡出动画）
+                      Positioned(
+                        bottom: 12,
+                        child: AnimatedSlide(
+                          offset: widget.isDropHovered
+                              ? const Offset(0, 0.8)
+                              : Offset.zero,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                          child: AnimatedOpacity(
+                            opacity: widget.isDropHovered ? 0.0 : 1.0,
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeInOut,
+                            child: const Text(
+                              '拖到此处输入',
+                              style: TextStyle(
+                                color: Color(0xFF333333),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+
+    // 根据是否启用拖拽，包装手势处理器
+    Widget gestureChild;
+    if (widget.enableDrag && widget.dragData != null) {
+      // LongPressDraggable 不处理 onTap，需要用 GestureDetector 包裹 child
+      final clickableGridStack = GestureDetector(
+        onTap: dataItem != null
+            ? () => ItemDescriptionDialog.show(context, item: dataItem)
+            : null,
+        behavior: HitTestBehavior.translucent,
+        child: gridStack,
+      );
+      gestureChild = LongPressDraggable<InventoryDragData>(
+        delay: const Duration(milliseconds: 450),
+        data: widget.dragData!,
+        feedback: _buildDragFeedback(dataItem),
+        childWhenDragging: Opacity(opacity: 0.3, child: gridStack),
+        child: clickableGridStack,
+        onDragStarted: _onDragStarted,
+        onDragEnd: (_) {
+          _dragStarted = false;
+          _longPressController.value = 0;
+          widget.onDragEnd?.call();
+        },
+      );
+    } else {
+      gestureChild = GestureDetector(
+        onTap: dataItem != null
+            ? () => ItemDescriptionDialog.show(context, item: dataItem)
+            : null,
+        behavior: HitTestBehavior.opaque,
+        child: gridStack,
+      );
+    }
+
+    final gridBoxRaw = Container(
       width: 128,
       height: 128,
-      child: MouseRegion(
-        cursor: dataItem != null
-            ? SystemMouseCursors.click
-            : SystemMouseCursors.basic,
-        onEnter: dataItem != null ? (_) => setState(() => _hovering = true) : null,
-        onExit: (_) => setState(() => _hovering = false),
-        child: GestureDetector(
-          onTap: dataItem != null
-              ? () => ItemDescriptionDialog.show(context, item: dataItem)
-              : null,
-          behavior: HitTestBehavior.opaque,
+      child: Listener(
+        onPointerDown: _onPointerDown,
+        onPointerUp: _onPointerUp,
+        onPointerCancel: (_) => _onPointerUp(PointerUpEvent()),
+        child: MouseRegion(
+          cursor: dataItem != null
+              ? SystemMouseCursors.click
+              : SystemMouseCursors.basic,
+          onEnter: dataItem != null ? (_) => setState(() => _hovering = true) : null,
+          onExit: (_) => setState(() => _hovering = false),
           child: Stack(
             fit: StackFit.expand,
             clipBehavior: Clip.antiAlias,
             children: [
-              _hovering && _cachedHoveredGridSvg != null
-                  ? _cachedHoveredGridSvg!
-                  : _cachedGridSvg!,
-              if (dataItem != null && dataItem.imageAssetPath.isNotEmpty)
-                Center(
-                  child: AnimatedScale(
-                    scale: _hovering ? 1.08 : 1.0,
-                    duration: const Duration(milliseconds: 150),
-                    child: AnimatedOpacity(
-                      opacity: totalAmount == 0
-                          ? 0.3
-                          : totalAmount == 1
-                              ? 0.5
-                              : 1.0,
-                      duration: const Duration(milliseconds: 300),
-                      child: Image.asset(
-                        dataItem.imageAssetPath,
-                        width: 128,
-                        height: 128,
-                        cacheWidth: 384,
-                        cacheHeight: 384,
-                        fit: BoxFit.contain,
-                        filterQuality: kIsWeb ? FilterQuality.high : FilterQuality.medium,
-                        isAntiAlias: true,
-                        errorBuilder: (_, __, ___) => _buildItemPlaceholder(dataItem),
-                      ),
-                    ),
-                  ),
-                )
-              else if (dataItem != null)
-                Center(child: _buildItemPlaceholder(dataItem)),
-              if (_hovering && dataItem != null)
-                Positioned(
-                  bottom: 8,
-                  left: 0,
-                  right: 0,
-                  child: IgnorePointer(
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[900]?.withValues(alpha: 0.9),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          dataItem.name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
+              gestureChild,
+              // 长按圆形填充动画
+              if (_isLongPressing || _dragStarted)
+                IgnorePointer(
+                  child: Center(
+                    child: AnimatedBuilder(
+                      animation: _longPressController,
+                      builder: (context, _) {
+                        final progress = _longPressController.value;
+                        final opacity = _dragStarted ? (1.0 - progress) : 1.0;
+                        return Opacity(
+                          opacity: opacity,
+                          child: CustomPaint(
+                            size: const Size(70, 70),
+                            painter: _CircularProgressPainter(
+                              progress: progress,
+                              color: Colors.white.withValues(alpha: 0.6),
+                            ),
                           ),
-                          textAlign: TextAlign.center,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -293,6 +511,25 @@ class SynthesisGridState extends State<SynthesisGrid>
         ),
       ),
     );
+
+    // 当作为拖放目标时，用 DragTarget 包裹 gridBox（仅 128x128 区域）
+    final gridBox = widget.isDropTarget
+        ? DragTarget<InventoryDragData>(
+            builder: (context, candidate, rejected) => gridBoxRaw,
+            onWillAcceptWithDetails: (details) {
+              if (details.data.source == InventoryDragSource.itemPanel) {
+                widget.onDropHoverChanged?.call(true);
+                return true;
+              }
+              return false;
+            },
+            onLeave: (_) => widget.onDropHoverChanged?.call(false),
+            onAcceptWithDetails: (details) {
+              widget.onDropHoverChanged?.call(false);
+              widget.onDropAccept?.call(details.data);
+            },
+          )
+        : gridBoxRaw;
 
     final double connectorHeight =
         solidPorts.isNotEmpty ? (solidPorts.length * 62.0) : 0.0;
@@ -561,6 +798,41 @@ class SynthesisGridState extends State<SynthesisGrid>
         shape: BoxShape.circle,
         border: Border.all(
           color: dataItem.color.withValues(alpha: 0.5),
+        ),
+      ),
+    );
+  }
+
+  /// 构建拖拽时跟随光标的反馈预览
+  Widget _buildDragFeedback(Item? dataItem) {
+    return Material(
+      color: Colors.transparent,
+      child: Opacity(
+        opacity: 0.85,
+        child: Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            color: const Color(0xFF373737),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.4)),
+          ),
+          child: dataItem != null && dataItem.imageAssetPath.isNotEmpty
+              ? Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Image.asset(
+                    dataItem.imageAssetPath,
+                    width: 68,
+                    height: 68,
+                    cacheWidth: 204,
+                    cacheHeight: 204,
+                    fit: BoxFit.contain,
+                    filterQuality:
+                        kIsWeb ? FilterQuality.high : FilterQuality.medium,
+                    isAntiAlias: true,
+                  ),
+                )
+              : const SizedBox.shrink(),
         ),
       ),
     );
@@ -1040,4 +1312,74 @@ class CollectAllButtonState extends State<CollectAllButton> {
       ),
     );
   }
+}
+
+/// 拖拽目标区域的涟漪动画画笔
+class _RipplePainter extends CustomPainter {
+  final double progress;
+  final Color color;
+
+  const _RipplePainter({
+    required this.progress,
+    required this.color,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final maxRadius = size.width / 2;
+
+    // 绘制两个交错的实心涟漪
+    for (int i = 0; i < 2; i++) {
+      final t = (progress + i * 0.5) % 1.0;
+      final radius = t * maxRadius;
+      final opacity = (1.0 - t) * 0.3;
+      final paint = Paint()
+        ..color = color.withValues(alpha: opacity)
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(center, radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _RipplePainter oldDelegate) =>
+      oldDelegate.progress != progress;
+}
+
+/// 长按圆形填充动画画笔
+class _CircularProgressPainter extends CustomPainter {
+  final double progress;
+  final Color color;
+
+  const _CircularProgressPainter({
+    required this.progress,
+    required this.color,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    final sweepAngle = progress * 2 * 3.14159265;
+    final path = Path()
+      ..moveTo(center.dx, center.dy)
+      ..arcTo(
+        Rect.fromCircle(center: center, radius: radius),
+        -3.14159265 / 2, // 从顶部开始
+        sweepAngle,
+        false,
+      )
+      ..close();
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _CircularProgressPainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }

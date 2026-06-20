@@ -1,6 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+/// 物品栏拖拽来源类型
+enum InventoryDragSource { itemPanel, inputGrid, outputGrid }
+
+/// 物品栏拖拽数据 — 在设备弹窗的物品栏与生产输入/输出格之间传递
+class InventoryDragData {
+  final InventoryDragSource source;
+  final String itemId;
+  final String itemName;
+  final String imageAssetPath;
+  final Color color;
+  final int level;
+
+  const InventoryDragData({
+    required this.source,
+    required this.itemId,
+    required this.itemName,
+    required this.imageAssetPath,
+    required this.color,
+    required this.level,
+  });
+}
+
 /// 带图标和文字的操作按钮（移动、收纳等）
 class ActionButton extends StatefulWidget {
   final String svgPath;
