@@ -501,12 +501,22 @@ class TransportBeltRenderer {
             : belt.path.length;
         final sourceSegment =
             i < sourceSegments.length ? sourceSegments[i] : segment;
+        // 物品段到达其独立上限（无论是死胡同末端还是被前方物品挡住）都应冻结，
+        // 不再依赖 isDeadEnd —— 连接到建筑物的传送带上的中间物品也需要冻结。
         final shouldFreezeSegment = sourceSegment.freezeProgress != null ||
-            (isDeadEnd && segment.fillCount >= limit);
+            segment.fillCount >= limit;
         if (shouldFreezeSegment && sourceSegment.freezeProgress == null) {
+          // 阶段 0→1：物品刚刚到达停止位置，标记为 -1.0（等待自然流入）
           sourceSegment.freezeProgress = -1.0;
         }
         if (shouldFreezeSegment && sourceSegment.freezeProgress == -1.0) {
+          // 阶段 1→2：等待 arrowProgress 降到 0.5 以下（物品已通过入口半区）
+          if (arrowProgress < 0.5) {
+            sourceSegment.freezeProgress = -0.5;
+          }
+        }
+        if (shouldFreezeSegment && sourceSegment.freezeProgress == -0.5) {
+          // 阶段 2→3：等待 arrowProgress 回升到 0.5（物品已自然流到格子中央）
           if (arrowProgress >= 0.5) {
             sourceSegment.freezeProgress = 0.5;
           }
@@ -533,13 +543,17 @@ class TransportBeltRenderer {
         isDeadEnd && lastFull && renderSegments.isEmpty;
 
     if (shouldFreezeCurrent && belt.deadEndFreezeProgress == null) {
-      // 刚达到满载：不立即冻结。设置为 -1.0 表示 "等待自然到位"
-      // 渲染时会继续用实时 arrowProgress，直到物品移动到末端再冻结
+      // 阶段 0→1：物品刚刚到达停止位置，标记为 -1.0（等待自然流入）
       belt.deadEndFreezeProgress = -1.0;
     }
     if (shouldFreezeCurrent && belt.deadEndFreezeProgress == -1.0) {
-      // Wait until the leading item reaches the center of the final belt cell.
-      // Freezing at the exit edge (1.0) clips half of the item outside a dead end.
+      // 阶段 1→2：等待 arrowProgress 降到 0.5 以下（物品已通过入口半区）
+      if (arrowProgress < 0.5) {
+        belt.deadEndFreezeProgress = -0.5;
+      }
+    }
+    if (shouldFreezeCurrent && belt.deadEndFreezeProgress == -0.5) {
+      // 阶段 2→3：等待 arrowProgress 回升到 0.5（物品已自然流到格子中央）
       if (arrowProgress >= 0.5) {
         belt.deadEndFreezeProgress = 0.5;
       }
@@ -550,9 +564,17 @@ class TransportBeltRenderer {
     }
 
     if (shouldFreezeLast && belt.lastItemFreezeProgress == null) {
+      // 阶段 0→1：物品刚刚到达停止位置，标记为 -1.0（等待自然流入）
       belt.lastItemFreezeProgress = -1.0;
     }
     if (shouldFreezeLast && belt.lastItemFreezeProgress == -1.0) {
+      // 阶段 1→2：等待 arrowProgress 降到 0.5 以下
+      if (arrowProgress < 0.5) {
+        belt.lastItemFreezeProgress = -0.5;
+      }
+    }
+    if (shouldFreezeLast && belt.lastItemFreezeProgress == -0.5) {
+      // 阶段 2→3：等待 arrowProgress 回升到 0.5
       if (arrowProgress >= 0.5) {
         belt.lastItemFreezeProgress = 0.5;
       }

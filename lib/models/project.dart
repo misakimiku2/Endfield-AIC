@@ -117,6 +117,7 @@ class PlacedBuilding {
   static const int maxBridgeLaneItemCount = 1;
   static const String _beltBridgeId = 'belt_bridge_1x1';
   static const String _bridgeLanePrefix = '__bridge_lane__';
+  static const String _splitterId = 'splitter_1x1';
 
   final String id;
   final Building building;
@@ -133,6 +134,10 @@ class PlacedBuilding {
   bool isBlocked;
   double productionProgress;
   bool isPaused;
+
+  /// 分流器循环分配索引（0=left, 1=up, 2=right）
+  /// 记录下一个要分配的输出方向，实现 左→上→右 循环分配
+  int splitterCycleIndex = 0;
 
   PlacedBuilding({
     required this.id,
@@ -288,6 +293,68 @@ class PlacedBuilding {
     return true;
   }
 
+  // ===== 分流器（Splitter）循环分配机制 =====
+  // 推送式架构：分流器接收物品后直接推送到输出带。
+  // 当所有输出带满时，至多缓存 1 个物品到内部槽位，
+  // 槽位满后输入端堵塞（符合需求：最多只被输入一个物品）。
+  // 按 左→上→右 循环顺序跳过无传送带和满传送带的方向。
+
+  bool get isSplitter => building.id == _splitterId;
+
+  static const String _splitterSlotKey = '__splitter_slot__';
+
+  /// 分流器内部缓冲：是否有物品等待输出
+  bool get splitterBufferOccupied {
+    if (!isSplitter) return false;
+    return outputItems.keys.any((key) => key.startsWith(_splitterSlotKey));
+  }
+
+  /// 获取缓冲槽位中的物品 ID
+  String? get splitterBufferedItemId {
+    if (!isSplitter) return null;
+    for (final entry in outputItems.entries) {
+      if (entry.key.startsWith(_splitterSlotKey) && entry.value > 0) {
+        // key 格式: __splitter_slot__<direction>__<itemId>
+        final withoutPrefix = entry.key.substring(_splitterSlotKey.length);
+        final sepIdx = withoutPrefix.indexOf('__');
+        if (sepIdx > 0) {
+          return withoutPrefix.substring(sepIdx + 2);
+        }
+      }
+    }
+    return null;
+  }
+
+  /// 获取缓冲槽位中物品的目标输出方向
+  String? get splitterBufferedDirection {
+    if (!isSplitter) return null;
+    for (final entry in outputItems.entries) {
+      if (entry.key.startsWith(_splitterSlotKey) && entry.value > 0) {
+        final withoutPrefix = entry.key.substring(_splitterSlotKey.length);
+        final sepIdx = withoutPrefix.indexOf('__');
+        if (sepIdx > 0) {
+          return withoutPrefix.substring(0, sepIdx);
+        }
+      }
+    }
+    return null;
+  }
+
+  /// 尝试将物品放入分流器缓冲槽位。若已有物品则失败。
+  bool acceptIntoBuffer(String itemId, String direction) {
+    if (!isSplitter || itemId.isEmpty || direction.isEmpty) return false;
+    if (splitterBufferOccupied) return false;
+    final key = '$_splitterSlotKey${direction}__$itemId';
+    outputItems[key] = 1;
+    return true;
+  }
+
+  /// 消费分流器缓冲槽位中的物品。
+  void consumeFromBuffer() {
+    if (!isSplitter) return;
+    outputItems.removeWhere((key, value) => key.startsWith(_splitterSlotKey));
+  }
+
   /// 旋转后的有效宽度（90°/270° 时宽高互换）
   int get effectiveWidth =>
       (rotation % 2 == 1) ? building.gridHeight : building.gridWidth;
@@ -365,11 +432,18 @@ class ConveyorItemSegment {
   int drainCount;
   double? freezeProgress;
 
+  /// 分流器推送后首次 tick 跳过推进标志。
+  /// 为 true 时，_tickSingleBeltOnce 不设置 activeSourceItemId，
+  /// 使物品在 position 0（建筑遮挡格）停留一个 tick 周期，
+  /// 避免物品从分流器"瞬移"到第一个可见格子。
+  bool skipAdvanceOnce;
+
   ConveyorItemSegment({
     required this.itemId,
     required this.fillCount,
     this.drainCount = 0,
     this.freezeProgress,
+    this.skipAdvanceOnce = false,
   });
 
   bool get hasItems => itemId.isNotEmpty && fillCount > drainCount;
@@ -379,12 +453,14 @@ class ConveyorItemSegment {
     int? fillCount,
     int? drainCount,
     double? freezeProgress,
+    bool? skipAdvanceOnce,
   }) {
     return ConveyorItemSegment(
       itemId: itemId ?? this.itemId,
       fillCount: fillCount ?? this.fillCount,
       drainCount: drainCount ?? this.drainCount,
       freezeProgress: freezeProgress ?? this.freezeProgress,
+      skipAdvanceOnce: skipAdvanceOnce ?? this.skipAdvanceOnce,
     );
   }
 
@@ -609,7 +685,7 @@ class ConveyorBelt {
     }
   }
 
-  bool pushSourceItem(String sourceItemId, {int? terminalLimit}) {
+  bool pushSourceItem(String sourceItemId, {int? terminalLimit, bool skipAdvanceOnce = false}) {
     if (sourceItemId.isEmpty || path.isEmpty) return false;
     ensureItemSegmentsFromLegacy();
     _sortItemSegments();
@@ -621,6 +697,7 @@ class ConveyorBelt {
       itemSegments.add(ConveyorItemSegment(
         itemId: sourceItemId,
         fillCount: 1.clamp(0, endLimit).toInt(),
+        skipAdvanceOnce: skipAdvanceOnce,
       ));
       syncLegacyFromSegments();
       return true;
@@ -644,10 +721,42 @@ class ConveyorBelt {
       ConveyorItemSegment(
         itemId: sourceItemId,
         fillCount: 1.clamp(0, math.min(first.drainCount, endLimit)).toInt(),
+        skipAdvanceOnce: skipAdvanceOnce,
       ),
     );
     syncLegacyFromSegments();
     return true;
+  }
+
+  /// 判断传送带起始端是否可以接收新物品（不实际压入）
+  /// 镜像 pushSourceItem 的接收逻辑，用于分流器预检查输出带可用性
+  bool canAcceptNewItemFromStart(String itemId, {int? terminalLimit}) {
+    if (path.isEmpty || itemId.isEmpty) return false;
+    ensureItemSegmentsFromLegacy();
+    _sortItemSegments();
+    final endLimit =
+        terminalLimit?.clamp(0, path.length).toInt() ?? path.length;
+    if (endLimit <= 0) return false;
+
+    if (itemSegments.isEmpty) return true;
+
+    final first = itemSegments.first;
+    if (first.drainCount == 0 && first.itemId == itemId) {
+      final limit = itemSegments.length > 1
+          ? itemSegments[1].drainCount.clamp(0, path.length).toInt()
+          : endLimit;
+      return first.fillCount < limit;
+    }
+
+    // 当第一个段的 fillCount 已到达传送带末端（endLimit），
+    // 且 drainCount <= 1 时（仅剩 position 0 隐藏格可用），
+    // 新物品插入后会被冻结合并，出现"出现后消失"的现象。
+    // drainCount >= 2 时仍有可见格可容纳新物品，允许接收。
+    if (first.fillCount >= endLimit && terminalLimit == null && first.drainCount <= 1) {
+      return false;
+    }
+
+    return first.drainCount > 0;
   }
 
   String? outputReadyItemId() {
@@ -689,6 +798,11 @@ class ConveyorBelt {
     required bool isDeadEnd,
     String? activeSourceItemId,
     int? terminalLimit,
+    /// 在本 tick 中 pushSourceItem 是否已成功扩展/插入了物品。
+    /// 若为 false 且存在 FedBySource 段（如分流器一次性推送），
+    /// 则以死胡同模式同时增长 fillCount 和 drainCount，
+    /// 让单物品作为 1 格宽的块沿传送带移动。
+    bool sourceExtendedThisTick = false,
   }) {
     ensureItemSegmentsFromLegacy();
     if (itemSegments.isEmpty) {
@@ -711,7 +825,17 @@ class ConveyorBelt {
             segment.drainCount == 0 &&
             activeSourceItemId != null &&
             segment.itemId == activeSourceItemId;
-        if (isFedBySource) continue;
+        if (isFedBySource) {
+          // 一次性推送（如分流器）：本 tick 未扩展则按死胡同模式推进
+          if (!sourceExtendedThisTick &&
+              segment.fillCount < limit) {
+            segment.fillCount++;
+            segment.drainCount++;
+            segment.freezeProgress = null;
+            changed = true;
+          }
+          continue;
+        }
         if (segment.fillCount < limit) {
           segment.fillCount++;
           segment.drainCount++;
@@ -724,7 +848,17 @@ class ConveyorBelt {
         final isFedBySource = segment.drainCount == 0 &&
             activeSourceItemId != null &&
             segment.itemId == activeSourceItemId;
-        if (isFedBySource) continue;
+        if (isFedBySource) {
+          // 一次性推送（如分流器）：本 tick 未扩展则按死胡同模式推进
+          if (!sourceExtendedThisTick &&
+              segment.fillCount < endLimit) {
+            segment.fillCount++;
+            segment.drainCount++;
+            segment.freezeProgress = null;
+            changed = true;
+          }
+          continue;
+        }
         if (segment.drainCount < segment.fillCount) {
           segment.drainCount++;
           segment.freezeProgress = null;
@@ -774,16 +908,20 @@ class ConveyorBelt {
 
   void _mergeAdjacentSegments() {
     if (itemSegments.length < 2) return;
+
     final merged = <ConveyorItemSegment>[];
     for (final segment in itemSegments) {
       if (!segment.hasItems) continue;
       if (merged.isNotEmpty) {
         final prev = merged.last;
+        // 仅当 freezeProgress 相同（如都是 null 或都是 0.5）时才合拼，
+        // 防止"已冻结的前方物品"与"刚到未冻结的后方物品"合拼后
+        // 互相破坏对方的冻结状态。
         if (prev.itemId == segment.itemId &&
-            prev.fillCount >= segment.drainCount) {
+            prev.fillCount >= segment.drainCount &&
+            prev.freezeProgress == segment.freezeProgress) {
           if (segment.fillCount > prev.fillCount) {
             prev.fillCount = segment.fillCount;
-            prev.freezeProgress = segment.freezeProgress;
           }
           if (segment.drainCount < prev.drainCount) {
             prev.drainCount = segment.drainCount;

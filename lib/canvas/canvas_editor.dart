@@ -124,6 +124,7 @@ class CanvasEditorState extends State<CanvasEditor>
   double _targetOffsetY = 0;
   bool _animating = false;
   double _gestureStartScale = 1.0;
+  double _prevGlobalProgress = 0.0;
 
   double _displayAngle = 0.0; // 当前显示角度（弧度）
   double _targetAngle = 0.0; // 目标角度（弧度）
@@ -389,6 +390,11 @@ class CanvasEditorState extends State<CanvasEditor>
   }
 
   void _onBeltAnimationFrame(double globalProgress) {
+    // 计算本帧 globalProgress 增量（处理 0→1 循环回绕）
+    double progressDelta = globalProgress - _prevGlobalProgress;
+    if (progressDelta < 0) progressDelta += 1.0;
+    _prevGlobalProgress = globalProgress;
+
     final activeIds = _project.conveyors.map((belt) => belt.id).toSet();
     _prevBeltProgressForTick.removeWhere((id, _) => !activeIds.contains(id));
 
@@ -438,20 +444,44 @@ class CanvasEditorState extends State<CanvasEditor>
     final sourceItemId = _getAvailableOutputItemIdForBeltStart(belt);
     final isProducing = sourceItemId != null && sourceItemId.isNotEmpty;
 
+    // 推送式：如果源是分流器且位置 0 有物品，标记为 activeSourceItemId
+    // 以便 advanceItemSegments 识别该段为「一次性推送」（非连续生产）。
+    // 不再依赖 _splitterHasIncomingItem —— 一次性推送的物品应当自行沿
+    // 传送带前进并最终离开，无需输入带仍有物品来「保持」。
+    String? activeSourceItemId = isProducing ? sourceItemId : null;
+    if (!isProducing && belt.itemSegments.isNotEmpty) {
+      final firstSegment = belt.itemSegments.first;
+      if (firstSegment.drainCount == 0) {
+        if (firstSegment.skipAdvanceOnce) {
+          // 分流器推送后首次 tick：跳过推进，让物品在 position 0
+          // （建筑遮挡格）停留一个 tick 周期，避免瞬移
+          firstSegment.skipAdvanceOnce = false;
+        } else {
+          final sourceBuilding = _findOutputBuildingAtCell(belt.path.first);
+          if (sourceBuilding != null && sourceBuilding.isSplitter) {
+            activeSourceItemId = firstSegment.itemId;
+          }
+        }
+      }
+    }
+
     var inventoryChanged = false;
+    var sourceExtendedThisTick = false;
     belt.ensureItemSegmentsFromLegacy();
     if (isProducing) {
       final pushed =
           belt.pushSourceItem(sourceItemId, terminalLimit: terminalLimit);
       if (pushed) {
+        sourceExtendedThisTick = true;
         inventoryChanged = _consumeOutputItemForBeltStart(belt, sourceItemId) ||
             inventoryChanged;
       }
     }
     belt.advanceItemSegments(
       isDeadEnd: isDeadEnd || inputBuilding != null || inputBlocked,
-      activeSourceItemId: isProducing ? sourceItemId : null,
+      activeSourceItemId: activeSourceItemId,
       terminalLimit: terminalLimit,
+      sourceExtendedThisTick: sourceExtendedThisTick,
     );
     if (inputBuilding != null) {
       inventoryChanged = _transferBeltOutputToBuilding(belt, inputBuilding) ||
@@ -481,6 +511,20 @@ class CanvasEditorState extends State<CanvasEditor>
       return outputDirection != null &&
           building.canAcceptBridgeInputItem(itemId, outputDirection);
     }
+    // 分流器：纯推送式，无内部缓冲。
+    // 仅当至少有一条输出传送带可实际接收物品时才允许进入，
+    // 否则直接阻塞输入端（物品在传送带上排队等待）。
+    if (building.isSplitter) {
+      final connectedDirs = _getConnectedSplitterOutputDirections(building);
+      if (connectedDirs.isEmpty) return false;
+      for (final dir in connectedDirs) {
+        final outputBelt = _getBeltForSplitterOutputDirection(building, dir);
+        if (outputBelt != null && _canSplitterOutputBeltAcceptItem(outputBelt, itemId)) {
+          return true;
+        }
+      }
+      return false;
+    }
     // 仓库存货口始终可以接收物品（直接进入全局仓库库存）
     if (building.building.id == DepotLoaderConfig.id) return true;
     return building.canAcceptInputItem(itemId);
@@ -491,6 +535,148 @@ class CanvasEditorState extends State<CanvasEditor>
       return _directionBetween(belt.path.first, belt.path[1]);
     }
     return belt.forcedDirection;
+  }
+
+  /// 获取分流器已连接的输出传送带方向列表
+  /// 通过查找所有起点在分流器格子上的传送带的出口方向来确定
+  List<String> _getConnectedSplitterOutputDirections(PlacedBuilding splitter) {
+    final splitterCell =
+        Offset(splitter.gridX.toDouble(), splitter.gridY.toDouble());
+    final directions = <String>[];
+    for (final belt in _project.conveyors) {
+      if (belt.path.isEmpty) continue;
+      final start = belt.path.first;
+      if (start.dx.round() == splitterCell.dx.round() &&
+          start.dy.round() == splitterCell.dy.round()) {
+        final exitDir = _beltExitDirection(belt);
+        if (exitDir != null && !directions.contains(exitDir)) {
+          directions.add(exitDir);
+        }
+      }
+    }
+    return directions;
+  }
+
+  /// 获取分流器指定输出方向上的传送带
+  ConveyorBelt? _getBeltForSplitterOutputDirection(
+      PlacedBuilding splitter, String direction) {
+    final splitterCell =
+        Offset(splitter.gridX.toDouble(), splitter.gridY.toDouble());
+    for (final belt in _project.conveyors) {
+      if (belt.path.isEmpty) continue;
+      final start = belt.path.first;
+      if (start.dx.round() == splitterCell.dx.round() &&
+          start.dy.round() == splitterCell.dy.round()) {
+        final exitDir = _beltExitDirection(belt);
+        if (exitDir == direction) return belt;
+      }
+    }
+    return null;
+  }
+
+  /// 检查分流器输出传送带是否可以接收新物品
+  /// 综合考虑传送带起始端空间和末端阻塞情况
+  bool _canSplitterOutputBeltAcceptItem(ConveyorBelt belt, String itemId) {
+    if (belt.path.isEmpty || itemId.isEmpty) return false;
+
+    belt.ensureItemSegmentsFromLegacy();
+
+    // 计算末端阻塞情况（与 _tickSingleBeltOnce 相同的逻辑）
+    final isDeadEnd =
+        !TransportBeltRenderer.isInputPort(belt.path.last, _project.buildings);
+    final inputBuilding =
+        isDeadEnd ? null : _findInputBuildingAtCell(belt.path.last);
+    final pendingOutputItemId =
+        inputBuilding == null ? null : belt.downstreamItemId();
+    final inputBlocked = inputBuilding != null &&
+        pendingOutputItemId != null &&
+        !_canBeltOutputEnterBuilding(belt, inputBuilding, pendingOutputItemId);
+    final terminalLimit = inputBlocked ? belt.path.length - 1 : null;
+
+    final result = belt.canAcceptNewItemFromStart(itemId, terminalLimit: terminalLimit);
+    return result;
+  }
+
+  /// 查找分流器下一个可用的输出方向（不更新循环索引）
+  /// 按 左→上→右 循环顺序，跳过无传送带和满传送带的方向
+  String? _peekNextAvailableSplitterDirection(
+      PlacedBuilding splitter, String itemId) {
+    final connectedDirs = _getConnectedSplitterOutputDirections(splitter);
+    if (connectedDirs.isEmpty) return null;
+
+    const cycleOrder = ['left', 'up', 'right'];
+
+    for (int offset = 0; offset < cycleOrder.length; offset++) {
+      final index =
+          (splitter.splitterCycleIndex + offset) % cycleOrder.length;
+      final direction = cycleOrder[index];
+
+      // 跳过无传送带的方向
+      if (!connectedDirs.contains(direction)) continue;
+
+      // 查找该方向的输出传送带
+      final belt =
+          _getBeltForSplitterOutputDirection(splitter, direction);
+      if (belt == null) continue;
+
+      // 检查传送带是否可以接收物品
+      if (_canSplitterOutputBeltAcceptItem(belt, itemId)) {
+        return direction;
+      }
+    }
+
+    return null;
+  }
+
+  /// 查找分流器下一个可用的输出方向并更新循环索引
+  String? _findNextAvailableSplitterDirection(
+      PlacedBuilding splitter, String itemId) {
+    final direction = _peekNextAvailableSplitterDirection(splitter, itemId);
+    if (direction == null) return null;
+
+    // 更新循环索引到选定方向之后
+    const cycleOrder = ['left', 'up', 'right'];
+    final index = cycleOrder.indexOf(direction);
+    if (index >= 0) {
+      splitter.splitterCycleIndex = (index + 1) % cycleOrder.length;
+    }
+    return direction;
+  }
+
+  /// 尝试将分流器缓冲槽位中的物品推送到已变为可用的输出带上
+  void _drainSplitterBuffer(PlacedBuilding splitter) {
+    if (!splitter.splitterBufferOccupied) return;
+    final itemId = splitter.splitterBufferedItemId;
+    if (itemId == null || itemId.isEmpty) return;
+
+    // 检查缓冲物品的目标方向是否已可用
+    final bufferedDir = splitter.splitterBufferedDirection;
+    if (bufferedDir != null) {
+      final belt = _getBeltForSplitterOutputDirection(splitter, bufferedDir);
+      if (belt != null && _canSplitterOutputBeltAcceptItem(belt, itemId)) {
+        final terminalLimit = _calculateBeltTerminalLimit(belt);
+        if (belt.pushSourceItem(itemId, terminalLimit: terminalLimit)) {
+          splitter.consumeFromBuffer();
+          return;
+        }
+      }
+    }
+    // 目标方向仍满：尝试其他连通方向
+    const cycleOrder = ['left', 'up', 'right'];
+    for (int offset = 0; offset < cycleOrder.length; offset++) {
+      final index =
+          (splitter.splitterCycleIndex + offset) % cycleOrder.length;
+      final direction = cycleOrder[index];
+      final belt = _getBeltForSplitterOutputDirection(splitter, direction);
+      if (belt == null) continue;
+      if (!_canSplitterOutputBeltAcceptItem(belt, itemId)) continue;
+      final terminalLimit = _calculateBeltTerminalLimit(belt);
+      if (belt.pushSourceItem(itemId, terminalLimit: terminalLimit)) {
+        splitter.consumeFromBuffer();
+        // 不更新 cycleIndex：缓冲排出不改变正常的轮询顺序
+        return;
+      }
+    }
   }
 
   String? _beltArrivalDirection(ConveyorBelt belt) {
@@ -536,11 +722,55 @@ class CanvasEditorState extends State<CanvasEditor>
     return null;
   }
 
+  /// 查找指定格子上的输出端口建筑（用于识别分流器源）
+  PlacedBuilding? _findOutputBuildingAtCell(Offset cell) {
+    final gx = cell.dx.round();
+    final gy = cell.dy.round();
+    for (final pb in _project.buildings) {
+      final rot = pb.rotation;
+      final gw = pb.building.gridWidth;
+      final gh = pb.building.gridHeight;
+      for (final port in pb.outputPorts) {
+        final portCell = port.gridPosition(
+          pb.gridX,
+          pb.gridY,
+          gw,
+          gh,
+          rotation: rot,
+        );
+        if (portCell.dx.round() == gx && portCell.dy.round() == gy) {
+          return pb;
+        }
+      }
+    }
+    return null;
+  }
+
+  /// 计算传送带的末端阻塞限制
+  /// 用于分流器推送时确定输出带可接收物品的位置上限
+  int? _calculateBeltTerminalLimit(ConveyorBelt belt) {
+    if (belt.path.isEmpty) return null;
+    final isDeadEnd =
+        !TransportBeltRenderer.isInputPort(belt.path.last, _project.buildings);
+    final inputBuilding =
+        isDeadEnd ? null : _findInputBuildingAtCell(belt.path.last);
+    final pendingOutputItemId =
+        inputBuilding == null ? null : belt.downstreamItemId();
+    final inputBlocked = inputBuilding != null &&
+        pendingOutputItemId != null &&
+        !_canBeltOutputEnterBuilding(belt, inputBuilding, pendingOutputItemId);
+    return inputBlocked ? belt.path.length - 1 : null;
+  }
+
   bool _transferBeltOutputToBuilding(
       ConveyorBelt belt, PlacedBuilding building) {
     if (building.building.maxInputs <= 0) return false;
     final itemId = belt.outputReadyItemId();
     if (itemId == null) return false;
+
+    // 若建筑当前不可接收（如分流器缓冲槽已满），则不尝试传输
+    if (!_canBeltOutputEnterBuilding(belt, building, itemId)) return false;
+
     if (building.isBeltBridge) {
       final outputDirection = _beltArrivalDirection(belt);
       if (outputDirection == null) return false;
@@ -549,6 +779,28 @@ class CanvasEditorState extends State<CanvasEditor>
       }
       belt.removeOutputReadyItem();
       return true;
+    }
+    // 分流器：纯推送式，无内部缓冲。直接推到输出带，全满则阻塞输入端。
+    if (building.isSplitter) {
+      final direction = _findNextAvailableSplitterDirection(building, itemId);
+      if (direction != null) {
+        final outputBelt =
+            _getBeltForSplitterOutputDirection(building, direction);
+        if (outputBelt != null) {
+          final terminalLimit = _calculateBeltTerminalLimit(outputBelt);
+          if (outputBelt.pushSourceItem(itemId, terminalLimit: terminalLimit, skipAdvanceOnce: true)) {
+            belt.removeOutputReadyItem();
+            return true;
+          }
+        }
+        // 推送失败：回退 cycleIndex
+        const cycleOrder = ['left', 'up', 'right'];
+        final idx = cycleOrder.indexOf(direction);
+        if (idx >= 0) {
+          building.splitterCycleIndex = idx;
+        }
+      }
+      return false;
     }
     // 仓库存货口：直接增加全局仓库库存，不受 inputItemCount 限制
     if (building.building.id == DepotLoaderConfig.id) {
@@ -579,11 +831,22 @@ class CanvasEditorState extends State<CanvasEditor>
 
   void _freezeReadyOutputSegments(ConveyorBelt belt, {required int limit}) {
     belt.ensureItemSegmentsFromLegacy();
-    final freezeLimit = limit.clamp(0, belt.path.length).toInt();
-    for (final segment in belt.itemSegments) {
-      if (segment.hasItems &&
-          segment.fillCount >= freezeLimit &&
-          segment.freezeProgress == null) {
+    if (belt.itemSegments.isEmpty) {
+      belt.syncLegacyFromSegments();
+      return;
+    }
+    belt.itemSegments.sort((a, b) => a.drainCount.compareTo(b.drainCount));
+    final endLimit = limit.clamp(0, belt.path.length).toInt();
+    for (int i = 0; i < belt.itemSegments.length; i++) {
+      final segment = belt.itemSegments[i];
+      if (!segment.hasItems) continue;
+      // 每个物品段有其独立的冻结上限：
+      // - 最后一段的上限是终端极限值（如传送带尽头或被阻塞位置）
+      // - 前方段落的上限是下一段的 drainCount（即不能越过前面的物品）
+      final segLimit = i + 1 < belt.itemSegments.length
+          ? belt.itemSegments[i + 1].drainCount.clamp(0, belt.path.length).toInt()
+          : endLimit;
+      if (segment.fillCount >= segLimit && segment.freezeProgress == null) {
         segment.freezeProgress = -1.0;
       }
     }
@@ -602,6 +865,14 @@ class CanvasEditorState extends State<CanvasEditor>
         return outputDirection == null
             ? null
             : pb.bridgeItemIdForOutputDirection(outputDirection);
+      }
+
+      // 分流器：若缓冲槽位中有物品，输出带从中拉取（作为生产者）
+      if (pb.isSplitter) {
+        if (pb.splitterBufferOccupied) {
+          return pb.splitterBufferedItemId;
+        }
+        return null;
       }
 
       if (LogisticsUnitRenderer.isLogisticsUnit(pb.building.id)) {
@@ -639,6 +910,14 @@ class CanvasEditorState extends State<CanvasEditor>
         final outputDirection = _beltExitDirection(belt);
         return outputDirection != null &&
             pb.consumeBridgeOutputItem(itemId, outputDirection);
+      }
+      // 分流器：消费缓冲槽位中的物品（仅当 belt 方向与缓冲方向匹配时）
+      if (pb.isSplitter) {
+        if (pb.splitterBufferOccupied) {
+          pb.consumeFromBuffer();
+          return true;
+        }
+        return false;
       }
       if (LogisticsUnitRenderer.isLogisticsUnit(pb.building.id)) {
         return pb.consumeInputItems(itemId, 1);
@@ -921,11 +1200,19 @@ class CanvasEditorState extends State<CanvasEditor>
         final otherFirst = other.path.first;
         final otherLast = other.path.last;
 
-        final connectsAtStart =
-            (firstCell.dx == otherLast.dx && firstCell.dy == otherLast.dy) ||
-                (lastCell.dx == otherFirst.dx && lastCell.dy == otherFirst.dy);
+        // 检查 firstCell 与 otherLast 是否在同一格
+        final startToEnd = firstCell.dx == otherLast.dx &&
+            firstCell.dy == otherLast.dy;
+        // 检查 lastCell 与 otherFirst 是否在同一格
+        final endToStart = lastCell.dx == otherFirst.dx &&
+            lastCell.dy == otherFirst.dy;
 
-        if (connectsAtStart) {
+        if (startToEnd || endToStart) {
+          // 确定共享的格子坐标
+          final sharedCell = startToEnd ? firstCell : lastCell;
+          // 如果共享格子上有建筑（如分流器），则不跨越建筑连接产线
+          if (_getBuildingAt(sharedCell) != null) continue;
+
           visited.add(other.id);
           connected.add(other);
           traverseFrom(other);

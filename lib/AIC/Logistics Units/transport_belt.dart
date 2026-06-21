@@ -120,6 +120,19 @@ class TransportBeltController {
 
     final belt = _findBeltAtCell(gridPos);
     if (belt != null) {
+      // 1x1建筑（如分流器）输入/输出端口共享同一格子
+      // 若该格子同时是设备输出端口，优先从输出端口创建新传送带，避免与输入传送带合并
+      if (_isCellInBuilding(gridPos)) {
+        final portInfo = _findPortAtCell(gridPos, preferredType: 'output');
+        if (portInfo != null && portInfo.type == 'output') {
+          anchors.add(gridPos);
+          _startingPortDirection = null;
+          _incomingDirection = null;
+          _updatePreview();
+          notifyListeners();
+          return true;
+        }
+      }
       if (belt.path.isNotEmpty) {
         final firstCell = belt.path.first;
         if (firstCell.dx.toInt() == gridPos.dx.toInt() &&
@@ -161,7 +174,10 @@ class TransportBeltController {
         return false;
       }
       anchors.add(gridPos);
-      _startingPortDirection = portInfo.worldDirection;
+      // 不限制起始方向（设为 null），让用户自由选择左/上/右任意方向。
+      // 对于分流器等有多输出端口的建筑，限制为单一端口方向会导致无法创建
+      // 某些方向的传送带（如只能往上/下，不能往左/右）。
+      _startingPortDirection = null;
       _updatePreview();
       notifyListeners();
       return true;
@@ -173,75 +189,88 @@ class TransportBeltController {
   bool _handleSubsequentAnchor(Offset gridPos) {
     if (anchors.last == gridPos) return false;
 
-    // 检查是否点击了某条传送带的起点（合并候选）
-    final mergeBelt = _findBeltStartCell(gridPos);
-    if (mergeBelt != null) {
-      // 不允许与路径中已包含的传送带合并（避免回环）
-      final alreadyInPath =
-          fullPath.any((c) => c.dx == gridPos.dx && c.dy == gridPos.dy);
-      if (!alreadyInPath) {
-        final blocked = _buildBlockedSet(excludeCell: gridPos);
-        final verticalFirst = _isIncomingVertical();
-        final segment = _findPath(anchors.last, gridPos, blocked,
-            verticalFirst: verticalFirst);
-        if (segment != null &&
-            segment.length >= 2 &&
-            _isDirectionCompatible(segment, mergeBelt)) {
-          if (fullPath.isEmpty) {
-            fullPath.addAll(segment);
-          } else {
-            if (segment.length > 1) {
-              fullPath.addAll(segment.sublist(1));
+    // 1x1建筑（如分流器）的输入/输出端口共享同一格子。
+    // 当目标格子是建筑输入端口格时，跳过合并和截断检查，
+    // 直接进入下方的输入端口终点逻辑。
+    final isBuildingInputCell =
+        _isCellInBuilding(gridPos) && _buildingAtCellHasInputPort(gridPos);
+    if (!isBuildingInputCell) {
+      // 检查是否点击了某条传送带的起点（合并候选）
+      final mergeBelt = _findBeltStartCell(gridPos);
+      if (mergeBelt != null) {
+        // 不允许与路径中已包含的传送带合并（避免回环）
+        final alreadyInPath =
+            fullPath.any((c) => c.dx == gridPos.dx && c.dy == gridPos.dy);
+        if (!alreadyInPath) {
+          final blocked = _buildBlockedSet(excludeCell: gridPos);
+          final verticalFirst = _isIncomingVertical();
+          final segment = _findPath(anchors.last, gridPos, blocked,
+              verticalFirst: verticalFirst);
+          if (segment != null &&
+              segment.length >= 2 &&
+              _isDirectionCompatible(segment, mergeBelt)) {
+            if (fullPath.isEmpty) {
+              fullPath.addAll(segment);
+            } else {
+              if (segment.length > 1) {
+                fullPath.addAll(segment.sublist(1));
+              }
             }
+            anchors.add(gridPos);
+            _mergeTarget = mergeBelt;
+            _finish(); // 合并时自动完成创建
+            notifyListeners();
+            return true;
           }
-          anchors.add(gridPos);
-          _mergeTarget = mergeBelt;
-          _finish(); // 合并时自动完成创建
-          notifyListeners();
-          return true;
         }
+        // 方向不兼容或路径不通，返回 false 让预览显示红色
+        return false;
       }
-      // 方向不兼容或路径不通，返回 false 让预览显示红色
-      return false;
-    }
 
-    // 检查是否点击了某条传送带的中间格子（非起点），进行截断连接
-    final midBelt = _findBeltAtCellExcluding(gridPos, _committedBeltId);
-    if (midBelt != null) {
-      // 排除首格（已由 mergeBelt 处理）和已在路径中的格子
-      final isFirstCell = midBelt.path.isNotEmpty &&
-          midBelt.path.first.dx == gridPos.dx &&
-          midBelt.path.first.dy == gridPos.dy;
-      final alreadyInPath =
-          fullPath.any((c) => c.dx == gridPos.dx && c.dy == gridPos.dy);
-      if (!isFirstCell && !alreadyInPath) {
-        final blocked = _buildBlockedSet(excludeCell: gridPos);
-        final verticalFirst = _isIncomingVertical();
-        final segment = _findPath(anchors.last, gridPos, blocked,
-            verticalFirst: verticalFirst);
-        if (segment != null && segment.length >= 2) {
-          if (fullPath.isEmpty) {
-            fullPath.addAll(segment);
-          } else {
-            if (segment.length > 1) {
-              fullPath.addAll(segment.sublist(1));
+      // 检查是否点击了某条传送带的中间格子（非起点），进行截断连接
+      final midBelt = _findBeltAtCellExcluding(gridPos, _committedBeltId);
+      if (midBelt != null) {
+        // 排除首格（已由 mergeBelt 处理）和已在路径中的格子
+        final isFirstCell = midBelt.path.isNotEmpty &&
+            midBelt.path.first.dx == gridPos.dx &&
+            midBelt.path.first.dy == gridPos.dy;
+        final alreadyInPath =
+            fullPath.any((c) => c.dx == gridPos.dx && c.dy == gridPos.dy);
+        if (!isFirstCell && !alreadyInPath) {
+          final blocked = _buildBlockedSet(excludeCell: gridPos);
+          final verticalFirst = _isIncomingVertical();
+          final segment = _findPath(anchors.last, gridPos, blocked,
+              verticalFirst: verticalFirst);
+          if (segment != null && segment.length >= 2) {
+            if (fullPath.isEmpty) {
+              fullPath.addAll(segment);
+            } else {
+              if (segment.length > 1) {
+                fullPath.addAll(segment.sublist(1));
+              }
             }
+            anchors.add(gridPos);
+            _finish(); // 截断连接时自动完成创建
+            notifyListeners();
+            return true;
           }
-          anchors.add(gridPos);
-          _finish(); // 截断连接时自动完成创建
-          notifyListeners();
-          return true;
         }
+        // 路径不通或格子不合法，返回 false 让预览显示红色
+        return false;
       }
-      // 路径不通或格子不合法，返回 false 让预览显示红色
-      return false;
+    } else {
     }
 
     // 允许设备输入端口的格子作为传送带终点
-    final isInputPort = _isCellDeviceInputPort(gridPos);
+    // 注意：_isCellDeviceInputPort 对1x1建筑无效（端口坐标在格边缘而非格中心），
+    // 需同时用 _isCellInBuilding + _buildingAtCellHasInputPort 补检。
+    final isInputPort = _isCellDeviceInputPort(gridPos) ||
+        (_isCellInBuilding(gridPos) && _buildingAtCellHasInputPort(gridPos));
     // 物流桥格子允许作为传送带路径的一部分
     final isBridgeCell = _findBeltBridgeAtCell(gridPos) != null;
-    if (!isInputPort && !isBridgeCell && _isCellOccupied(gridPos)) return false;
+    if (!isInputPort && !isBridgeCell && _isCellOccupied(gridPos)) {
+      return false;
+    }
 
     // 输入端口作为终点时，从 blocked 中排除该格
     final blocked = _buildBlockedSet(excludeCell: isInputPort ? gridPos : null);
@@ -249,8 +278,12 @@ class TransportBeltController {
 
     final segment =
         _findPath(anchors.last, gridPos, blocked, verticalFirst: verticalFirst);
-    if (segment == null || segment.length < 2) return false;
-    if (_isBlockedBridgeStartSegment(segment)) return false;
+    if (segment == null || segment.length < 2) {
+      return false;
+    }
+    if (_isBlockedBridgeStartSegment(segment)) {
+      return false;
+    }
 
     // 点击输入端口时自动完成创建
     if (isInputPort) {
@@ -327,6 +360,13 @@ class TransportBeltController {
       // 使用 anchors.first（用户实际点击的位置）作为分叉点
       final startCell = anchors.first;
       final startsAtBridge = _findBeltBridgeAtCell(startCell) != null;
+      // 1x1建筑（如分流器）输出端口与输入传送带终点共享同一格子
+      // 从输出端口创建新传送带时，不应将输入传送带视为分叉源/源传送带/截断目标
+      final startPortInfo = _isCellInBuilding(startCell)
+          ? _findPortAtCell(startCell, preferredType: 'output')
+          : null;
+      final startIsDeviceOutputPort =
+          startPortInfo != null && startPortInfo.type == 'output';
       final bridgeStartDirection = startsAtBridge && fullPath.length >= 2
           ? _directionBetween(fullPath[0], fullPath[1])
           : null;
@@ -344,7 +384,7 @@ class TransportBeltController {
       }
       ConveyorBelt? forkSourceBelt;
       int forkSourceIndex = -1;
-      if (!startsAtBridge) {
+      if (!startsAtBridge && !startIsDeviceOutputPort) {
         for (final oldBelt in project.conveyors) {
           for (int i = 0; i < oldBelt.path.length; i++) {
             if (oldBelt.path[i].dx == startCell.dx &&
@@ -422,8 +462,9 @@ class TransportBeltController {
 
       // 查找源传送带（用户从其终点开始创建新传送带的旧传送带）
       // 当 startCell 是某条旧传送带的终点时，继承其物品状态
+      // 设备输出端口起点不继承输入传送带的物品状态（物品经过设备处理）
       ConveyorBelt? sourceBelt = bridgeSourceBelt;
-      if (sourceBelt == null) {
+      if (sourceBelt == null && !startIsDeviceOutputPort) {
         for (final oldBelt in project.conveyors) {
           if (oldBelt.path.isNotEmpty &&
               oldBelt.path.last.dx == startCell.dx &&
@@ -609,6 +650,10 @@ class TransportBeltController {
 
         // 跳过合并目标（会单独移除）
         if (_mergeTarget != null && identical(oldBelt, _mergeTarget)) continue;
+
+        // 设备输出端口起点：不截断任何旧传送带
+        // 1x1建筑输入/输出端口共享同一格子，输入传送带的终点在此，不应被移除
+        if (startIsDeviceOutputPort) continue;
 
         int forkIdx = -1;
         for (int i = 0; i < oldBelt.path.length; i++) {
@@ -1270,6 +1315,8 @@ class TransportBeltController {
             if (_isPerpendicularCrossing(newDir, beltDir)) {
               // Check if there's already a bridge at this cell
               if (_findBeltBridgeAtCell(cell) != null) continue;
+              // 交叉点已有建筑（如分流器、汇流器等）时不创建物流桥
+              if (_isCellOccupied(cell)) continue;
               // 物流桥不能在转角传送带格子上创建
               if (_isBeltCellTurn(belt, j)) continue;
               crossings.add(cell);
@@ -1331,6 +1378,8 @@ class TransportBeltController {
             final beltDir = _getBeltDirectionAtCell(belt, j);
             if (_isPerpendicularCrossing(newDir, beltDir)) {
               if (_findBeltBridgeAtCell(cell) != null) continue;
+              // 交叉点已有建筑（如分流器、汇流器等）时不创建物流桥
+              if (_isCellOccupied(cell)) continue;
               // 物流桥不能在转角传送带格子上创建
               if (_isBeltCellTurn(belt, j)) continue;
               if (crossings.any((c) =>
@@ -1494,6 +1543,25 @@ class TransportBeltController {
   bool _isCellDeviceInputPort(Offset gridPos) {
     final portInfo = _findPortAtCell(gridPos, preferredType: 'input');
     return portInfo != null && portInfo.type == 'input';
+  }
+
+  /// 检查 gridPos 是否在某个有输入端口的建筑内（如1x1分流器）。
+  /// _isCellDeviceInputPort 对1x1建筑无效（端口在格边缘），此函数补检。
+  bool _buildingAtCellHasInputPort(Offset gridPos) {
+    final gx = gridPos.dx.toInt();
+    final gy = gridPos.dy.toInt();
+    for (final pb in project.buildings) {
+      if (pb.inputPorts.isEmpty) continue;
+      final bx = pb.effectiveGridX.toInt();
+      final by = pb.effectiveGridY.toInt();
+      if (gx >= bx &&
+          gx < bx + pb.effectiveWidth &&
+          gy >= by &&
+          gy < by + pb.effectiveHeight) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // === 预览 ===
