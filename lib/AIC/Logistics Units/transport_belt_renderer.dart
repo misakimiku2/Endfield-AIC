@@ -41,10 +41,12 @@ class TransportBeltRenderer {
   static VoidCallback? onItemImageReady;
 
   /// 检测是否是输出端口 (output)
+  /// 对1x1建筑（如分流器），端口坐标在格边缘，需补检建筑占据范围。
   static bool isOutputPort(Offset gridPos, List<PlacedBuilding> buildings) {
     final gx = gridPos.dx.round();
     final gy = gridPos.dy.round();
     for (final pb in buildings) {
+      // 先检查精确端口坐标
       final rot = pb.rotation;
       final gw = pb.building.gridWidth;
       final gh = pb.building.gridHeight;
@@ -52,6 +54,17 @@ class TransportBeltRenderer {
         final portGrid =
             port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
         if (portGrid.dx.round() == gx && portGrid.dy.round() == gy) {
+          return true;
+        }
+      }
+      // 1x1补检：若建筑占据此格且有输出端口，视为输出端口格
+      if (pb.outputPorts.isNotEmpty) {
+        final bx = pb.effectiveGridX.toInt();
+        final by = pb.effectiveGridY.toInt();
+        if (gx >= bx &&
+            gx < bx + pb.effectiveWidth &&
+            gy >= by &&
+            gy < by + pb.effectiveHeight) {
           return true;
         }
       }
@@ -71,6 +84,17 @@ class TransportBeltRenderer {
         final portGrid =
             port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
         if (portGrid.dx.round() == gx && portGrid.dy.round() == gy) {
+          return true;
+        }
+      }
+      // 1x1补检：若建筑占据此格且有输入端口，视为输入端口格
+      if (pb.inputPorts.isNotEmpty) {
+        final bx = pb.effectiveGridX.toInt();
+        final by = pb.effectiveGridY.toInt();
+        if (gx >= bx &&
+            gx < bx + pb.effectiveWidth &&
+            gy >= by &&
+            gy < by + pb.effectiveHeight) {
           return true;
         }
       }

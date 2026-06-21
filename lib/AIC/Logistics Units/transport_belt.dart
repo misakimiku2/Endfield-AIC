@@ -41,6 +41,10 @@ class TransportBeltController {
   List<Offset> previewBridgeCells = [];
 
   String? _startingPortDirection;
+  /// 首段路径允许的物理方向集合（如分流器允许 {up, left, right}）。
+  /// null 表示无限制。非 null 时 BFS 第一步仅允许集合内的方向，
+  /// 防止从建筑输出端口往输入端方向创建传送带。
+  Set<String>? _startingPortAllowedDirections;
   String? _incomingDirection;
   String? _committedBeltId;
   int _lastCommittedPathLength = 0;
@@ -68,6 +72,7 @@ class TransportBeltController {
     previewBridgeCells = [];
     _mergeTarget = null;
     _startingPortDirection = null;
+    _startingPortAllowedDirections = null;
     _incomingDirection = null;
     _committedBeltId = null;
     _lastCommittedPathLength = 0;
@@ -107,6 +112,9 @@ class TransportBeltController {
   // === 内部实现 ===
 
   bool _handleFirstAnchor(Offset gridPos) {
+    // 每次开始新传送带时清空入方向，防止上一轮 _finish() 遗留的
+    // incomingDirection 导致新传送带首格预览显示为转角传送带。
+    _incomingDirection = null;
     // 物流桥：允许从任意方向开始创建传送带
     final bridgeAtCell = _findBeltBridgeAtCell(gridPos);
     if (bridgeAtCell != null) {
@@ -124,9 +132,22 @@ class TransportBeltController {
       // 若该格子同时是设备输出端口，优先从输出端口创建新传送带，避免与输入传送带合并
       if (_isCellInBuilding(gridPos)) {
         final portInfo = _findPortAtCell(gridPos, preferredType: 'output');
-        if (portInfo != null && portInfo.type == 'output') {
+        // 对 1x1 建筑（如分流器），_findPortAtCell 因端口坐标 round 后偏移
+        // 可能返回 null 或 fallback 返回 input 类型的端口（非 null）。
+        // 此时通过检查建筑是否有输出来判断是否应走"从输出端口创建"分支，
+        // 避免回退到"从已有传送带创建"逻辑导致继承旧的 incomingDirection 使预览首格误判为转角。
+        final hasOutputPort = _buildingAtCellHasOutputPort(gridPos);
+        final isOutputPort =
+            portInfo != null && portInfo.type == 'output';
+        if (isOutputPort || (!isOutputPort && hasOutputPort)) {
           anchors.add(gridPos);
           _startingPortDirection = null;
+          _startingPortAllowedDirections =
+              _computeAllowedDirectionsForBuilding(gridPos);
+          // 从设备的输出端口重新开始创建新传送带时，必须清空旧的 fullPath，
+          // 否则 _updatePreview 会将已提交的旧路径作为 confirmedPath 拼入 fullPathContext，
+          // 导致预览首格被误判为转弯（如左带向上+右预览向右时显示为转角）。
+          fullPath = [];
           _incomingDirection = null;
           _updatePreview();
           notifyListeners();
@@ -170,14 +191,18 @@ class TransportBeltController {
       // 只允许从输出端口开始创建传送带
       // 不允许从输入端口开始（传送带单向），也不允许从设备内部非端口格子开始
       final portInfo = _findPortAtCell(gridPos, preferredType: 'output');
-      if (portInfo == null || portInfo.type != 'output') {
+      // 对 1x1 建筑（如分流器），_findPortAtCell 可能因端口坐标 round 后偏移而返回 null。
+      // 此时通过检查建筑是否有输出来判断是否允许创建。
+      final hasOutputPort = _buildingAtCellHasOutputPort(gridPos);
+      if ((portInfo == null || portInfo.type != 'output') && !hasOutputPort) {
         return false;
       }
       anchors.add(gridPos);
-      // 不限制起始方向（设为 null），让用户自由选择左/上/右任意方向。
-      // 对于分流器等有多输出端口的建筑，限制为单一端口方向会导致无法创建
-      // 某些方向的传送带（如只能往上/下，不能往左/右）。
+      // 计算建筑输出端口的允许方向集合，替代单一方向限制。
+      // 如分流器允许 {up, left, right}，阻止往输入端（down）方向创建传送带。
       _startingPortDirection = null;
+      _startingPortAllowedDirections =
+          _computeAllowedDirectionsForBuilding(gridPos);
       _updatePreview();
       notifyListeners();
       return true;
@@ -194,6 +219,12 @@ class TransportBeltController {
     // 直接进入下方的输入端口终点逻辑。
     final isBuildingInputCell =
         _isCellInBuilding(gridPos) && _buildingAtCellHasInputPort(gridPos);
+
+    // 若当前目标是建筑输出端口格（如从分流器创建新输出带），
+    // 清空上一轮遗留的 incomingDirection，避免首格预览显示为转角。
+    if (_isCellInBuilding(gridPos) && _buildingAtCellHasInputPort(gridPos)) {
+      _incomingDirection = null;
+    }
     if (!isBuildingInputCell) {
       // 检查是否点击了某条传送带的起点（合并候选）
       final mergeBelt = _findBeltStartCell(gridPos);
@@ -937,6 +968,12 @@ class TransportBeltController {
       if (fullPath.any((c) => c.dx == neighbor.dx && c.dy == neighbor.dy)) {
         continue;
       }
+      // 排除 anchors 中的格子（路径起点），防止转角吸附导致路径回环
+      // 如从分流器向左创建传送带时，预览末尾检测到分流器格子上已有传送带起点，
+      // 导致预览路径回环到起点形成 U 型弯
+      if (anchors.any((a) => a.dx == neighbor.dx && a.dy == neighbor.dy)) {
+        continue;
+      }
       // 检查方向兼容性：从 fromCell 到 neighbor 的方向必须与传送带出方向一致
       final toDx = d.dx.toInt();
       final toDy = d.dy.toInt();
@@ -1564,6 +1601,46 @@ class TransportBeltController {
     return false;
   }
 
+  /// 检查目标格子是否被有输出端口的建筑占据（不依赖端口坐标，解决 1x1 建筑坐标偏差问题）
+  bool _buildingAtCellHasOutputPort(Offset gridPos) {
+    final gx = gridPos.dx.toInt();
+    final gy = gridPos.dy.toInt();
+    for (final pb in project.buildings) {
+      if (pb.outputPorts.isEmpty) continue;
+      final bx = pb.effectiveGridX.toInt();
+      final by = pb.effectiveGridY.toInt();
+      if (gx >= bx &&
+          gx < bx + pb.effectiveWidth &&
+          gy >= by &&
+          gy < by + pb.effectiveHeight) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// 计算建筑在 gridPos 处的所有输出端口旋转后的世界方向集合。
+  /// 用于限制传送带首段只能沿这些方向创建，阻止往输入端方向创建。
+  Set<String>? _computeAllowedDirectionsForBuilding(Offset gridPos) {
+    final gx = gridPos.dx.toInt();
+    final gy = gridPos.dy.toInt();
+    final dirs = <String>{};
+    for (final pb in project.buildings) {
+      final bx = pb.effectiveGridX.toInt();
+      final by = pb.effectiveGridY.toInt();
+      if (gx < bx || gx >= bx + pb.effectiveWidth ||
+          gy < by || gy >= by + pb.effectiveHeight) {
+        continue;
+      }
+      final rot = pb.rotation;
+      for (final port in pb.outputPorts) {
+        final worldDir = _rotateDirection(port.definition.direction, rot);
+        if (worldDir.isNotEmpty) dirs.add(worldDir);
+      }
+    }
+    return dirs.isNotEmpty ? dirs : null;
+  }
+
   // === 预览 ===
 
   void _updatePreview() {
@@ -1575,7 +1652,6 @@ class TransportBeltController {
       previewBridgeCells = [];
       return;
     }
-
     final lastAnchor = anchors.last;
 
     // 检查鼠标是否悬停在某条传送带的起点（合并候选）
@@ -1728,6 +1804,8 @@ class TransportBeltController {
     // 仅在创建第一段时（即 anchors.length <= 1），才施加起始端口物理方向的约束，之后的中继锚点寻路自由
     final activeDirection =
         (anchors.length <= 1) ? _startingPortDirection : null;
+    final allowedDirections =
+        (anchors.length <= 1) ? _startingPortAllowedDirections : null;
 
     // 如果有端口方向约束，优先尝试按端口方向走
     final momentumPath = _calculateMomentumPath(start, end,
@@ -1740,6 +1818,13 @@ class TransportBeltController {
         break;
       }
     }
+    // 验证首段方向是否在允许集合内（如分流器禁止往输入端down方向）
+    if (momentumValid && allowedDirections != null && momentumPath.length >= 2) {
+      final firstStepDir = _directionBetween(momentumPath[0], momentumPath[1]);
+      if (firstStepDir != null && !allowedDirections.contains(firstStepDir)) {
+        momentumValid = false;
+      }
+    }
     // 验证 momentum path 在物流桥格子处是否保持直线
     if (momentumValid && !_isPathValidAtBridges(momentumPath)) {
       momentumValid = false;
@@ -1750,8 +1835,9 @@ class TransportBeltController {
     }
     if (momentumValid) return _deduplicatePath(momentumPath);
 
-    final bfsPath =
-        _findPathBFS(start, end, blocked, firstStepDirection: activeDirection);
+    final bfsPath = _findPathBFS(start, end, blocked,
+        firstStepDirection: activeDirection,
+        allowedDirections: allowedDirections);
     return bfsPath != null ? _deduplicatePath(bfsPath) : null;
   }
 
@@ -1842,7 +1928,7 @@ class TransportBeltController {
   }
 
   List<Offset>? _findPathBFS(Offset start, Offset end, Set<String> blocked,
-      {String? firstStepDirection}) {
+      {String? firstStepDirection, Set<String>? allowedDirections}) {
     final startKey = '${start.dx.toInt()}_${start.dy.toInt()}';
     final endKey = '${end.dx.toInt()}_${end.dy.toInt()}';
 
@@ -1903,7 +1989,14 @@ class TransportBeltController {
       }
 
       List<int> allowedDirIndices;
-      if (nodeKey == startKey && firstStepDirection != null) {
+      if (nodeKey == startKey && allowedDirections != null) {
+        // 优先使用多方向允许集合（如分流器允许 up/left/right，禁止 down）
+        allowedDirIndices = allowedDirections
+            .map((d) => dirNameToIndex(d))
+            .whereType<int>()
+            .toList();
+        if (allowedDirIndices.isEmpty) allowedDirIndices = [0, 1, 2, 3];
+      } else if (nodeKey == startKey && firstStepDirection != null) {
         final idx = dirNameToIndex(firstStepDirection);
         allowedDirIndices = idx != null ? [idx] : [0, 1, 2, 3];
       } else if (node.incomingDir >= 0) {

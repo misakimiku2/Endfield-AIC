@@ -598,21 +598,16 @@ class CanvasEditorState extends State<CanvasEditor>
   }
 
   /// 查找分流器下一个可用的输出方向（不更新循环索引）
-  /// 按 左→上→右 循环顺序，跳过无传送带和满传送带的方向
+  /// 按输出传送带创建顺序循环，跳过无传送带和满传送带的方向
   String? _peekNextAvailableSplitterDirection(
       PlacedBuilding splitter, String itemId) {
-    final connectedDirs = _getConnectedSplitterOutputDirections(splitter);
-    if (connectedDirs.isEmpty) return null;
-
-    const cycleOrder = ['left', 'up', 'right'];
+    final cycleOrder = _getConnectedSplitterOutputDirections(splitter);
+    if (cycleOrder.isEmpty) return null;
 
     for (int offset = 0; offset < cycleOrder.length; offset++) {
       final index =
           (splitter.splitterCycleIndex + offset) % cycleOrder.length;
       final direction = cycleOrder[index];
-
-      // 跳过无传送带的方向
-      if (!connectedDirs.contains(direction)) continue;
 
       // 查找该方向的输出传送带
       final belt =
@@ -634,8 +629,8 @@ class CanvasEditorState extends State<CanvasEditor>
     final direction = _peekNextAvailableSplitterDirection(splitter, itemId);
     if (direction == null) return null;
 
-    // 更新循环索引到选定方向之后
-    const cycleOrder = ['left', 'up', 'right'];
+    // 更新循环索引到选定方向之后（按创建顺序）
+    final cycleOrder = _getConnectedSplitterOutputDirections(splitter);
     final index = cycleOrder.indexOf(direction);
     if (index >= 0) {
       splitter.splitterCycleIndex = (index + 1) % cycleOrder.length;
@@ -661,8 +656,8 @@ class CanvasEditorState extends State<CanvasEditor>
         }
       }
     }
-    // 目标方向仍满：尝试其他连通方向
-    const cycleOrder = ['left', 'up', 'right'];
+    // 目标方向仍满：尝试其他连通方向（按创建顺序）
+    final cycleOrder = _getConnectedSplitterOutputDirections(splitter);
     for (int offset = 0; offset < cycleOrder.length; offset++) {
       final index =
           (splitter.splitterCycleIndex + offset) % cycleOrder.length;
@@ -793,8 +788,8 @@ class CanvasEditorState extends State<CanvasEditor>
             return true;
           }
         }
-        // 推送失败：回退 cycleIndex
-        const cycleOrder = ['left', 'up', 'right'];
+        // 推送失败：回退 cycleIndex（按创建顺序）
+        final cycleOrder = _getConnectedSplitterOutputDirections(building);
         final idx = cycleOrder.indexOf(direction);
         if (idx >= 0) {
           building.splitterCycleIndex = idx;
