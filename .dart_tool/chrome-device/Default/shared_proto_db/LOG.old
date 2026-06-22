@@ -1,16 +1,24 @@
-2026/06/22-02:40:44.382 b984 Reusing MANIFEST C:\Users\Misaki\AppData\Local\Temp\flutter_tools.662ca012\flutter_tools_chrome_device.508a560b\Default\shared_proto_db/MANIFEST-000001
-2026/06/22-02:40:44.383 b984 Recovering log #29
-2026/06/22-02:40:44.384 b984 Reusing old log C:\Users\Misaki\AppData\Local\Temp\flutter_tools.662ca012\flutter_tools_chrome_device.508a560b\Default\shared_proto_db/000029.log 
-2026/06/22-02:40:44.385 b984 Delete type=0 #3
-2026/06/22-02:40:44.385 b984 Delete type=0 #4
-2026/06/22-02:40:44.385 b984 Delete type=0 #7
-2026/06/22-02:40:44.385 b984 Delete type=2 #8
-2026/06/22-02:40:44.385 b984 Delete type=0 #10
-2026/06/22-02:40:44.385 b984 Delete type=2 #11
-2026/06/22-02:40:44.385 b984 Delete type=0 #13
-2026/06/22-02:40:44.385 b984 Delete type=2 #14
-2026/06/22-02:40:44.385 b984 Delete type=0 #16
-2026/06/22-02:40:44.386 b984 Delete type=2 #17
-2026/06/22-02:40:44.386 b984 Delete type=0 #19
-2026/06/22-02:40:44.386 b984 Delete type=0 #23
-2026/06/22-02:40:44.386 b984 Delete type=0 #26
+2026/06/22-04:46:39.912 3ad0 Reusing MANIFEST C:\Users\Misaki\AppData\Local\Temp\flutter_tools.2a6f2066\flutter_tools_chrome_device.a3ab7391\Default\shared_proto_db/MANIFEST-000001
+2026/06/22-04:46:39.912 3ad0 Recovering log #32
+2026/06/22-04:46:39.913 3ad0 Reusing old log C:\Users\Misaki\AppData\Local\Temp\flutter_tools.2a6f2066\flutter_tools_chrome_device.a3ab7391\Default\shared_proto_db/000032.log 
+2026/06/22-04:46:39.914 3ad0 Delete type=0 #3
+2026/06/22-04:46:39.914 3ad0 Delete type=0 #4
+2026/06/22-04:46:39.914 3ad0 Delete type=0 #7
+2026/06/22-04:46:39.914 3ad0 Delete type=2 #8
+2026/06/22-04:46:39.914 3ad0 Delete type=0 #10
+2026/06/22-04:46:39.914 3ad0 Delete type=2 #11
+2026/06/22-04:46:39.914 3ad0 Delete type=0 #13
+2026/06/22-04:46:39.914 3ad0 Delete type=2 #14
+2026/06/22-04:46:39.914 3ad0 Delete type=0 #16
+2026/06/22-04:46:39.914 3ad0 Delete type=2 #17
+2026/06/22-04:46:39.914 3ad0 Delete type=0 #19
+2026/06/22-04:46:39.914 3ad0 Delete type=2 #21
+2026/06/22-04:46:39.914 3ad0 Delete type=0 #23
+2026/06/22-04:46:39.914 3ad0 Delete type=2 #24
+2026/06/22-04:46:39.914 3ad0 Delete type=0 #26
+2026/06/22-04:46:39.914 3ad0 Delete type=2 #27
+2026/06/22-04:46:39.914 3ad0 Delete type=0 #29
+2026/06/22-04:46:39.914 3ad0 Delete type=2 #30
+2026/06/22-04:47:25.569 4464 Level-0 table #37: started
+2026/06/22-04:47:25.573 4464 Level-0 table #37: 136803 bytes OK
+2026/06/22-04:47:25.575 4464 Delete type=0 #32

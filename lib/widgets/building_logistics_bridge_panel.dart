@@ -178,20 +178,59 @@ class _LogisticsBridgePanelState extends State<LogisticsBridgePanel>
     return null;
   }
 
+  /// 检查指定轨道（0=A左右, 1=B上下）是否有传送带堵塞
+  bool _isTrackBlocked(int trackIndex) {
+    final targetDirections =
+        trackIndex == 0 ? {'left', 'right'} : {'up', 'down'};
+    // 找到穿过物流桥的传送带
+    final bridgeX = widget.placedBuilding.gridX;
+    final bridgeY = widget.placedBuilding.gridY;
+    for (final belt in widget.conveyors ?? []) {
+      for (int i = 0; i < belt.path.length; i++) {
+        if (belt.path[i].dx.round() != bridgeX ||
+            belt.path[i].dy.round() != bridgeY) continue;
+        final dir = _getBeltDirectionAtIndex(belt, i);
+        if (dir != null && targetDirections.contains(dir)) {
+          if (belt.isBlocked || _isBeltStuck(belt)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /// 判断传送带是否处于物品卡住状态
+  bool _isBeltStuck(ConveyorBelt belt) {
+    if (belt.itemId.isEmpty && belt.lastItemId.isEmpty) return false;
+    if (belt.deadEndFreezeProgress != null) return true;
+    if (belt.lastItemFreezeProgress != null) return true;
+    if (belt.itemFillCount >= belt.path.length &&
+        belt.itemDrainCount < belt.itemFillCount - 1) return true;
+    return false;
+  }
+
   void _spawnItem() {
     final trackAConnected = _isTrackConnected(0);
     final trackBConnected = _isTrackConnected(1);
 
     if (!trackAConnected && !trackBConnected) return;
 
+    final trackABlocked = _isTrackBlocked(0);
+    final trackBblocked = _isTrackBlocked(1);
+
+    // 收集可用的（已连接且未堵塞）轨道
+    final availableTracks = <int>[];
+    if (trackAConnected && !trackABlocked) availableTracks.add(0);
+    if (trackBConnected && !trackBblocked) availableTracks.add(1);
+    // 所有可用轨道都堵塞 → 停止生成
+    if (availableTracks.isEmpty) return;
+
     int trackIndex;
-    if (trackAConnected && trackBConnected) {
-      trackIndex = _spawnCounter % 2;
-      _spawnCounter++;
-    } else if (trackAConnected) {
-      trackIndex = 0;
+    if (availableTracks.length == 1) {
+      trackIndex = availableTracks.first;
     } else {
-      trackIndex = 1;
+      // 多条可用轨道时交替选择
+      trackIndex = availableTracks[_spawnCounter % availableTracks.length];
+      _spawnCounter++;
     }
 
     final controller = AnimationController(
@@ -262,6 +301,9 @@ class _LogisticsBridgePanelState extends State<LogisticsBridgePanel>
                     final centerY = constraints.maxHeight / 2;
                     final trackAConnected = _isTrackConnected(0);
                     final trackBConnected = _isTrackConnected(1);
+                    // 计算轨道状态：0=未连接, 1=正常, 2=堵塞
+                    final trackAState = !trackAConnected ? 0 : (_isTrackBlocked(0) ? 2 : 1);
+                    final trackBState = !trackBConnected ? 0 : (_isTrackBlocked(1) ? 2 : 1);
 
                     return Stack(
                       clipBehavior: Clip.none,
@@ -274,9 +316,9 @@ class _LogisticsBridgePanelState extends State<LogisticsBridgePanel>
                               size: Size(constraints.maxWidth, constraints.maxHeight),
                               painter: _BridgeTrackPainter(
                                 trackType: _BridgeTrackType.b,
-                                isActive: trackBConnected,
+                                state: trackBState,
                                 animationValue:
-                                    trackBConnected ? _arrowController.value : 0,
+                                    (trackBState == 1) ? _arrowController.value : 0,
                                 trackLength: _trackLength,
                                 trackWidth: _trackWidth,
                               ),
@@ -293,9 +335,9 @@ class _LogisticsBridgePanelState extends State<LogisticsBridgePanel>
                               size: Size(constraints.maxWidth, constraints.maxHeight),
                               painter: _BridgeTrackPainter(
                                 trackType: _BridgeTrackType.a,
-                                isActive: trackAConnected,
+                                state: trackAState,
                                 animationValue:
-                                    trackAConnected ? _arrowController.value : 0,
+                                    (trackAState == 1) ? _arrowController.value : 0,
                                 trackLength: _trackLength,
                                 trackWidth: _trackWidth,
                               ),
@@ -598,7 +640,8 @@ class _BridgeTrackPainter extends CustomPainter {
   final double trackLength;
   final double trackWidth;
   final _BridgeTrackType trackType;
-  final bool isActive;
+  // 轨道状态：0=未连接(灰), 1=正常(橙金流动), 2=堵塞(红静止)
+  final int state;
 
   static const double _depthHeight = 10.0;
   static const double _fadeRatio = 0.35;
@@ -608,7 +651,7 @@ class _BridgeTrackPainter extends CustomPainter {
     required this.trackLength,
     required this.trackWidth,
     required this.trackType,
-    this.isActive = true,
+    this.state = 0,
   });
 
   // 等轴测投影映射函数
@@ -634,6 +677,10 @@ class _BridgeTrackPainter extends CustomPainter {
   void _drawTrackA(Canvas canvas, Offset center) {
     final halfLen = trackLength / 2;
     final halfWidth = trackWidth / 2;
+    final isActive = state > 0;
+    final isBlocked = state == 2;
+    // 未连接或堵塞时使用固定值，箭头可见但静止
+    final effectiveAnimValue = (isActive && !isBlocked) ? animationValue : 0.0;
 
     // 1. 顶面顶点 (z = 0)
     final p1 = _project(-halfLen, -halfWidth, 0, center);
@@ -659,28 +706,37 @@ class _BridgeTrackPainter extends CustomPainter {
       ..lineTo(p4Depth.dx, p4Depth.dy)
       ..close();
 
-    // 3. 顶面渐变着色器 (方向为 60°，以使渐变边缘与 150° 的端点完全平行)
+    // 3. 顶面渐变着色器 — 根据状态选色
     const cos30 = 0.86602540378;
     final double gradDist = halfLen * cos30;
     final gradStart = center + Offset(-gradDist * 0.5, -gradDist * cos30);
     final gradEnd = center + Offset(gradDist * 0.5, gradDist * cos30);
 
+    final topColors = isBlocked
+        ? const [
+            Color(0x00CC2222),
+            Color(0xAAFF3333),
+            Color(0xAAFF3333),
+            Color(0x00CC2222),
+          ]
+        : isActive
+            ? const [
+                Color(0x00E88A11),
+                Color(0xAAFFB82B),
+                Color(0xAAFFB82B),
+                Color(0x00E88A11),
+              ]
+            : const [
+                Color(0x00444444),
+                Color(0xAA666666),
+                Color(0xAA666666),
+                Color(0x00444444),
+              ];
+
     final topGradient = ui.Gradient.linear(
       gradStart,
       gradEnd,
-      isActive
-          ? const [
-              Color(0x00E88A11),
-              Color(0xAAFFB82B),
-              Color(0xAAFFB82B),
-              Color(0x00E88A11),
-            ]
-          : const [
-              Color(0x00444444),
-              Color(0xAA666666),
-              Color(0xAA666666),
-              Color(0x00444444),
-            ],
+      topColors,
       const [0.0, _fadeRatio, 1.0 - _fadeRatio, 1.0],
     );
 
@@ -688,23 +744,32 @@ class _BridgeTrackPainter extends CustomPainter {
       ..shader = topGradient
       ..style = PaintingStyle.fill;
 
-    // 4. 前方面板渐变着色器
+    // 4. 前方面板渐变着色器 — 根据状态选色
+    final frontColors = isBlocked
+        ? const [
+            Color(0x00661111),
+            Color(0xCC992222),
+            Color(0xCC992222),
+            Color(0x00661111),
+          ]
+        : isActive
+            ? const [
+                Color(0x006E4E1A),
+                Color(0xCC8D6E32),
+                Color(0xCC8D6E32),
+                Color(0x006E4E1A),
+              ]
+            : const [
+                Color(0x00333333),
+                Color(0xCC555555),
+                Color(0xCC555555),
+                Color(0x00333333),
+              ];
+
     final frontGradient = ui.Gradient.linear(
       gradStart,
       gradEnd,
-      isActive
-          ? const [
-              Color(0x006E4E1A),
-              Color(0xCC8D6E32),
-              Color(0xCC8D6E32),
-              Color(0x006E4E1A),
-            ]
-          : const [
-              Color(0x00333333),
-              Color(0xCC555555),
-              Color(0xCC555555),
-              Color(0x00333333),
-            ],
+      frontColors,
       const [0.0, _fadeRatio, 1.0 - _fadeRatio, 1.0],
     );
 
@@ -716,23 +781,32 @@ class _BridgeTrackPainter extends CustomPainter {
     canvas.drawPath(frontPath, frontPaint);
     canvas.drawPath(topPath, trackPaint);
 
-    // 5. 边框线条 (同步渐变过渡)
+    // 5. 边框线条 (同步渐变过渡) — 根据状态选色
+    final borderColors = isBlocked
+        ? const [
+            Color(0x00EE3333),
+            Color(0xDDFF5555),
+            Color(0xDDFF5555),
+            Color(0x00EE3333),
+          ]
+        : isActive
+            ? const [
+                Color(0x00FFBB33),
+                Color(0xDDFFD266),
+                Color(0xDDFFD266),
+                Color(0x00FFBB33),
+              ]
+            : const [
+                Color(0x00444444),
+                Color(0xDD777777),
+                Color(0xDD777777),
+                Color(0x00444444),
+              ];
+
     final borderGradient = ui.Gradient.linear(
       gradStart,
       gradEnd,
-      isActive
-          ? const [
-              Color(0x00FFBB33),
-              Color(0xDDFFD266),
-              Color(0xDDFFD266),
-              Color(0x00FFBB33),
-            ]
-          : const [
-              Color(0x00444444),
-              Color(0xDD777777),
-              Color(0xDD777777),
-              Color(0x00444444),
-            ],
+      borderColors,
       const [0.0, _fadeRatio, 1.0 - _fadeRatio, 1.0],
     );
 
@@ -750,7 +824,7 @@ class _BridgeTrackPainter extends CustomPainter {
     canvas.clipPath(topPath);
 
     for (int a = 0; a < 3; a++) {
-      final t = (animationValue + a / 3.0) % 1.0;
+      final t = (effectiveAnimValue + a / 3.0) % 1.0;
       final arrowX = -halfLen + t * trackLength;
 
       final edgeFadeLen = trackLength * _fadeRatio;
@@ -762,9 +836,14 @@ class _BridgeTrackPainter extends CustomPainter {
         opacity = ((trackLength - distFromStart) / edgeFadeLen) * 0.9;
       }
 
+      // 箭头颜色：正常=白, 堵塞=红, 未连接=灰
+      final arrowBaseColor = isBlocked
+          ? const Color(0xFFFF5555)
+          : isActive
+              ? Colors.white
+              : const Color(0xFF999999);
       final arrowPaint = Paint()
-        ..color = (isActive ? Colors.white : const Color(0xFF999999))
-            .withValues(alpha: opacity.clamp(0.0, 1.0))
+        ..color = arrowBaseColor.withValues(alpha: opacity.clamp(0.0, 1.0))
         ..style = PaintingStyle.fill;
 
       // 3D 三角形顶点 (沿 x 轴方向流动)
@@ -787,6 +866,10 @@ class _BridgeTrackPainter extends CustomPainter {
   void _drawTrackB(Canvas canvas, Offset center) {
     final halfLen = trackLength / 2;
     final halfWidth = trackWidth / 2;
+    final isActive = state > 0;
+    final isBlocked = state == 2;
+    // 未连接或堵塞时使用固定值，箭头可见但静止
+    final effectiveAnimValue = (isActive && !isBlocked) ? animationValue : 0.0;
 
     // 1. 顶面顶点 (z = 0)
     final p1 = _project(-halfWidth, -halfLen, 0, center);
@@ -812,28 +895,37 @@ class _BridgeTrackPainter extends CustomPainter {
       ..lineTo(p2Depth.dx, p2Depth.dy)
       ..close();
 
-    // 3. 顶面渐变着色器 (方向为 120°，以使渐变与 30° 的端点完全平行)
+    // 3. 顶面渐变着色器 (方向为 120°，以使渐变与 30° 的端点完全平行) — 根据状态选色
     const cos30 = 0.86602540378;
     final double gradDist = halfLen * cos30;
     final gradStart = center + Offset(gradDist * 0.5, -gradDist * cos30);
     final gradEnd = center + Offset(-gradDist * 0.5, gradDist * cos30);
 
+    final topColorsB = isBlocked
+        ? const [
+            Color(0x00CC2222),
+            Color(0xAAFF3333),
+            Color(0xAAFF3333),
+            Color(0x00CC2222),
+          ]
+        : isActive
+            ? const [
+                Color(0x00E88A11),
+                Color(0xAAFFB82B),
+                Color(0xAAFFB82B),
+                Color(0x00E88A11),
+              ]
+            : const [
+                Color(0x00444444),
+                Color(0xAA666666),
+                Color(0xAA666666),
+                Color(0x00444444),
+              ];
+
     final topGradient = ui.Gradient.linear(
       gradStart,
       gradEnd,
-      isActive
-          ? const [
-              Color(0x00E88A11),
-              Color(0xAAFFB82B),
-              Color(0xAAFFB82B),
-              Color(0x00E88A11),
-            ]
-          : const [
-              Color(0x00444444),
-              Color(0xAA666666),
-              Color(0xAA666666),
-              Color(0x00444444),
-            ],
+      topColorsB,
       const [0.0, _fadeRatio, 1.0 - _fadeRatio, 1.0],
     );
 
@@ -841,23 +933,32 @@ class _BridgeTrackPainter extends CustomPainter {
       ..shader = topGradient
       ..style = PaintingStyle.fill;
 
-    // 4. 前方面板渐变着色器
+    // 4. 前方面板渐变着色器 — 根据状态选色
+    final frontColors = isBlocked
+        ? const [
+            Color(0x00661111),
+            Color(0xCC992222),
+            Color(0xCC992222),
+            Color(0x00661111),
+          ]
+        : isActive
+            ? const [
+                Color(0x006E4E1A),
+                Color(0xCC8D6E32),
+                Color(0xCC8D6E32),
+                Color(0x006E4E1A),
+              ]
+            : const [
+                Color(0x00333333),
+                Color(0xCC555555),
+                Color(0xCC555555),
+                Color(0x00333333),
+              ];
+
     final frontGradient = ui.Gradient.linear(
       gradStart,
       gradEnd,
-      isActive
-          ? const [
-              Color(0x006E4E1A),
-              Color(0xCC8D6E32),
-              Color(0xCC8D6E32),
-              Color(0x006E4E1A),
-            ]
-          : const [
-              Color(0x00333333),
-              Color(0xCC555555),
-              Color(0xCC555555),
-              Color(0x00333333),
-            ],
+      frontColors,
       const [0.0, _fadeRatio, 1.0 - _fadeRatio, 1.0],
     );
 
@@ -869,23 +970,32 @@ class _BridgeTrackPainter extends CustomPainter {
     canvas.drawPath(frontPath, frontPaint);
     canvas.drawPath(topPath, trackPaint);
 
-    // 5. 边框线条 (同步渐变过渡)
+    // 5. 边框线条 (同步渐变过渡) — 根据状态选色
+    final borderColors = isBlocked
+        ? const [
+            Color(0x00EE3333),
+            Color(0xDDFF5555),
+            Color(0xDDFF5555),
+            Color(0x00EE3333),
+          ]
+        : isActive
+            ? const [
+                Color(0x00FFBB33),
+                Color(0xDDFFD266),
+                Color(0xDDFFD266),
+                Color(0x00FFBB33),
+              ]
+            : const [
+                Color(0x00444444),
+                Color(0xDD777777),
+                Color(0xDD777777),
+                Color(0x00444444),
+              ];
+
     final borderGradient = ui.Gradient.linear(
       gradStart,
       gradEnd,
-      isActive
-          ? const [
-              Color(0x00FFBB33),
-              Color(0xDDFFD266),
-              Color(0xDDFFD266),
-              Color(0x00FFBB33),
-            ]
-          : const [
-              Color(0x00444444),
-              Color(0xDD777777),
-              Color(0xDD777777),
-              Color(0x00444444),
-            ],
+      borderColors,
       const [0.0, _fadeRatio, 1.0 - _fadeRatio, 1.0],
     );
 
@@ -903,7 +1013,7 @@ class _BridgeTrackPainter extends CustomPainter {
     canvas.clipPath(topPath);
 
     for (int a = 0; a < 3; a++) {
-      final t = (animationValue + a / 3.0) % 1.0;
+      final t = (effectiveAnimValue + a / 3.0) % 1.0;
       final arrowY = -halfLen + t * trackLength;
 
       final edgeFadeLen = trackLength * _fadeRatio;
@@ -915,9 +1025,14 @@ class _BridgeTrackPainter extends CustomPainter {
         opacity = ((trackLength - distFromStart) / edgeFadeLen) * 0.9;
       }
 
+      // 箭头颜色：正常=白, 堵塞=红, 未连接=灰
+      final arrowBaseColor = isBlocked
+          ? const Color(0xFFFF5555)
+          : isActive
+              ? Colors.white
+              : const Color(0xFF999999);
       final arrowPaint = Paint()
-        ..color = (isActive ? Colors.white : const Color(0xFF999999))
-            .withValues(alpha: opacity.clamp(0.0, 1.0))
+        ..color = arrowBaseColor.withValues(alpha: opacity.clamp(0.0, 1.0))
         ..style = PaintingStyle.fill;
 
       // 3D 三角形顶点 (沿 y 轴方向流动)
@@ -940,7 +1055,7 @@ class _BridgeTrackPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _BridgeTrackPainter oldDelegate) {
     return oldDelegate.animationValue != animationValue ||
-        oldDelegate.isActive != isActive ||
+        oldDelegate.state != state ||
         oldDelegate.trackType != trackType;
   }
 }

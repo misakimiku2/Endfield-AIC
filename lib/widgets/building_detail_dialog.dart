@@ -12,6 +12,7 @@ import 'building_resource_panel.dart';
 import 'building_depot_panel.dart';
 import 'building_synthesis_panel.dart';
 import 'building_logistics_bridge_panel.dart';
+import 'building_splitter_panel.dart';
 
 class BuildingDetailDialog extends StatefulWidget {
   final PlacedBuilding placedBuilding;
@@ -104,8 +105,13 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog>
   bool get _isLogisticsBridge =>
       widget.placedBuilding.building.id == 'belt_bridge_1x1';
 
-  bool get _isSynthesisBuilding =>
-      !_isDepotUnloader && !_isDepotLoader && !_isLogisticsBridge;
+  bool get _isSplitter =>
+      widget.placedBuilding.building.id == 'splitter_1x1';
+
+  bool get _isSynthesisBuilding => !_isDepotUnloader &&
+      !_isDepotLoader &&
+      !_isLogisticsBridge &&
+      !_isSplitter;
 
   void _toggleDepotAddMode() {
     setState(() {
@@ -173,8 +179,8 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog>
     if (logoPath.isEmpty) return;
     try {
       var raw = await rootBundle.loadString(logoPath);
-      // 物流桥的SVG包含实心BG背景元素，需要移除
-      if (_isLogisticsBridge) {
+      // 物流桥和分流器的SVG包含实心BG背景元素，需要移除
+      if (_isLogisticsBridge || _isSplitter) {
         raw = raw.replaceAll(
           RegExp(r'<rect[^>]*inkscape:label="BG"[^>]*/>'),
           '',
@@ -254,7 +260,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog>
                   children: [
                     _buildWindowInfoBar(),
                     _buildSeparator(),
-                    if (!_isLogisticsBridge)
+                    if (!_isLogisticsBridge && !_isSplitter)
                       Align(
                         alignment: Alignment.centerLeft,
                         child: Padding(
@@ -268,7 +274,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog>
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            if (!_isLogisticsBridge) ...[
+                            if (!_isLogisticsBridge && !_isSplitter) ...[
                               _buildResourcePanel(),
                               const SizedBox(width: 20),
                             ],
@@ -302,7 +308,15 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog>
                                               onMove: widget.onMove,
                                               onDelete: widget.onDelete,
                                             )
-                                          : DefaultSynthesisPanel(
+                                          : _isSplitter
+                                              ? SplitterPanel(
+                                                  placedBuilding: widget.placedBuilding,
+                                                  dataLoader: widget.dataLoader,
+                                                  conveyors: widget.conveyors,
+                                                  onMove: widget.onMove,
+                                                  onDelete: widget.onDelete,
+                                                )
+                                              : DefaultSynthesisPanel(
                                               placedBuilding: widget.placedBuilding,
                                               dataLoader: widget.dataLoader,
                                               conveyors: widget.conveyors,
@@ -351,7 +365,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog>
               ),
             ),
           ),
-          if (!_isLogisticsBridge && !_isDepotLoader && !_isDepotUnloader) ...[
+          if (!_isLogisticsBridge && !_isDepotLoader && !_isDepotUnloader && !_isSplitter) ...[
             _buildSeparatorVertical(),
             Align(
               alignment: Alignment.bottomCenter,
