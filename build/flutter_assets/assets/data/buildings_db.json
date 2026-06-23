@@ -130,12 +130,12 @@
       "logo_asset": "assets/svg/Converger.svg",
       "ports": {
         "inputs": [
-          {"relative_x": 0.5, "relative_y": 1.0, "direction": "down", "port_type": "solid"},
           {"relative_x": 0.0, "relative_y": 0.5, "direction": "left", "port_type": "solid"},
+          {"relative_x": 0.5, "relative_y": 0.0, "direction": "up", "port_type": "solid"},
           {"relative_x": 1.0, "relative_y": 0.5, "direction": "right", "port_type": "solid"}
         ],
         "outputs": [
-          {"relative_x": 0.5, "relative_y": 0.0, "direction": "up", "port_type": "solid"}
+          {"relative_x": 0.5, "relative_y": 1.0, "direction": "down", "port_type": "solid"}
         ]
       }
     },

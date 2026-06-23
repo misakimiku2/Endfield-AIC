@@ -15,15 +15,15 @@ class ConvergerConfig {
 
   static const List<PortDefinition> inputPorts = [
     PortDefinition(
-      relativeX: 0.5,
-      relativeY: 1.0,
-      direction: 'down',
-      portType: 'solid',
-    ),
-    PortDefinition(
       relativeX: 0.0,
       relativeY: 0.5,
       direction: 'left',
+      portType: 'solid',
+    ),
+    PortDefinition(
+      relativeX: 0.5,
+      relativeY: 0.0,
+      direction: 'up',
       portType: 'solid',
     ),
     PortDefinition(
@@ -37,8 +37,8 @@ class ConvergerConfig {
   static const List<PortDefinition> outputPorts = [
     PortDefinition(
       relativeX: 0.5,
-      relativeY: 0.0,
-      direction: 'up',
+      relativeY: 1.0,
+      direction: 'down',
       portType: 'solid',
     ),
   ];

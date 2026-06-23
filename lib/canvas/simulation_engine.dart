@@ -101,7 +101,7 @@ class SimulationEngine extends ChangeNotifier {
       final pb = _project!.buildings.where((b) => b.id == br.id).firstOrNull;
       if (pb != null) {
         // 物流设备状态由 canvas_editor 主线程管理，跳过 Isolate 覆盖
-        if (pb.isBeltBridge || pb.isSplitter) continue;
+        if (pb.isBeltBridge || pb.isSplitter || pb.isConverger) continue;
 
         pb.isBlocked = br.isBlocked;
         pb.productionProgress = br.productionProgress;

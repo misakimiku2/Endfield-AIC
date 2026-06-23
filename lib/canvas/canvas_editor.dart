@@ -1,22 +1,17 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import '../models/building.dart';
-import '../models/recipe.dart';
 import '../models/project.dart';
 import '../data/data_loader.dart';
-import '../AIC/Production I/refining_unit.dart';
-import '../AIC/Depot Access/depot_access.dart';
-import '../AIC/Logistics Units/logistics_unit_renderer.dart';
-import 'grid_painter.dart';
-import 'building_renderer.dart';
+import '../AIC/equipment.dart';
 import 'conveyor_create_mode_hud.dart';
-import '../AIC/Logistics Units/transport_belt.dart';
-import '../AIC/Logistics Units/transport_belt_renderer.dart';
+import 'canvas_painter.dart';
+import 'canvas_utils.dart';
 import '../widgets/conveyor_belt_dialog.dart';
+import 'belt_simulation_logic.dart';
 
 class CanvasEditor extends StatefulWidget {
   final DataLoader dataLoader;
@@ -44,70 +39,13 @@ class CanvasEditor extends StatefulWidget {
   State<CanvasEditor> createState() => CanvasEditorState();
 }
 
-bool _isBeltBridgeBuilding(Building building) {
-  return building.id == LogisticsUnitRenderer.beltBridgeId;
-}
-
-String _gridCellKey(Offset cell) {
-  return '${cell.dx.round()}_${cell.dy.round()}';
-}
-
-Offset _normalizedGridCell(Offset cell) {
-  return Offset(cell.dx.roundToDouble(), cell.dy.roundToDouble());
-}
-
-String? _directionBetweenGridCells(Offset from, Offset to) {
-  final dx = to.dx.round() - from.dx.round();
-  final dy = to.dy.round() - from.dy.round();
-  if (dx == 1 && dy == 0) return 'right';
-  if (dx == -1 && dy == 0) return 'left';
-  if (dx == 0 && dy == 1) return 'down';
-  if (dx == 0 && dy == -1) return 'up';
-  return null;
-}
-
-bool _isStraightBeltCell(ConveyorBelt belt, int cellIndex) {
-  if (cellIndex < 0 || cellIndex >= belt.path.length) return false;
-  if (belt.path.length == 1) {
-    return belt.incomingDirection == null ||
-        belt.forcedDirection == null ||
-        belt.incomingDirection == belt.forcedDirection;
-  }
-  if (cellIndex == 0) {
-    final outgoing = _directionBetweenGridCells(belt.path[0], belt.path[1]);
-    return belt.incomingDirection == null ||
-        outgoing == null ||
-        belt.incomingDirection == outgoing;
-  }
-  if (cellIndex == belt.path.length - 1) return true;
-
-  final previous = belt.path[cellIndex - 1];
-  final current = belt.path[cellIndex];
-  final next = belt.path[cellIndex + 1];
-  final incomingDx = current.dx.round() - previous.dx.round();
-  final incomingDy = current.dy.round() - previous.dy.round();
-  final outgoingDx = next.dx.round() - current.dx.round();
-  final outgoingDy = next.dy.round() - current.dy.round();
-
-  return incomingDx == outgoingDx && incomingDy == outgoingDy;
-}
-
-bool _canBuildingOverlapBeltCell(
-  Building building,
-  ConveyorBelt belt,
-  int cellIndex,
-) {
-  return _isBeltBridgeBuilding(building) &&
-      _isStraightBeltCell(belt, cellIndex);
-}
-
 class CanvasEditorState extends State<CanvasEditor>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, BeltSimulationLogic {
   Offset? _lastFocalPoint;
   bool _isPanning = false;
   Offset? _mouseGridPos;
 
-  late final TransportBeltController _beltCtrl;
+  late final TransportBeltController beltCtrl;
 
   int? _middleDragPointerId;
   Offset? _lastMiddlePos;
@@ -124,12 +62,11 @@ class CanvasEditorState extends State<CanvasEditor>
   double _targetOffsetY = 0;
   bool _animating = false;
   double _gestureStartScale = 1.0;
-  double _prevGlobalProgress = 0.0;
 
   double _displayAngle = 0.0; // 当前显示角度（弧度）
   double _targetAngle = 0.0; // 目标角度（弧度）
 
-  static const double _cellSize = 48.0;
+  static const double cellSize = 48.0;
   static const double _minScale = 0.25;
   static const double _maxScale = 5.0;
 
@@ -159,23 +96,16 @@ class CanvasEditorState extends State<CanvasEditor>
   // 移动模式下：端口传送带快照（用于取消移动时恢复）
 
   // 端口连接缓存：building id -> port key -> 是否连接
-  Map<String, Map<String, bool>> _portConnectionsCache = {};
+  Map<String, Map<String, bool>> portConnectionsCache = {};
 
   // 记录最近一次 onPointerDown 是否为左键
   bool _lastPointerWasPrimary = false;
-
-  // 跟踪每个传送带的上一帧 itemId，用于检测 itemId 变化
-  final Map<String, String> _prevBeltItemIds = {};
-  final Map<String, String> _prevBeltLastItemIds = {};
-
-  // 传送带填充时钟：用于在 addListener 中检测 arrowProgress 跨零
-  final Map<String, double> _prevBeltProgressForTick = {};
 
   // 重绘触发计数器，确保图片缓存清理后，即使其他属性不变，也能正常强制触发 CustomPainter 完成重绘
   int _repaintTrigger = 0;
 
   void _forceRepaint() {
-    _EditorPainter.clearPictureCache();
+    EditorPainter.clearPictureCache();
     _repaintTrigger++;
     if (mounted) {
       setState(() {});
@@ -186,11 +116,11 @@ class CanvasEditorState extends State<CanvasEditor>
 
   /// 重新计算所有端口连接关系（仅在数据变更时调用）
   void _rebuildPortConnectionsCache() {
-    _portConnectionsCache = {};
+    portConnectionsCache = {};
     for (final pb in _project.buildings) {
-      _portConnectionsCache[pb.id] = pb.conveyorPortConnections(
+      portConnectionsCache[pb.id] = pb.conveyorPortConnections(
         _project.conveyors,
-        cellSize: _cellSize,
+        cellSize: cellSize,
       );
     }
   }
@@ -205,7 +135,7 @@ class CanvasEditorState extends State<CanvasEditor>
     _targetOffsetX = _project.offsetX;
     _targetOffsetY = _project.offsetY;
     _ticker = createTicker(_onTick);
-    _beltCtrl = TransportBeltController(
+    beltCtrl = TransportBeltController(
       project: _project,
       onProjectChanged: widget.onProjectChanged,
       onRebuildCache: _rebuildPortConnectionsCache,
@@ -219,7 +149,7 @@ class CanvasEditorState extends State<CanvasEditor>
     )..repeat();
     // 监听 animation value 变化，检测跨零（完成一格传输）来触发传送带填充时钟滴答
     _beltArrowController.addListener(() {
-      _onBeltAnimationFrame(_beltArrowController.value);
+      onBeltAnimationFrame(_beltArrowController.value);
       // 跨零检测：从 >0.5 跳到 <0.5（即从 ~1.0 重置到 ~0.0）
     });
     _rebuildPortConnectionsCache();
@@ -262,11 +192,11 @@ class CanvasEditorState extends State<CanvasEditor>
     if (widget.conveyorMode != oldWidget.conveyorMode) {
       _forceRepaint();
       if (oldWidget.conveyorMode && !widget.conveyorMode) {
-        _beltCtrl.reset();
+        beltCtrl.reset();
       }
     }
     if (!identical(widget.project, oldWidget.project)) {
-      _beltCtrl.project = widget.project;
+      beltCtrl.project = widget.project;
     }
   }
 
@@ -323,624 +253,6 @@ class CanvasEditorState extends State<CanvasEditor>
     }
 
     setState(() {});
-  }
-
-  /// 传送带物品填充时钟滴答：每次 arrowProgress 跨零时触发
-  /// 驱动所有传送带的 itemFillCount / itemDrainCount 增减
-  // ignore: unused_element
-  void _onBeltTick() {
-    final buildings = _project.buildings;
-
-    var inventoryChanged = false;
-    for (final belt in _project.conveyors) {
-      if (belt.isBlocked) continue;
-      if (belt.path.isEmpty) continue;
-
-      // 检测是否是断头传送带（终点未连接设备输入端口）
-      final isDeadEnd =
-          !TransportBeltRenderer.isInputPort(belt.path.last, buildings);
-      final inputBuilding =
-          isDeadEnd ? null : _findInputBuildingAtCell(belt.path.last);
-      final pendingOutputItemId =
-          inputBuilding == null ? null : belt.downstreamItemId();
-      final inputBlocked = inputBuilding != null &&
-          pendingOutputItemId != null &&
-          !_canBeltOutputEnterBuilding(
-            belt,
-            inputBuilding,
-            pendingOutputItemId,
-          );
-      final terminalLimit = inputBlocked ? belt.path.length - 1 : null;
-      final sourceItemId = _getAvailableOutputItemIdForBeltStart(belt);
-      final isProducing = sourceItemId != null && sourceItemId.isNotEmpty;
-
-      belt.ensureItemSegmentsFromLegacy();
-      if (isProducing) {
-        final pushed =
-            belt.pushSourceItem(sourceItemId, terminalLimit: terminalLimit);
-        if (pushed) {
-          inventoryChanged =
-              _consumeOutputItemForBeltStart(belt, sourceItemId) ||
-                  inventoryChanged;
-        }
-      }
-      belt.advanceItemSegments(
-        isDeadEnd: isDeadEnd || inputBuilding != null || inputBlocked,
-        activeSourceItemId: isProducing ? sourceItemId : null,
-        terminalLimit: terminalLimit,
-      );
-      if (inputBuilding != null) {
-        inventoryChanged = _transferBeltOutputToBuilding(belt, inputBuilding) ||
-            inventoryChanged;
-        _freezeReadyOutputSegments(
-          belt,
-          limit: terminalLimit ?? belt.path.length,
-        );
-      }
-      _prevBeltItemIds[belt.id] = belt.itemId;
-      _prevBeltLastItemIds[belt.id] = belt.lastItemId;
-    }
-    // 确保重绘（当从 AnimationController listener 触发时，ticker 可能已暂停）
-    if (mounted) {
-      if (inventoryChanged) {
-        widget.onProjectChanged(_project);
-      }
-      setState(() {});
-    }
-  }
-
-  void _onBeltAnimationFrame(double globalProgress) {
-    // 计算本帧 globalProgress 增量（处理 0→1 循环回绕）
-    double progressDelta = globalProgress - _prevGlobalProgress;
-    if (progressDelta < 0) progressDelta += 1.0;
-    _prevGlobalProgress = globalProgress;
-
-    final activeIds = _project.conveyors.map((belt) => belt.id).toSet();
-    _prevBeltProgressForTick.removeWhere((id, _) => !activeIds.contains(id));
-
-    final buildings = _project.buildings;
-    var inventoryChanged = false;
-    var ticked = false;
-
-    for (final belt in _project.conveyors) {
-      final progress = belt.animationProgress(globalProgress);
-      final previous = _prevBeltProgressForTick[belt.id] ?? progress;
-      if (previous > 0.5 && progress < 0.5) {
-        ticked = true;
-        inventoryChanged =
-            _tickSingleBeltOnce(belt, buildings) || inventoryChanged;
-      }
-      _prevBeltProgressForTick[belt.id] = progress;
-    }
-
-    if (!mounted || !ticked) return;
-    if (inventoryChanged) {
-      widget.onProjectChanged(_project);
-    }
-    setState(() {});
-  }
-
-  bool _tickSingleBeltOnce(
-    ConveyorBelt belt,
-    List<PlacedBuilding> buildings,
-  ) {
-    if (belt.isBlocked) return false;
-    if (belt.path.isEmpty) return false;
-
-    final isDeadEnd =
-        !TransportBeltRenderer.isInputPort(belt.path.last, buildings);
-    final inputBuilding =
-        isDeadEnd ? null : _findInputBuildingAtCell(belt.path.last);
-    final pendingOutputItemId =
-        inputBuilding == null ? null : belt.downstreamItemId();
-    final inputBlocked = inputBuilding != null &&
-        pendingOutputItemId != null &&
-        !_canBeltOutputEnterBuilding(
-          belt,
-          inputBuilding,
-          pendingOutputItemId,
-        );
-    final terminalLimit = inputBlocked ? belt.path.length - 1 : null;
-    final sourceItemId = _getAvailableOutputItemIdForBeltStart(belt);
-    final isProducing = sourceItemId != null && sourceItemId.isNotEmpty;
-
-    // 推送式：如果源是分流器且位置 0 有物品，标记为 activeSourceItemId
-    // 以便 advanceItemSegments 识别该段为「一次性推送」（非连续生产）。
-    // 不再依赖 _splitterHasIncomingItem —— 一次性推送的物品应当自行沿
-    // 传送带前进并最终离开，无需输入带仍有物品来「保持」。
-    String? activeSourceItemId = isProducing ? sourceItemId : null;
-    if (!isProducing && belt.itemSegments.isNotEmpty) {
-      final firstSegment = belt.itemSegments.first;
-      if (firstSegment.drainCount == 0) {
-        if (firstSegment.skipAdvanceOnce) {
-          // 分流器推送后首次 tick：跳过推进，让物品在 position 0
-          // （建筑遮挡格）停留一个 tick 周期，避免瞬移
-          firstSegment.skipAdvanceOnce = false;
-        } else {
-          final sourceBuilding = _findOutputBuildingAtCell(belt.path.first);
-          if (sourceBuilding != null && sourceBuilding.isSplitter) {
-            activeSourceItemId = firstSegment.itemId;
-          }
-        }
-      }
-    }
-
-    var inventoryChanged = false;
-    var sourceExtendedThisTick = false;
-    belt.ensureItemSegmentsFromLegacy();
-    if (isProducing) {
-      final pushed =
-          belt.pushSourceItem(sourceItemId, terminalLimit: terminalLimit);
-      if (pushed) {
-        sourceExtendedThisTick = true;
-        inventoryChanged = _consumeOutputItemForBeltStart(belt, sourceItemId) ||
-            inventoryChanged;
-      }
-    }
-    belt.advanceItemSegments(
-      isDeadEnd: isDeadEnd || inputBuilding != null || inputBlocked,
-      activeSourceItemId: activeSourceItemId,
-      terminalLimit: terminalLimit,
-      sourceExtendedThisTick: sourceExtendedThisTick,
-    );
-    if (inputBuilding != null) {
-      inventoryChanged = _transferBeltOutputToBuilding(belt, inputBuilding) ||
-          inventoryChanged;
-      _freezeReadyOutputSegments(
-        belt,
-        limit: terminalLimit ?? belt.path.length,
-      );
-    } else if (isDeadEnd) {
-      // 死胡同传送带：物品到达各自极限后在实际传送带上设置冻结，
-      // 确保创建过程中（hidesTerminalCell）裁剪副本能继承冻结状态，
-      // 避免物品在末端反复跳转。
-      belt.freezeDeadEndSegments();
-    }
-    _prevBeltItemIds[belt.id] = belt.itemId;
-    _prevBeltLastItemIds[belt.id] = belt.lastItemId;
-    return inventoryChanged;
-  }
-
-  bool _canBeltOutputEnterBuilding(
-    ConveyorBelt belt,
-    PlacedBuilding building,
-    String itemId,
-  ) {
-    if (building.isBeltBridge) {
-      final outputDirection = _beltArrivalDirection(belt);
-      return outputDirection != null &&
-          building.canAcceptBridgeInputItem(itemId, outputDirection);
-    }
-    // 分流器：纯推送式，无内部缓冲。
-    // 仅当至少有一条输出传送带可实际接收物品时才允许进入，
-    // 否则直接阻塞输入端（物品在传送带上排队等待）。
-    if (building.isSplitter) {
-      final connectedDirs = _getConnectedSplitterOutputDirections(building);
-      if (connectedDirs.isEmpty) return false;
-      for (final dir in connectedDirs) {
-        final outputBelt = _getBeltForSplitterOutputDirection(building, dir);
-        if (outputBelt != null && _canSplitterOutputBeltAcceptItem(outputBelt, itemId)) {
-          return true;
-        }
-      }
-      return false;
-    }
-    // 仓库存货口始终可以接收物品（直接进入全局仓库库存）
-    if (building.building.id == DepotLoaderConfig.id) return true;
-    return building.canAcceptInputItem(itemId);
-  }
-
-  String? _beltExitDirection(ConveyorBelt belt) {
-    if (belt.path.length >= 2) {
-      return _directionBetween(belt.path.first, belt.path[1]);
-    }
-    return belt.forcedDirection;
-  }
-
-  /// 获取分流器已连接的输出传送带方向列表
-  /// 通过查找所有起点在分流器格子上的传送带的出口方向来确定
-  List<String> _getConnectedSplitterOutputDirections(PlacedBuilding splitter) {
-    final splitterCell =
-        Offset(splitter.gridX.toDouble(), splitter.gridY.toDouble());
-    final directions = <String>[];
-    for (final belt in _project.conveyors) {
-      if (belt.path.isEmpty) continue;
-      final start = belt.path.first;
-      if (start.dx.round() == splitterCell.dx.round() &&
-          start.dy.round() == splitterCell.dy.round()) {
-        final exitDir = _beltExitDirection(belt);
-        if (exitDir != null && !directions.contains(exitDir)) {
-          directions.add(exitDir);
-        }
-      }
-    }
-    return directions;
-  }
-
-  /// 获取分流器指定输出方向上的传送带
-  ConveyorBelt? _getBeltForSplitterOutputDirection(
-      PlacedBuilding splitter, String direction) {
-    final splitterCell =
-        Offset(splitter.gridX.toDouble(), splitter.gridY.toDouble());
-    for (final belt in _project.conveyors) {
-      if (belt.path.isEmpty) continue;
-      final start = belt.path.first;
-      if (start.dx.round() == splitterCell.dx.round() &&
-          start.dy.round() == splitterCell.dy.round()) {
-        final exitDir = _beltExitDirection(belt);
-        if (exitDir == direction) return belt;
-      }
-    }
-    return null;
-  }
-
-  /// 检查分流器输出传送带是否可以接收新物品
-  /// 综合考虑传送带起始端空间和末端阻塞情况
-  bool _canSplitterOutputBeltAcceptItem(ConveyorBelt belt, String itemId) {
-    if (belt.path.isEmpty || itemId.isEmpty) return false;
-
-    belt.ensureItemSegmentsFromLegacy();
-
-    // 计算末端阻塞情况（与 _tickSingleBeltOnce 相同的逻辑）
-    final isDeadEnd =
-        !TransportBeltRenderer.isInputPort(belt.path.last, _project.buildings);
-    final inputBuilding =
-        isDeadEnd ? null : _findInputBuildingAtCell(belt.path.last);
-    final pendingOutputItemId =
-        inputBuilding == null ? null : belt.downstreamItemId();
-    final inputBlocked = inputBuilding != null &&
-        pendingOutputItemId != null &&
-        !_canBeltOutputEnterBuilding(belt, inputBuilding, pendingOutputItemId);
-    final terminalLimit = inputBlocked ? belt.path.length - 1 : null;
-
-    final result = belt.canAcceptNewItemFromStart(itemId, terminalLimit: terminalLimit);
-    return result;
-  }
-
-  /// 查找分流器下一个可用的输出方向（不更新循环索引）
-  /// 按输出传送带创建顺序循环，跳过无传送带和满传送带的方向
-  String? _peekNextAvailableSplitterDirection(
-      PlacedBuilding splitter, String itemId) {
-    final cycleOrder = _getConnectedSplitterOutputDirections(splitter);
-    if (cycleOrder.isEmpty) return null;
-
-    for (int offset = 0; offset < cycleOrder.length; offset++) {
-      final index =
-          (splitter.splitterCycleIndex + offset) % cycleOrder.length;
-      final direction = cycleOrder[index];
-
-      // 查找该方向的输出传送带
-      final belt =
-          _getBeltForSplitterOutputDirection(splitter, direction);
-      if (belt == null) continue;
-
-      // 检查传送带是否可以接收物品
-      if (_canSplitterOutputBeltAcceptItem(belt, itemId)) {
-        return direction;
-      }
-    }
-
-    return null;
-  }
-
-  /// 查找分流器下一个可用的输出方向并更新循环索引
-  String? _findNextAvailableSplitterDirection(
-      PlacedBuilding splitter, String itemId) {
-    final direction = _peekNextAvailableSplitterDirection(splitter, itemId);
-    if (direction == null) return null;
-
-    // 更新循环索引到选定方向之后（按创建顺序）
-    final cycleOrder = _getConnectedSplitterOutputDirections(splitter);
-    final index = cycleOrder.indexOf(direction);
-    if (index >= 0) {
-      splitter.splitterCycleIndex = (index + 1) % cycleOrder.length;
-    }
-    return direction;
-  }
-
-  /// 尝试将分流器缓冲槽位中的物品推送到已变为可用的输出带上
-  void _drainSplitterBuffer(PlacedBuilding splitter) {
-    if (!splitter.splitterBufferOccupied) return;
-    final itemId = splitter.splitterBufferedItemId;
-    if (itemId == null || itemId.isEmpty) return;
-
-    // 检查缓冲物品的目标方向是否已可用
-    final bufferedDir = splitter.splitterBufferedDirection;
-    if (bufferedDir != null) {
-      final belt = _getBeltForSplitterOutputDirection(splitter, bufferedDir);
-      if (belt != null && _canSplitterOutputBeltAcceptItem(belt, itemId)) {
-        final terminalLimit = _calculateBeltTerminalLimit(belt);
-        if (belt.pushSourceItem(itemId, terminalLimit: terminalLimit)) {
-          splitter.consumeFromBuffer();
-          return;
-        }
-      }
-    }
-    // 目标方向仍满：尝试其他连通方向（按创建顺序）
-    final cycleOrder = _getConnectedSplitterOutputDirections(splitter);
-    for (int offset = 0; offset < cycleOrder.length; offset++) {
-      final index =
-          (splitter.splitterCycleIndex + offset) % cycleOrder.length;
-      final direction = cycleOrder[index];
-      final belt = _getBeltForSplitterOutputDirection(splitter, direction);
-      if (belt == null) continue;
-      if (!_canSplitterOutputBeltAcceptItem(belt, itemId)) continue;
-      final terminalLimit = _calculateBeltTerminalLimit(belt);
-      if (belt.pushSourceItem(itemId, terminalLimit: terminalLimit)) {
-        splitter.consumeFromBuffer();
-        // 不更新 cycleIndex：缓冲排出不改变正常的轮询顺序
-        return;
-      }
-    }
-  }
-
-  String? _beltArrivalDirection(ConveyorBelt belt) {
-    if (belt.path.length >= 2) {
-      return _directionBetween(
-        belt.path[belt.path.length - 2],
-        belt.path.last,
-      );
-    }
-    return belt.incomingDirection;
-  }
-
-  String? _directionBetween(Offset from, Offset to) {
-    final dx = to.dx.round() - from.dx.round();
-    final dy = to.dy.round() - from.dy.round();
-    if (dx == 1 && dy == 0) return 'right';
-    if (dx == -1 && dy == 0) return 'left';
-    if (dx == 0 && dy == 1) return 'down';
-    if (dx == 0 && dy == -1) return 'up';
-    return null;
-  }
-
-  PlacedBuilding? _findInputBuildingAtCell(Offset cell) {
-    final gx = cell.dx.round();
-    final gy = cell.dy.round();
-    for (final pb in _project.buildings) {
-      final rot = pb.rotation;
-      final gw = pb.building.gridWidth;
-      final gh = pb.building.gridHeight;
-      for (final port in pb.inputPorts) {
-        final portCell = port.gridPosition(
-          pb.gridX,
-          pb.gridY,
-          gw,
-          gh,
-          rotation: rot,
-        );
-        if (portCell.dx.round() == gx && portCell.dy.round() == gy) {
-          return pb;
-        }
-      }
-    }
-    return null;
-  }
-
-  /// 查找指定格子上的输出端口建筑（用于识别分流器源）
-  PlacedBuilding? _findOutputBuildingAtCell(Offset cell) {
-    final gx = cell.dx.round();
-    final gy = cell.dy.round();
-    for (final pb in _project.buildings) {
-      final rot = pb.rotation;
-      final gw = pb.building.gridWidth;
-      final gh = pb.building.gridHeight;
-      for (final port in pb.outputPorts) {
-        final portCell = port.gridPosition(
-          pb.gridX,
-          pb.gridY,
-          gw,
-          gh,
-          rotation: rot,
-        );
-        if (portCell.dx.round() == gx && portCell.dy.round() == gy) {
-          return pb;
-        }
-      }
-    }
-    return null;
-  }
-
-  /// 计算传送带的末端阻塞限制
-  /// 用于分流器推送时确定输出带可接收物品的位置上限
-  int? _calculateBeltTerminalLimit(ConveyorBelt belt) {
-    if (belt.path.isEmpty) return null;
-    final isDeadEnd =
-        !TransportBeltRenderer.isInputPort(belt.path.last, _project.buildings);
-    final inputBuilding =
-        isDeadEnd ? null : _findInputBuildingAtCell(belt.path.last);
-    final pendingOutputItemId =
-        inputBuilding == null ? null : belt.downstreamItemId();
-    final inputBlocked = inputBuilding != null &&
-        pendingOutputItemId != null &&
-        !_canBeltOutputEnterBuilding(belt, inputBuilding, pendingOutputItemId);
-    return inputBlocked ? belt.path.length - 1 : null;
-  }
-
-  bool _transferBeltOutputToBuilding(
-      ConveyorBelt belt, PlacedBuilding building) {
-    if (building.building.maxInputs <= 0) return false;
-    final itemId = belt.outputReadyItemId();
-    if (itemId == null) return false;
-
-    // 若建筑当前不可接收（如分流器缓冲槽已满），则不尝试传输
-    if (!_canBeltOutputEnterBuilding(belt, building, itemId)) return false;
-
-    if (building.isBeltBridge) {
-      final outputDirection = _beltArrivalDirection(belt);
-      if (outputDirection == null) return false;
-      if (!building.acceptBridgeInputItem(itemId, outputDirection)) {
-        return false;
-      }
-      belt.removeOutputReadyItem();
-      return true;
-    }
-    // 分流器：纯推送式，无内部缓冲。直接推到输出带，全满则阻塞输入端。
-    if (building.isSplitter) {
-      final direction = _findNextAvailableSplitterDirection(building, itemId);
-      if (direction != null) {
-        final outputBelt =
-            _getBeltForSplitterOutputDirection(building, direction);
-        if (outputBelt != null) {
-          final terminalLimit = _calculateBeltTerminalLimit(outputBelt);
-          if (outputBelt.pushSourceItem(itemId, terminalLimit: terminalLimit, skipAdvanceOnce: true)) {
-            belt.removeOutputReadyItem();
-            return true;
-          }
-        }
-        // 推送失败：回退 cycleIndex（按创建顺序）
-        final cycleOrder = _getConnectedSplitterOutputDirections(building);
-        final idx = cycleOrder.indexOf(direction);
-        if (idx >= 0) {
-          building.splitterCycleIndex = idx;
-        }
-      }
-      return false;
-    }
-    // 仓库存货口：直接增加全局仓库库存，不受 inputItemCount 限制
-    if (building.building.id == DepotLoaderConfig.id) {
-      _project.incrementWarehouseItem(itemId);
-      belt.removeOutputReadyItem();
-      return true;
-    }
-    if (!building.acceptInputItem(itemId)) return false;
-    // 自动匹配配方：当建筑没有激活配方时，根据输入物品自动选择匹配的配方
-    if (building.activeRecipeId == null) {
-      _autoSelectRecipe(building, itemId);
-    }
-    belt.removeOutputReadyItem();
-    return true;
-  }
-
-  /// 根据输入物品自动选择匹配的配方
-  void _autoSelectRecipe(PlacedBuilding building, String inputItemId) {
-    final recipes =
-        widget.dataLoader.getRecipesForBuilding(building.building.id);
-    for (final recipe in recipes) {
-      if (recipe.inputs.any((input) => input.itemId == inputItemId)) {
-        building.activeRecipeId = recipe.id;
-        return;
-      }
-    }
-  }
-
-  void _freezeReadyOutputSegments(ConveyorBelt belt, {required int limit}) {
-    belt.ensureItemSegmentsFromLegacy();
-    if (belt.itemSegments.isEmpty) {
-      belt.syncLegacyFromSegments();
-      return;
-    }
-    belt.itemSegments.sort((a, b) => a.drainCount.compareTo(b.drainCount));
-    final endLimit = limit.clamp(0, belt.path.length).toInt();
-    for (int i = 0; i < belt.itemSegments.length; i++) {
-      final segment = belt.itemSegments[i];
-      if (!segment.hasItems) continue;
-      // 每个物品段有其独立的冻结上限：
-      // - 最后一段的上限是终端极限值（如传送带尽头或被阻塞位置）
-      // - 前方段落的上限是下一段的 drainCount（即不能越过前面的物品）
-      final segLimit = i + 1 < belt.itemSegments.length
-          ? belt.itemSegments[i + 1].drainCount.clamp(0, belt.path.length).toInt()
-          : endLimit;
-      if (segment.fillCount >= segLimit && segment.freezeProgress == null) {
-        segment.freezeProgress = -1.0;
-      }
-    }
-    belt.syncLegacyFromSegments();
-  }
-
-  String? _getAvailableOutputItemIdForBeltStart(ConveyorBelt belt) {
-    if (belt.path.isEmpty) return null;
-    final start = belt.path.first;
-    for (final pb in _project.buildings) {
-      final outputIndex = _findOutputPortIndexAtCell(pb, start);
-      if (outputIndex == null) continue;
-
-      if (pb.isBeltBridge) {
-        final outputDirection = _beltExitDirection(belt);
-        return outputDirection == null
-            ? null
-            : pb.bridgeItemIdForOutputDirection(outputDirection);
-      }
-
-      // 分流器：若缓冲槽位中有物品，输出带从中拉取（作为生产者）
-      if (pb.isSplitter) {
-        if (pb.splitterBufferOccupied) {
-          return pb.splitterBufferedItemId;
-        }
-        return null;
-      }
-
-      if (LogisticsUnitRenderer.isLogisticsUnit(pb.building.id)) {
-        return pb.inputItemCount > 0 ? pb.inputItemId : null;
-      }
-
-      if (pb.building.id == DepotUnloaderConfig.id) {
-        final itemId = pb.depotOutputItemId;
-        if (itemId == null || itemId.isEmpty) return null;
-        // 仓库库存为 0 时不再输出物品
-        if (_project.getWarehouseItemCount(itemId) <= 0) return null;
-        return itemId;
-      }
-
-      final recipe = pb.activeRecipeId != null
-          ? widget.dataLoader.getRecipe(pb.activeRecipeId!)
-          : null;
-      if (recipe == null || recipe.outputs.isEmpty) return null;
-      final output = recipe.outputs.length > outputIndex
-          ? recipe.outputs[outputIndex]
-          : recipe.outputs.first;
-      if (!pb.hasOutputItem(output.itemId)) return null;
-      return output.itemId;
-    }
-    return null;
-  }
-
-  bool _consumeOutputItemForBeltStart(ConveyorBelt belt, String itemId) {
-    if (belt.path.isEmpty || itemId.isEmpty) return false;
-    final start = belt.path.first;
-    for (final pb in _project.buildings) {
-      final outputIndex = _findOutputPortIndexAtCell(pb, start);
-      if (outputIndex == null) continue;
-      if (pb.isBeltBridge) {
-        final outputDirection = _beltExitDirection(belt);
-        return outputDirection != null &&
-            pb.consumeBridgeOutputItem(itemId, outputDirection);
-      }
-      // 分流器：消费缓冲槽位中的物品（仅当 belt 方向与缓冲方向匹配时）
-      if (pb.isSplitter) {
-        if (pb.splitterBufferOccupied) {
-          pb.consumeFromBuffer();
-          return true;
-        }
-        return false;
-      }
-      if (LogisticsUnitRenderer.isLogisticsUnit(pb.building.id)) {
-        return pb.consumeInputItems(itemId, 1);
-      }
-      if (pb.building.id == DepotUnloaderConfig.id) {
-        // 仓库取货口输出物品时减少全局仓库库存
-        _project.decrementWarehouseItem(itemId);
-        return false;
-      }
-      return pb.consumeOutputItem(itemId, 1);
-    }
-    return false;
-  }
-
-  int? _findOutputPortIndexAtCell(PlacedBuilding pb, Offset cell) {
-    final gx = cell.dx.round();
-    final gy = cell.dy.round();
-    final rot = pb.rotation;
-    final gw = pb.building.gridWidth;
-    final gh = pb.building.gridHeight;
-    for (int i = 0; i < pb.outputPorts.length; i++) {
-      final portCell = pb.outputPorts[i]
-          .gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
-      if (portCell.dx.round() == gx && portCell.dy.round() == gy) {
-        return i;
-      }
-    }
-    return null;
   }
 
   void _startAnimation() {
@@ -1020,15 +332,15 @@ class CanvasEditorState extends State<CanvasEditor>
   Offset _screenToGrid(Offset screenPos, Size size) {
     final world = _screenToWorld(screenPos, size);
     return Offset(
-      (world.dx / _cellSize).floorToDouble(),
-      (world.dy / _cellSize).floorToDouble(),
+      (world.dx / cellSize).floorToDouble(),
+      (world.dy / cellSize).floorToDouble(),
     );
   }
 
   PlacedBuilding? _getBuildingAt(Offset gridPos) {
     for (final pb in _project.buildings.reversed) {
-      final bounds = pb.getBounds(_cellSize);
-      if (bounds.contains(gridPos * _cellSize)) {
+      final bounds = pb.getBounds(cellSize);
+      if (bounds.contains(gridPos * cellSize)) {
         return pb;
       }
     }
@@ -1132,9 +444,9 @@ class CanvasEditorState extends State<CanvasEditor>
     }
 
     if (widget.conveyorMode) {
-      final hadNoAnchors = _beltCtrl.anchors.isEmpty;
-      final wasPathInvalid = _beltCtrl.pathInvalid;
-      if (_beltCtrl.handleTap(gridPos)) return;
+      final hadNoAnchors = beltCtrl.anchors.isEmpty;
+      final wasPathInvalid = beltCtrl.pathInvalid;
+      if (beltCtrl.handleTap(gridPos)) return;
       // 创建失败时触发 HUD 错误动画和文字提示
       if (hadNoAnchors) {
         // 首次点击空白网格（未从设备输出端开始）
@@ -1390,9 +702,9 @@ class CanvasEditorState extends State<CanvasEditor>
       gridY: cy,
       rotation: rotation,
     );
-    final bounds = tempBuilding.getBounds(_cellSize);
+    final bounds = tempBuilding.getBounds(cellSize);
     final buildingOverlaps = _project.buildings.any(
-      (b) => b != _movingBuilding && b.overlaps(bounds, _cellSize),
+      (b) => b != _movingBuilding && b.overlaps(bounds, cellSize),
     );
     if (buildingOverlaps) return true;
 
@@ -1416,8 +728,8 @@ class CanvasEditorState extends State<CanvasEditor>
     }
     for (final belt in _project.conveyors) {
       for (int i = 0; i < belt.path.length; i++) {
-        if (!cells.contains(_gridCellKey(belt.path[i]))) continue;
-        if (!_canBuildingOverlapBeltCell(building, belt, i)) {
+        if (!cells.contains(gridCellKey(belt.path[i]))) continue;
+        if (!canBuildingOverlapBeltCell(building, belt, i)) {
           return true;
         }
       }
@@ -1730,11 +1042,11 @@ class CanvasEditorState extends State<CanvasEditor>
   }
 
   /// 是否正在创建传送带（已有锚点）
-  bool get isCreatingConveyorBelt => _beltCtrl.anchors.isNotEmpty;
+  bool get isCreatingConveyorBelt => beltCtrl.anchors.isNotEmpty;
 
   /// 完成传送带创建（ESC 按下且有锚点时调用）
   void finishConveyorBeltCreation() {
-    _beltCtrl.handleKeyEscape();
+    beltCtrl.handleKeyEscape();
   }
 
   bool cancelMoveMode() {
@@ -1794,7 +1106,7 @@ class CanvasEditorState extends State<CanvasEditor>
   }
 
   void _handleRightClick(Offset screenPos, Size size) {
-    _beltCtrl.handleRightClick();
+    beltCtrl.handleRightClick();
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
@@ -1804,7 +1116,7 @@ class CanvasEditorState extends State<CanvasEditor>
           cancelMoveMode();
           return KeyEventResult.handled;
         }
-        if (widget.conveyorMode && _beltCtrl.handleKeyEscape()) {
+        if (widget.conveyorMode && beltCtrl.handleKeyEscape()) {
           return KeyEventResult.handled;
         }
       }
@@ -1826,32 +1138,173 @@ class CanvasEditorState extends State<CanvasEditor>
     return KeyEventResult.ignored;
   }
 
+  void _handleHover(PointerHoverEvent event) {
+    final renderBox = context.findRenderObject() as RenderBox;
+    final localPos = renderBox.globalToLocal(event.position);
+    final gridPos = _screenToGrid(localPos, renderBox.size);
+    // 只在网格位置变化时才触发重绘
+    if (_mouseGridPos == gridPos) return;
+    setState(() {
+      _mouseGridPos = gridPos;
+      // 检测悬停的建筑
+      _hoveredBuilding =
+          widget.placingBuilding == null && _movingBuilding == null
+              ? _getBuildingAt(gridPos)
+              : null;
+      if (widget.conveyorMode) {
+        beltCtrl.handleHover(gridPos);
+      } else {
+        beltCtrl.reset();
+      }
+    });
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    _lastPointerWasPrimary = event.buttons & kPrimaryMouseButton != 0;
+    // 中键拖拽
+    if (event.buttons & kMiddleMouseButton != 0 &&
+        _middleDragPointerId == null) {
+      _middleDragPointerId = event.pointer;
+      _lastMiddlePos = event.localPosition;
+      _isMiddleDragging = true;
+      return;
+    }
+    // 左键
+    if (event.buttons & kPrimaryMouseButton != 0) {
+      final renderBox = context.findRenderObject() as RenderBox;
+      final localPos = event.localPosition;
+      final gridPos = _screenToGrid(localPos, renderBox.size);
+
+      // 移动模式：点击放置
+      if (_movingBuilding != null) {
+        _placeMovingBuilding(gridPos);
+        setState(() {});
+        return;
+      }
+
+      // 放置模式：立即放置
+      if (widget.placingBuilding != null) {
+        _handleTap(localPos, renderBox.size);
+        setState(() {});
+        return;
+      }
+
+      // 传送带模式：立即处理
+      if (widget.conveyorMode) {
+        _handleTap(localPos, renderBox.size);
+        setState(() {});
+        return;
+      }
+
+      // 普通模式：检测是否点击了建筑（用于长按）
+      final pb = _getBuildingAt(gridPos);
+      if (pb != null) {
+        _startLongPress(localPos, pb);
+      }
+      setState(() {});
+    }
+    // 右键：移动模式下取消
+    if (event.buttons & kSecondaryMouseButton != 0 &&
+        _movingBuilding != null) {
+      cancelMoveMode();
+      setState(() {});
+    }
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    if (event.pointer == _middleDragPointerId &&
+        _lastMiddlePos != null) {
+      final delta = event.localPosition - _lastMiddlePos!;
+      final rotatedDelta = _screenDeltaToWorldDelta(delta);
+      _targetOffsetX -= rotatedDelta.dx;
+      _targetOffsetY -= rotatedDelta.dy;
+      _displayOffsetX = _targetOffsetX;
+      _displayOffsetY = _targetOffsetY;
+      _lastMiddlePos = event.localPosition;
+      setState(() {});
+    }
+    // 长按时移动过远则取消
+    if (_isLongPressing && _longPressScreenPos != null) {
+      const cancelDist = 30.0;
+      if ((event.localPosition - _longPressScreenPos!).distance >
+          cancelDist) {
+        _cancelLongPress();
+        setState(() {});
+      }
+    }
+  }
+
+  void _handlePointerUp(PointerUpEvent event) {
+    if (event.pointer == _middleDragPointerId) {
+      _middleDragPointerId = null;
+      _lastMiddlePos = null;
+      _isMiddleDragging = false;
+      return;
+    }
+
+    // 仅左键释放时处理传送带弹窗和建筑选中
+    final isPrimaryButton = _lastPointerWasPrimary;
+
+    final renderBox = context.findRenderObject() as RenderBox;
+    final localPos = event.localPosition;
+    final gridPos = _screenToGrid(localPos, renderBox.size);
+
+    if (_isLongPressing && _longPressProgress < 1.0) {
+      _cancelLongPress();
+      if (isPrimaryButton &&
+          !widget.conveyorMode &&
+          widget.placingBuilding == null) {
+        final clickedBelt = _findBeltAtCell(gridPos);
+        if (clickedBelt != null && !_isCellOnBuildingPort(gridPos)) {
+          _showConveyorBeltDialog(clickedBelt, gridPos);
+          setState(() {});
+          return;
+        }
+      }
+      _handleSingleClick(localPos, renderBox.size);
+      setState(() {});
+    } else if (isPrimaryButton &&
+        !_isLongPressing &&
+        !widget.conveyorMode &&
+        widget.placingBuilding == null &&
+        _movingBuilding == null) {
+      final clickedBelt = _findBeltAtCell(gridPos);
+      if (clickedBelt != null && !_isCellOnBuildingPort(gridPos)) {
+        _showConveyorBeltDialog(clickedBelt, gridPos);
+        setState(() {});
+      }
+    }
+  }
+
+  void _handlePointerCancel(PointerCancelEvent event) {
+    if (event.pointer == _middleDragPointerId) {
+      _middleDragPointerId = null;
+      _lastMiddlePos = null;
+      _isMiddleDragging = false;
+    }
+    if (_isLongPressing) {
+      _cancelLongPress();
+      setState(() {});
+    }
+  }
+
+  void _handleScaleUpdateWithSize(ScaleUpdateDetails details) {
+    final renderBox = context.findRenderObject() as RenderBox;
+    _handleScaleUpdate(details, renderBox.size);
+  }
+
+  void _handleSecondaryTapUp(TapUpDetails details) {
+    final renderBox = context.findRenderObject() as RenderBox;
+    _handleRightClick(details.localPosition, renderBox.size);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Focus(
       onKeyEvent: _handleKeyEvent,
       autofocus: true,
       child: MouseRegion(
-        onHover: (event) {
-          final renderBox = context.findRenderObject() as RenderBox;
-          final localPos = renderBox.globalToLocal(event.position);
-          final gridPos = _screenToGrid(localPos, renderBox.size);
-          // 只在网格位置变化时才触发重绘
-          if (_mouseGridPos == gridPos) return;
-          setState(() {
-            _mouseGridPos = gridPos;
-            // 检测悬停的建筑
-            _hoveredBuilding =
-                widget.placingBuilding == null && _movingBuilding == null
-                    ? _getBuildingAt(gridPos)
-                    : null;
-            if (widget.conveyorMode) {
-              _beltCtrl.handleHover(gridPos);
-            } else {
-              _beltCtrl.reset();
-            }
-          });
-        },
+        onHover: _handleHover,
         child: Listener(
           onPointerSignal: (event) {
             if (event is PointerScrollEvent) {
@@ -1860,169 +1313,42 @@ class CanvasEditorState extends State<CanvasEditor>
               _handleScroll(event, localPos);
             }
           },
-          onPointerDown: (event) {
-            _lastPointerWasPrimary = event.buttons & kPrimaryMouseButton != 0;
-            // 中键拖拽
-            if (event.buttons & kMiddleMouseButton != 0 &&
-                _middleDragPointerId == null) {
-              _middleDragPointerId = event.pointer;
-              _lastMiddlePos = event.localPosition;
-              _isMiddleDragging = true;
-              return;
-            }
-            // 左键
-            if (event.buttons & kPrimaryMouseButton != 0) {
-              final renderBox = context.findRenderObject() as RenderBox;
-              final localPos = event.localPosition;
-              final gridPos = _screenToGrid(localPos, renderBox.size);
-
-              // 移动模式：点击放置
-              if (_movingBuilding != null) {
-                _placeMovingBuilding(gridPos);
-                setState(() {});
-                return;
-              }
-
-              // 放置模式：立即放置
-              if (widget.placingBuilding != null) {
-                _handleTap(localPos, renderBox.size);
-                setState(() {});
-                return;
-              }
-
-              // 传送带模式：立即处理
-              if (widget.conveyorMode) {
-                _handleTap(localPos, renderBox.size);
-                setState(() {});
-                return;
-              }
-
-              // 普通模式：检测是否点击了建筑（用于长按）
-              final pb = _getBuildingAt(gridPos);
-              if (pb != null) {
-                _startLongPress(localPos, pb);
-              }
-              setState(() {});
-            }
-            // 右键：移动模式下取消
-            if (event.buttons & kSecondaryMouseButton != 0 &&
-                _movingBuilding != null) {
-              cancelMoveMode();
-              setState(() {});
-            }
-          },
-          onPointerMove: (event) {
-            if (event.pointer == _middleDragPointerId &&
-                _lastMiddlePos != null) {
-              final delta = event.localPosition - _lastMiddlePos!;
-              final rotatedDelta = _screenDeltaToWorldDelta(delta);
-              _targetOffsetX -= rotatedDelta.dx;
-              _targetOffsetY -= rotatedDelta.dy;
-              _displayOffsetX = _targetOffsetX;
-              _displayOffsetY = _targetOffsetY;
-              _lastMiddlePos = event.localPosition;
-              setState(() {});
-            }
-            // 长按时移动过远则取消
-            if (_isLongPressing && _longPressScreenPos != null) {
-              const cancelDist = 30.0;
-              if ((event.localPosition - _longPressScreenPos!).distance >
-                  cancelDist) {
-                _cancelLongPress();
-                setState(() {});
-              }
-            }
-          },
-          onPointerUp: (event) {
-            if (event.pointer == _middleDragPointerId) {
-              _middleDragPointerId = null;
-              _lastMiddlePos = null;
-              _isMiddleDragging = false;
-              return;
-            }
-
-            // 仅左键释放时处理传送带弹窗和建筑选中
-            final isPrimaryButton = _lastPointerWasPrimary;
-
-            final renderBox = context.findRenderObject() as RenderBox;
-            final localPos = event.localPosition;
-            final gridPos = _screenToGrid(localPos, renderBox.size);
-
-            if (_isLongPressing && _longPressProgress < 1.0) {
-              _cancelLongPress();
-              if (isPrimaryButton &&
-                  !widget.conveyorMode &&
-                  widget.placingBuilding == null) {
-                final clickedBelt = _findBeltAtCell(gridPos);
-                if (clickedBelt != null && !_isCellOnBuildingPort(gridPos)) {
-                  _showConveyorBeltDialog(clickedBelt, gridPos);
-                  setState(() {});
-                  return;
-                }
-              }
-              _handleSingleClick(localPos, renderBox.size);
-              setState(() {});
-            } else if (isPrimaryButton &&
-                !_isLongPressing &&
-                !widget.conveyorMode &&
-                widget.placingBuilding == null &&
-                _movingBuilding == null) {
-              final clickedBelt = _findBeltAtCell(gridPos);
-              if (clickedBelt != null && !_isCellOnBuildingPort(gridPos)) {
-                _showConveyorBeltDialog(clickedBelt, gridPos);
-                setState(() {});
-              }
-            }
-          },
-          onPointerCancel: (event) {
-            if (event.pointer == _middleDragPointerId) {
-              _middleDragPointerId = null;
-              _lastMiddlePos = null;
-              _isMiddleDragging = false;
-            }
-            if (_isLongPressing) {
-              _cancelLongPress();
-              setState(() {});
-            }
-          },
+          onPointerDown: _handlePointerDown,
+          onPointerMove: _handlePointerMove,
+          onPointerUp: _handlePointerUp,
+          onPointerCancel: _handlePointerCancel,
           child: GestureDetector(
             onScaleStart: _handleScaleStart,
-            onScaleUpdate: (details) {
-              final renderBox = context.findRenderObject() as RenderBox;
-              _handleScaleUpdate(details, renderBox.size);
-            },
+            onScaleUpdate: _handleScaleUpdateWithSize,
             onScaleEnd: _handleScaleEnd,
-            onSecondaryTapUp: (details) {
-              final renderBox = context.findRenderObject() as RenderBox;
-              _handleRightClick(details.localPosition, renderBox.size);
-            },
+            onSecondaryTapUp: _handleSecondaryTapUp,
             child: CustomPaint(
-              painter: _EditorPainter(
+              painter: EditorPainter(
                 repaintTrigger: _repaintTrigger,
                 project: _project,
                 dataLoader: widget.dataLoader,
-                cellSize: _cellSize,
+                cellSize: cellSize,
                 placingBuilding: widget.placingBuilding,
                 placingRotation: _placingRotation,
                 mouseGridPos: _mouseGridPos,
                 hoveredBuilding: _hoveredBuilding,
                 conveyorMode: widget.conveyorMode,
-                conveyorConfirmedPath: _beltCtrl.confirmedPath,
-                conveyorPreviewPath: _beltCtrl.previewPath,
-                conveyorPreviewOccupied: _beltCtrl.previewOccupied,
-                conveyorPathInvalid: _beltCtrl.pathInvalid,
-                conveyorForkCell: _beltCtrl.anchors.isNotEmpty
-                    ? _beltCtrl.anchors.first
+                conveyorConfirmedPath: beltCtrl.confirmedPath,
+                conveyorPreviewPath: beltCtrl.previewPath,
+                conveyorPreviewOccupied: beltCtrl.previewOccupied,
+                conveyorPathInvalid: beltCtrl.pathInvalid,
+                conveyorForkCell: beltCtrl.anchors.isNotEmpty
+                    ? beltCtrl.anchors.first
                     : null,
-                conveyorHasCommittedPath: _beltCtrl.hasCommittedPath,
-                conveyorIncomingDirection: _beltCtrl.incomingDirection,
-                previewContextExtension: _beltCtrl.previewContextExtension,
-                previewBridgeCells: _beltCtrl.previewBridgeCells,
+                conveyorHasCommittedPath: beltCtrl.hasCommittedPath,
+                conveyorIncomingDirection: beltCtrl.incomingDirection,
+                previewContextExtension: beltCtrl.previewContextExtension,
+                previewBridgeCells: beltCtrl.previewBridgeCells,
                 displayScale: _displayScale,
                 displayOffsetX: _displayOffsetX,
                 displayOffsetY: _displayOffsetY,
                 displayAngle: _displayAngle,
-                portConnectionsCache: _portConnectionsCache,
+                portConnectionsCache: portConnectionsCache,
                 isLongPressing: _isLongPressing,
                 longPressScreenPos: _longPressScreenPos,
                 longPressProgress: _longPressProgress,
@@ -2038,1163 +1364,4 @@ class CanvasEditorState extends State<CanvasEditor>
       ),
     );
   }
-}
-
-class _EditorPainter extends CustomPainter {
-  final int repaintTrigger;
-  final ProjectState project;
-  final DataLoader dataLoader;
-  final double cellSize;
-  final Building? placingBuilding;
-  final int placingRotation;
-  final Offset? mouseGridPos;
-  final PlacedBuilding? hoveredBuilding;
-  final bool conveyorMode;
-  final List<Offset> conveyorConfirmedPath;
-  final List<Offset>? conveyorPreviewPath;
-  final Set<String>? conveyorPreviewOccupied;
-  final bool conveyorPathInvalid;
-  final Offset? conveyorForkCell;
-  final bool conveyorHasCommittedPath;
-  final String? conveyorIncomingDirection;
-  final List<Offset>? previewContextExtension;
-  final List<Offset> previewBridgeCells;
-  final double displayScale;
-  final double displayOffsetX;
-  final double displayOffsetY;
-  final double displayAngle;
-  final Map<String, Map<String, bool>> portConnectionsCache;
-  final bool isLongPressing;
-  final Offset? longPressScreenPos;
-  final double longPressProgress;
-  final PlacedBuilding? movingBuilding;
-  final int movingRotation;
-  final Offset? bridgeMoveHiddenCell;
-  final AnimationController beltArrowController;
-
-  // 预渲染缓存: key = "buildingId_rotation_detailLevel_portsHash" -> Picture
-  static final Map<String, ui.Picture> _pictureCache = {};
-  static const int _maxCacheSize = 200;
-
-  /// 清除所有静态渲染缓存
-  static void clearPictureCache() {
-    _pictureCache.clear();
-  }
-
-  _EditorPainter({
-    required this.repaintTrigger,
-    required this.project,
-    required this.dataLoader,
-    required this.cellSize,
-    this.placingBuilding,
-    this.placingRotation = 0,
-    this.mouseGridPos,
-    this.hoveredBuilding,
-    this.conveyorMode = false,
-    this.conveyorConfirmedPath = const [],
-    this.conveyorPreviewPath,
-    this.conveyorPreviewOccupied,
-    this.conveyorPathInvalid = false,
-    this.conveyorForkCell,
-    this.conveyorHasCommittedPath = false,
-    this.conveyorIncomingDirection,
-    this.previewContextExtension,
-    this.previewBridgeCells = const [],
-    required this.displayScale,
-    required this.displayOffsetX,
-    required this.displayOffsetY,
-    required this.displayAngle,
-    required this.portConnectionsCache,
-    this.isLongPressing = false,
-    this.longPressScreenPos,
-    this.longPressProgress = 0.0,
-    this.movingBuilding,
-    this.movingRotation = 0,
-    this.bridgeMoveHiddenCell,
-    required this.beltArrowController,
-  }) : super(repaint: Listenable.merge([beltArrowController]));
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // 计算可见世界区域（视口裁剪用）
-    final viewport = _computeViewport(size);
-
-    final gridPainter = GridPainter(
-      offsetX: displayOffsetX,
-      offsetY: displayOffsetY,
-      scale: displayScale,
-      cellSize: cellSize,
-      rotation: displayAngle,
-    );
-    gridPainter.paint(canvas, size);
-
-    canvas.save();
-    if (displayAngle != 0) {
-      final center = Offset(size.width / 2, size.height / 2);
-      canvas.translate(center.dx, center.dy);
-      canvas.rotate(displayAngle);
-      canvas.translate(-center.dx, -center.dy);
-    }
-    canvas.translate(-displayOffsetX, -displayOffsetY);
-    canvas.scale(displayScale);
-
-    // LOD: 根据缩放级别决定渲染细节
-    final detailLevel = displayScale < 0.35 ? 0 : (displayScale < 0.5 ? 1 : 2);
-
-    // 获取当前正在绘制的新传送带的分叉点（用于旧道动态裁剪）
-    // 使用 anchors.first（用户实际点击的位置），而非路径的 first
-    // 创建过程中不打断原传送带的物品动画：不裁剪原传送带、不清空物品、不渲染已确认段预览
-    const hasConfirmedForkHandoff = false;
-    const Offset? startCell = null;
-
-    // 构建 fullPathContext（已确认段 + 实时段的完整路径）
-    // 不论路径有效还是无效都构建上下文，这样即使渲染红色错误预览时，转角处的纹理也能计算正确
-    List<Offset>? fullPathContext;
-    int previewStartIndex = conveyorConfirmedPath.length;
-
-    if (conveyorPreviewPath != null && conveyorPreviewPath!.isNotEmpty) {
-      if (conveyorConfirmedPath.isNotEmpty) {
-        fullPathContext = [...conveyorConfirmedPath, ...conveyorPreviewPath!];
-        // 去重：已确认段末尾和实时段开头可能重叠
-        if (fullPathContext.length >= 2 &&
-            fullPathContext[conveyorConfirmedPath.length - 1].dx ==
-                fullPathContext[conveyorConfirmedPath.length].dx &&
-            fullPathContext[conveyorConfirmedPath.length - 1].dy ==
-                fullPathContext[conveyorConfirmedPath.length].dy) {
-          fullPathContext.removeAt(conveyorConfirmedPath.length);
-          previewStartIndex = conveyorConfirmedPath.length - 1;
-        }
-      } else {
-        // 第一段创建时 confirmedPath 为空，仅用 previewPath 构建上下文
-        fullPathContext = [...conveyorPreviewPath!];
-        previewStartIndex = 0;
-      }
-    }
-
-    // 追加转角上下文扩展（合并目标的路径，仅用于转角检测，不渲染为蓝色预览）
-    if (previewContextExtension != null &&
-        previewContextExtension!.isNotEmpty &&
-        fullPathContext != null) {
-      fullPathContext.addAll(previewContextExtension!);
-    }
-
-    final previewItemSegments = <ConveyorItemSegment>[];
-    if (conveyorMode &&
-        !conveyorHasCommittedPath &&
-        !conveyorPathInvalid &&
-        fullPathContext != null &&
-        fullPathContext.isNotEmpty) {
-      previewItemSegments.addAll(_previewItemSegmentsForPath(
-        fullPathContext,
-        shouldProjectForkSource: hasConfirmedForkHandoff,
-        forkProjectionLimit: previewStartIndex + 1,
-      ));
-    }
-
-    final livePreviewRenderPath = conveyorPreviewPath;
-    final livePreviewContextStartIndex = previewStartIndex;
-    final hiddenPreviewTerminal =
-        conveyorPreviewPath != null && conveyorPreviewPath!.length > 1
-            ? conveyorPreviewPath!.first
-            : null;
-
-    // 物流桥移动时，隐藏其下方传送带格子的背景
-    final bridgeHiddenCells = bridgeMoveHiddenCell != null
-        ? <Offset>{bridgeMoveHiddenCell!}
-        : null;
-
-    // 检查分叉点是否在物流桥上：如果是，则不应裁剪只是穿过物流桥的传送带
-    // （传送带从物流桥开始创建，并非从穿过物流桥的传送带分叉）
-    bool isForkAtBridge = false;
-    if (startCell != null) {
-      final sx = startCell.dx.toInt();
-      final sy = startCell.dy.toInt();
-      for (final pb in project.buildings) {
-        if (!pb.isBeltBridge) continue;
-        final bx = pb.effectiveGridX.toInt();
-        final by = pb.effectiveGridY.toInt();
-        if (sx >= bx && sx < bx + pb.effectiveWidth &&
-            sy >= by && sy < by + pb.effectiveHeight) {
-          isForkAtBridge = true;
-          break;
-        }
-      }
-    }
-
-    // 调试：视口与裁剪统计（有裁剪时才输出，且每2秒最多一次）
-    for (final belt in project.conveyors) {
-      // 动态裁剪：如果当前正在绘制且起点在旧传送带上，裁剪分叉点之前的部分
-      List<Offset> renderPath = belt.path;
-      int forkIdx = -1;
-      final hidesTerminalCell = hiddenPreviewTerminal != null &&
-          belt.path.isNotEmpty &&
-          _sameCell(belt.path.last, hiddenPreviewTerminal);
-      if (startCell != null) {
-        for (int i = 0; i < belt.path.length; i++) {
-          if (belt.path[i].dx == startCell.dx &&
-              belt.path[i].dy == startCell.dy) {
-            forkIdx = i;
-            break;
-          }
-        }
-        // 如果分叉点在物流桥上，且分叉点在传送带路径中间（非终点），
-        // 则不裁剪该传送带——传送带只是穿过物流桥，并非从该传送带分叉
-        if (isForkAtBridge && forkIdx >= 0 && forkIdx < belt.path.length - 1) {
-          forkIdx = -1;
-        }
-        if (forkIdx >= 0 && forkIdx < belt.path.length - 1) {
-          // 分叉点在中间：裁剪分叉点之后的路径段
-          renderPath = belt.path.sublist(forkIdx + 1);
-        } else if (forkIdx >= 0 && forkIdx >= belt.path.length - 1) {
-          // 分叉点在末尾或之后：整条旧道被替代改为保留原样
-          // 当用户从传送带末尾格开始延伸时（forkIdx == path.length - 1），
-          // 传送带尚未被实际拆分，应继续渲染原传送带及其物品
-          renderPath = belt.path;
-        } else {
-          // 没有分叉：继续使用 renderPath
-        }
-      }
-      if (hidesTerminalCell) {
-        // 不裁剪路径：保留完整路径以便物品能自然传输到终点格。
-        // 终点格的背景由预览覆盖，通过 hideTerminalBackground 标志
-        // 在渲染器中跳过背景绘制，但物品仍正常渲染。
-      }
-
-      if (renderPath.isEmpty) {
-        continue;
-      }
-      final visible = _isPathVisible(renderPath, viewport);
-      if (!visible) {
-        continue;
-      }
-      final effectiveItemId =
-          belt.itemId.isNotEmpty ? belt.itemId : belt.lastItemId;
-      final item = dataLoader.getItem(effectiveItemId);
-      // 残留物品：当 lastItemFillCount > 0 且 lastItemId 与当前 itemId 不同时
-      final lastItem = belt.lastItemFillCount > 0 &&
-              belt.lastItemId.isNotEmpty &&
-              belt.lastItemId != belt.itemId
-          ? dataLoader.getItem(belt.lastItemId)
-          : null;
-      // 如果路径被裁剪，创建临时 ConveyorBelt 用于渲染
-      if (!identical(renderPath, belt.path)) {
-        // 单格下游：从旧传送带推断原始方向
-        String? forcedDir;
-        // 下游首格的入方向：从分叉点指向下游首格
-        String? incomingDir;
-        if (hidesTerminalCell && renderPath.isNotEmpty) {
-          final dx = belt.path.last.dx - renderPath.last.dx;
-          final dy = belt.path.last.dy - renderPath.last.dy;
-          if (dx > 0) {
-            forcedDir = 'right';
-          } else if (dx < 0) {
-            forcedDir = 'left';
-          } else if (dy > 0) {
-            forcedDir = 'down';
-          } else if (dy < 0) {
-            forcedDir = 'up';
-          }
-          incomingDir = belt.incomingDirection;
-        } else if (forkIdx >= 0 && forkIdx + 1 < belt.path.length) {
-          final dx = belt.path[forkIdx + 1].dx - belt.path[forkIdx].dx;
-          final dy = belt.path[forkIdx + 1].dy - belt.path[forkIdx].dy;
-          if (dx > 0) {
-            incomingDir = 'right';
-          } else if (dx < 0) {
-            incomingDir = 'left';
-          } else if (dy > 0) {
-            incomingDir = 'down';
-          } else if (dy < 0) {
-            incomingDir = 'up';
-          }
-          if (renderPath.length == 1) {
-            // 如果仅剩最后一格，且原传送带定义了 forcedDirection，则保留原转向
-            forcedDir = belt.forcedDirection ?? incomingDir;
-          }
-        }
-        final clippedBelt = ConveyorBelt(
-          id: belt.id,
-          path: renderPath,
-          itemId: belt.itemId,
-          lastItemId: belt.lastItemId,
-          itemSegments: hidesTerminalCell
-              ? belt.clippedItemSegments(0, renderPath.length)
-              : forkIdx >= 0
-                  ? belt.clippedItemSegments(forkIdx + 1, belt.path.length)
-                  : belt.shiftedItemSegments(0),
-          itemFillCount: hidesTerminalCell
-              ? math.min(belt.itemFillCount, renderPath.length)
-              : forkIdx >= 0
-                  ? math.max(0, belt.itemFillCount - (forkIdx + 1))
-                  : belt.itemFillCount,
-          itemDrainCount: hidesTerminalCell
-              ? math.min(belt.itemDrainCount, renderPath.length)
-              : forkIdx >= 0
-                  ? math.max(0, belt.itemDrainCount - (forkIdx + 1))
-                  : belt.itemDrainCount,
-          isBlocked: belt.isBlocked,
-          forcedDirection: forcedDir,
-          incomingDirection: incomingDir,
-          phaseOffset: belt.phaseOffset,
-          lastItemFillCount: hidesTerminalCell
-              ? math.min(belt.lastItemFillCount, renderPath.length)
-              : belt.lastItemFillCount > 0 && forkIdx >= 0
-                  ? math.max(0, belt.lastItemFillCount - (forkIdx + 1))
-                  : belt.lastItemFillCount,
-          lastItemDrainCount: hidesTerminalCell
-              ? math.min(belt.lastItemDrainCount, renderPath.length)
-              : belt.lastItemFillCount > 0 && forkIdx >= 0
-                  ? math.max(0, belt.lastItemDrainCount - (forkIdx + 1))
-                  : belt.lastItemDrainCount,
-          deadEndFreezeProgress: belt.deadEndFreezeProgress,
-          lastItemFreezeProgress: belt.lastItemFreezeProgress,
-        );
-        TransportBeltRenderer.renderConveyorPath(
-            canvas, clippedBelt, item, cellSize, project.buildings,
-            detailLevel: detailLevel,
-            arrowProgress:
-                clippedBelt.animationProgress(beltArrowController.value),
-            lastItem: lastItem,
-            allItems: dataLoader.items,
-            hiddenBackgroundCells: bridgeHiddenCells);
-      } else {
-        TransportBeltRenderer.renderConveyorPath(
-            canvas, belt, item, cellSize, project.buildings,
-            detailLevel: detailLevel,
-            arrowProgress: belt.animationProgress(beltArrowController.value),
-            lastItem: lastItem,
-            allItems: dataLoader.items,
-            hideTerminalBackground: hidesTerminalCell,
-            hiddenBackgroundCells: bridgeHiddenCells);
-      }
-    }
-
-    // Build previewSet for checking which ports are currently covered by preview path
-    final Set<Offset> previewSet = {};
-    if (conveyorMode) {
-      if (!conveyorHasCommittedPath && conveyorConfirmedPath.isNotEmpty) {
-        previewSet.addAll(conveyorConfirmedPath);
-      }
-      if (livePreviewRenderPath != null &&
-          livePreviewRenderPath.isNotEmpty &&
-          (!conveyorHasCommittedPath || conveyorPreviewPath!.length > 1)) {
-        previewSet.addAll(livePreviewRenderPath);
-      }
-    }
-
-    // 已确认段不单独渲染预览，原传送带在创建过程中保持完整渲染，动画不中断
-
-    // 实时段根据有效/无效状态分别渲染 - (放到建筑下方渲染)
-    if (conveyorPathInvalid) {
-      // 无效状态：仅实时段标红，但是同样传入 fullPathContext 使得转弯样式能与已确认段进行平滑衔接
-      if (livePreviewRenderPath != null &&
-          livePreviewRenderPath.isNotEmpty &&
-          (!conveyorHasCommittedPath || conveyorPreviewPath!.length > 1)) {
-        TransportBeltRenderer.renderPreviewPath(
-          canvas,
-          livePreviewRenderPath,
-          cellSize,
-          <String>{},
-          project.buildings,
-          isInvalid: true,
-          fullPathContext: fullPathContext,
-          contextStartIndex: livePreviewContextStartIndex,
-          incomingDirection: conveyorIncomingDirection,
-          arrowProgress: beltArrowController.value,
-          itemSegments: previewItemSegments,
-          allItems: dataLoader.items,
-          opaqueItems: hasConfirmedForkHandoff,
-          itemArrowProgress: 0.5,
-        );
-      }
-    } else {
-      // 有效状态：实时段为蓝色预览
-      if (livePreviewRenderPath != null &&
-          livePreviewRenderPath.isNotEmpty &&
-          (!conveyorHasCommittedPath || conveyorPreviewPath!.length > 1)) {
-        TransportBeltRenderer.renderPreviewPath(
-          canvas,
-          livePreviewRenderPath,
-          cellSize,
-          <String>{},
-          project.buildings,
-          fullPathContext: fullPathContext,
-          contextStartIndex: livePreviewContextStartIndex,
-          incomingDirection: conveyorIncomingDirection,
-          arrowProgress: beltArrowController.value,
-          itemSegments: previewItemSegments,
-          allItems: dataLoader.items,
-          opaqueItems: hasConfirmedForkHandoff,
-          itemArrowProgress: 0.5,
-        );
-      } else if (conveyorMode &&
-          mouseGridPos != null &&
-          conveyorConfirmedPath.isEmpty) {
-        // 传送带处于尚未锚定的预备状态且当前空节点鼠标浮动时，高亮选中指示格
-        TransportBeltRenderer.renderHoverHighlight(
-            canvas, mouseGridPos!, cellSize);
-      }
-    }
-
-    // 渲染物流桥预览：在传送带交叉点显示灰色半透明物流桥
-    if (conveyorMode && previewBridgeCells.isNotEmpty && !conveyorPathInvalid) {
-      final bridgeBuilding = dataLoader.getBuilding('belt_bridge_1x1');
-      if (bridgeBuilding != null) {
-        for (final cell in previewBridgeCells) {
-          LogisticsUnitRenderer.renderPlaceholder(
-            canvas,
-            bridgeBuilding,
-            cell.dx - (bridgeBuilding.gridWidth ~/ 2).toDouble(),
-            cell.dy - (bridgeBuilding.gridHeight ~/ 2).toDouble(),
-            cellSize,
-            0.6,
-            rotation: 0,
-            previewColorOverride: const Color(0xFF3D3D3D),
-          );
-        }
-      }
-    }
-
-    for (final pb in project.buildings) {
-      if (pb == movingBuilding) continue;
-      if (!_isBuildingVisible(pb, viewport)) continue;
-
-      // Compute combined port states (actual + preview connections)
-      final combinedPorts = <String, int>{};
-      final actualConns = portConnectionsCache[pb.id] ?? <String, bool>{};
-      actualConns.forEach((key, isConnected) {
-        if (isConnected) {
-          combinedPorts[key] = 1; // 1 = connected yellow
-        }
-      });
-
-      if (conveyorMode) {
-        bool containsGrid(Offset portGrid) {
-          final px = portGrid.dx.round();
-          final py = portGrid.dy.round();
-          for (final cell in previewSet) {
-            if (cell.dx.round() == px && cell.dy.round() == py) {
-              return true;
-            }
-          }
-          return false;
-        }
-
-        for (int i = 0; i < pb.inputPorts.length; i++) {
-          final port = pb.inputPorts[i];
-          final portGrid = port.gridPosition(
-            pb.gridX,
-            pb.gridY,
-            pb.building.gridWidth,
-            pb.building.gridHeight,
-            rotation: pb.rotation,
-          );
-          if (containsGrid(portGrid)) {
-            combinedPorts['input_$i'] = 2; // 2 = preview blue
-          }
-        }
-        for (int i = 0; i < pb.outputPorts.length; i++) {
-          final port = pb.outputPorts[i];
-          final portGrid = port.gridPosition(
-            pb.gridX,
-            pb.gridY,
-            pb.building.gridWidth,
-            pb.building.gridHeight,
-            rotation: pb.rotation,
-          );
-          if (containsGrid(portGrid)) {
-            combinedPorts['output_$i'] = 2; // 2 = preview blue
-          }
-        }
-      }
-
-      // 预渲染缓存 key
-      final sortedEntries = combinedPorts.entries.toList()
-        ..sort((a, b) => a.key.compareTo(b.key));
-      final portsHash =
-          sortedEntries.map((e) => '${e.key}:${e.value}').join(',');
-      final assetVersion = LogisticsUnitRenderer.isLogisticsUnit(pb.building.id)
-          ? LogisticsUnitRenderer.cacheVersion
-          : 0;
-      final cacheKey =
-          '${pb.building.id}_${pb.rotation}_${detailLevel}_${assetVersion}_$portsHash';
-
-      final x = pb.gridX * cellSize;
-      final y = pb.gridY * cellSize;
-      final w = pb.building.gridWidth * cellSize;
-      final h = pb.building.gridHeight * cellSize;
-
-      ui.Picture? cachedPicture = _pictureCache[cacheKey];
-      if (cachedPicture == null) {
-        final recorder = ui.PictureRecorder();
-        final recordCanvas = Canvas(recorder);
-        recordCanvas.translate(w / 2, h / 2);
-        recordCanvas.rotate(pb.rotation * math.pi / 2);
-        recordCanvas.translate(-w / 2, -h / 2);
-
-        _renderBuildingStatic(
-            recordCanvas, pb, cellSize, detailLevel, combinedPorts);
-
-        cachedPicture = recorder.endRecording();
-        if (_pictureCache.length >= _maxCacheSize) {
-          _pictureCache.remove(_pictureCache.keys.first);
-        }
-        _pictureCache[cacheKey] = cachedPicture;
-      }
-
-      canvas.save();
-      canvas.translate(x, y);
-      canvas.drawPicture(cachedPicture);
-      canvas.restore();
-
-      // Logo 单独绘制（不缓存），始终不随设备/画布旋转
-      if (pb.building.id == RefiningUnitConfig.id &&
-          RefiningUnitRenderer.isReady) {
-        RefiningUnitRenderer.renderLogo(
-          canvas,
-          x,
-          y,
-          w,
-          h,
-          pb.rotation,
-          displayAngle,
-        );
-      } else if ((pb.building.id == DepotLoaderConfig.id ||
-              pb.building.id == DepotUnloaderConfig.id) &&
-          DepotAccessRenderer.isReady) {
-        DepotAccessRenderer.renderLogo(
-          canvas,
-          x,
-          y,
-          w,
-          h,
-          pb.building.id,
-          pb.rotation,
-          displayAngle,
-        );
-      }
-    }
-
-    if (placingBuilding != null && mouseGridPos != null) {
-      final cx =
-          mouseGridPos!.dx - (placingBuilding!.gridWidth ~/ 2).toDouble();
-      final cy =
-          mouseGridPos!.dy - (placingBuilding!.gridHeight ~/ 2).toDouble();
-      final isBlocked =
-          _isPreviewBlocked(placingBuilding!, cx, cy, placingRotation);
-
-      if (placingBuilding!.id == RefiningUnitConfig.id) {
-        RefiningUnitRenderer.renderPlaceholder(
-          canvas,
-          placingBuilding!,
-          cx,
-          cy,
-          cellSize,
-          0.6,
-          rotation: placingRotation,
-          isBlocked: isBlocked,
-          canvasRotation: displayAngle,
-        );
-      } else if (placingBuilding!.id == DepotLoaderConfig.id ||
-          placingBuilding!.id == DepotUnloaderConfig.id) {
-        DepotAccessRenderer.renderPlaceholder(
-          canvas,
-          placingBuilding!,
-          cx,
-          cy,
-          cellSize,
-          0.6,
-          rotation: placingRotation,
-          isBlocked: isBlocked,
-          canvasRotation: displayAngle,
-        );
-      } else if (LogisticsUnitRenderer.isLogisticsUnit(placingBuilding!.id)) {
-        LogisticsUnitRenderer.renderPlaceholder(
-          canvas,
-          placingBuilding!,
-          cx,
-          cy,
-          cellSize,
-          0.6,
-          rotation: placingRotation,
-          isBlocked: isBlocked,
-          canvasRotation: displayAngle,
-        );
-      } else {
-        BuildingRenderer.renderPlaceholder(
-          canvas,
-          placingBuilding!,
-          cx,
-          cy,
-          cellSize,
-          0.6,
-          rotation: placingRotation,
-          isBlocked: isBlocked,
-        );
-      }
-
-      // 碰撞时绘制阻拦对象红色叠加
-      if (isBlocked) {
-        _drawBlockedOverlays(canvas, placingBuilding!, cx, cy, placingRotation);
-      }
-    }
-
-    // 移动中的建筑预览
-    if (movingBuilding != null && mouseGridPos != null) {
-      final mb = movingBuilding!;
-      final cx = mouseGridPos!.dx - (mb.building.gridWidth ~/ 2).toDouble();
-      final cy = mouseGridPos!.dy - (mb.building.gridHeight ~/ 2).toDouble();
-      final isBlocked = _isPreviewBlocked(mb.building, cx, cy, movingRotation);
-
-      if (mb.building.id == RefiningUnitConfig.id) {
-        RefiningUnitRenderer.renderPlaceholder(
-          canvas,
-          mb.building,
-          cx,
-          cy,
-          cellSize,
-          0.6,
-          rotation: movingRotation,
-          isBlocked: isBlocked,
-          canvasRotation: displayAngle,
-        );
-      } else if (mb.building.id == DepotLoaderConfig.id ||
-          mb.building.id == DepotUnloaderConfig.id) {
-        DepotAccessRenderer.renderPlaceholder(
-          canvas,
-          mb.building,
-          cx,
-          cy,
-          cellSize,
-          0.6,
-          rotation: movingRotation,
-          isBlocked: isBlocked,
-          canvasRotation: displayAngle,
-        );
-      } else if (LogisticsUnitRenderer.isLogisticsUnit(mb.building.id)) {
-        LogisticsUnitRenderer.renderPlaceholder(
-          canvas,
-          mb.building,
-          cx,
-          cy,
-          cellSize,
-          0.6,
-          rotation: movingRotation,
-          isBlocked: isBlocked,
-          canvasRotation: displayAngle,
-        );
-      } else {
-        BuildingRenderer.renderPlaceholder(
-          canvas,
-          mb.building,
-          cx,
-          cy,
-          cellSize,
-          0.6,
-          rotation: movingRotation,
-          isBlocked: isBlocked,
-        );
-      }
-
-      // 碰撞时绘制阻拦对象红色叠加
-      if (isBlocked) {
-        _drawBlockedOverlays(canvas, mb.building, cx, cy, movingRotation);
-      }
-    }
-
-    // 悬停高亮白框
-    if (hoveredBuilding != null &&
-        placingBuilding == null &&
-        movingBuilding == null) {
-      final hb = hoveredBuilding!;
-      final hx = hb.gridX * cellSize;
-      final hy = hb.gridY * cellSize;
-      final hw = hb.building.gridWidth * cellSize;
-      final hh = hb.building.gridHeight * cellSize;
-
-      canvas.save();
-      canvas.translate(hx + hw / 2, hy + hh / 2);
-      canvas.rotate(hb.rotation * math.pi / 2);
-      canvas.translate(-hw / 2, -hh / 2);
-
-      final highlightPaint = Paint()
-        ..color = Colors.white
-        ..strokeWidth = 5.0
-        ..style = PaintingStyle.stroke;
-      canvas.drawRect(Rect.fromLTWH(0, 0, hw, hh), highlightPaint);
-
-      canvas.restore();
-    }
-
-    canvas.restore();
-
-    // 长按圆形进度条（屏幕空间绘制，进度超过阈值才显示，避免快速点击闪烁）
-    if (isLongPressing &&
-        longPressScreenPos != null &&
-        longPressProgress > 0.15) {
-      final center = longPressScreenPos!;
-      const radius = 24.0;
-      const strokeW = 4.0;
-
-      // 背景圆环
-      final bgPaint = Paint()
-        ..color = const Color(0x30FFFFFF)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeW;
-      canvas.drawCircle(center, radius, bgPaint);
-
-      // 蓝色填充弧（顺时针，从顶部开始）
-      final progressPaint = Paint()
-        ..color = Colors.blue
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeW
-        ..strokeCap = StrokeCap.round;
-
-      const startAngle = -math.pi / 2; // 12点方向
-      final sweepAngle = 2 * math.pi * longPressProgress;
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        startAngle,
-        sweepAngle,
-        false,
-        progressPaint,
-      );
-    }
-
-    if (conveyorMode) {
-      final hudPhase =
-          (beltArrowController.lastElapsedDuration?.inMicroseconds ?? 0) /
-              beltArrowController.duration!.inMicroseconds;
-      ConveyorCreateModeHudPainter.paintHud(
-        canvas,
-        size,
-        hudPhase,
-      );
-    }
-  }
-
-  /// 对坐标点进行逆旋转变换（绕原点旋转 -θ）
-  Offset _inverseRotate(Offset pos, double cosA, double sinA) {
-    return Offset(
-      pos.dx * cosA + pos.dy * sinA,
-      -pos.dx * sinA + pos.dy * cosA,
-    );
-  }
-
-  /// 计算可见世界坐标区域（考虑旋转的轴对齐包围盒）
-  _Viewport _computeViewport(Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final cosA = math.cos(displayAngle);
-    final sinA = math.sin(displayAngle);
-
-    // 屏幕四角逆变换到世界坐标
-    final corners = [
-      Offset.zero,
-      Offset(size.width, 0),
-      Offset(size.width, size.height),
-      Offset(0, size.height),
-    ];
-
-    double minX = double.infinity, minY = double.infinity;
-    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
-
-    for (final corner in corners) {
-      var pos = corner;
-      // 逆变换: translate(-center) → inverse-rotate → translate(center) → translate(+offset) → unscale
-      pos = Offset(pos.dx - center.dx, pos.dy - center.dy);
-      pos = _inverseRotate(pos, cosA, sinA);
-      pos = Offset(pos.dx + center.dx, pos.dy + center.dy);
-      pos = Offset(pos.dx + displayOffsetX, pos.dy + displayOffsetY);
-      pos = Offset(pos.dx / displayScale, pos.dy / displayScale);
-
-      if (pos.dx < minX) minX = pos.dx;
-      if (pos.dy < minY) minY = pos.dy;
-      if (pos.dx > maxX) maxX = pos.dx;
-      if (pos.dy > maxY) maxY = pos.dy;
-    }
-
-    return _Viewport(minX, minY, maxX, maxY);
-  }
-
-  /// 判断预览建筑是否与现有建筑或传送带碰撞
-  bool _isPreviewBlocked(
-      Building building, double gridX, double gridY, int rotation) {
-    final tempPb = PlacedBuilding(
-      id: '_preview',
-      building: building,
-      gridX: gridX,
-      gridY: gridY,
-      rotation: rotation,
-    );
-    final bounds = tempPb.getBounds(cellSize);
-
-    // 检测与现有建筑的碰撞
-    for (final pb in project.buildings) {
-      if (pb.overlaps(bounds, cellSize)) return true;
-    }
-
-    // 检测与传送带的碰撞
-    final previewCells = _getGridCells(building, gridX, gridY, rotation);
-    for (final belt in project.conveyors) {
-      for (int i = 0; i < belt.path.length; i++) {
-        if (previewCells.contains(_normalizedGridCell(belt.path[i])) &&
-            !_canBuildingOverlapBeltCell(building, belt, i)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  /// 获取建筑占用的网格坐标集合
-  Set<Offset> _getGridCells(
-      Building building, double gridX, double gridY, int rotation) {
-    final cells = <Offset>{};
-    // 考虑旋转后的有效尺寸
-    int effW, effH;
-    double effX, effY;
-    if (rotation % 2 == 1) {
-      effW = building.gridHeight;
-      effH = building.gridWidth;
-    } else {
-      effW = building.gridWidth;
-      effH = building.gridHeight;
-    }
-    effX = gridX + (building.gridWidth - effW) / 2.0;
-    effY = gridY + (building.gridHeight - effH) / 2.0;
-
-    for (int dx = 0; dx < effW; dx++) {
-      for (int dy = 0; dy < effH; dy++) {
-        cells.add(
-            Offset((effX + dx).roundToDouble(), (effY + dy).roundToDouble()));
-      }
-    }
-    return cells;
-  }
-
-  /// 绘制碰撞对象的红色叠加层
-  void _drawBlockedOverlays(Canvas canvas, Building building, double gridX,
-      double gridY, int rotation) {
-    final previewCells = _getGridCells(building, gridX, gridY, rotation);
-    final previewSet =
-        previewCells.map((c) => '${c.dx.toInt()}_${c.dy.toInt()}').toSet();
-
-    // 阻拦的建筑：整体变红
-    for (final pb in project.buildings) {
-      final tempPb = PlacedBuilding(
-        id: '_temp',
-        building: pb.building,
-        gridX: pb.gridX,
-        gridY: pb.gridY,
-        rotation: pb.rotation,
-      );
-      final bounds = tempPb.getBounds(cellSize);
-      final testPb = PlacedBuilding(
-        id: '_preview',
-        building: building,
-        gridX: gridX,
-        gridY: gridY,
-        rotation: rotation,
-      );
-      if (!testPb.overlaps(bounds, cellSize)) continue;
-
-      final x = pb.gridX * cellSize;
-      final y = pb.gridY * cellSize;
-      final w = pb.building.gridWidth * cellSize;
-      final h = pb.building.gridHeight * cellSize;
-
-      canvas.save();
-      canvas.translate(x + w / 2, y + h / 2);
-      canvas.rotate(pb.rotation * math.pi / 2);
-      canvas.translate(-w / 2, -h / 2);
-      canvas.drawRect(
-        Rect.fromLTWH(0, 0, w, h),
-        Paint()..color = const Color(0x55FF4444),
-      );
-      canvas.restore();
-    }
-
-    // 阻拦的传送带：使用红色传送带预览渲染
-    for (final belt in project.conveyors) {
-      final blockedKeys = <String>{};
-      for (int i = 0; i < belt.path.length; i++) {
-        final key = _gridCellKey(belt.path[i]);
-        if (previewSet.contains(key) &&
-            !_canBuildingOverlapBeltCell(building, belt, i)) {
-          blockedKeys.add(key);
-        }
-      }
-      if (blockedKeys.isNotEmpty) {
-        TransportBeltRenderer.renderBlockedBeltCells(
-          canvas,
-          belt.path,
-          cellSize,
-          blockedKeys,
-          project.buildings,
-          incomingDirection: belt.incomingDirection,
-        );
-      }
-    }
-  }
-
-  /// 判断设备是否在视口内
-  bool _isBuildingVisible(PlacedBuilding pb, _Viewport vp) {
-    final x = pb.gridX * cellSize;
-    final y = pb.gridY * cellSize;
-    final w = pb.building.gridWidth * cellSize;
-    final h = pb.building.gridHeight * cellSize;
-    // AABB 碰撞检测
-    return x + w > vp.minX && x < vp.maxX && y + h > vp.minY && y < vp.maxY;
-  }
-
-  /// 判断路径是否在视口内
-  bool _isPathVisible(List<Offset> path, _Viewport vp) {
-    if (path.isEmpty) return false;
-
-    double minX = double.infinity, minY = double.infinity;
-    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
-
-    for (final cell in path) {
-      final x = cell.dx * cellSize;
-      final y = cell.dy * cellSize;
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (x + cellSize > maxX) maxX = x + cellSize;
-      if (y + cellSize > maxY) maxY = y + cellSize;
-    }
-
-    return maxX > vp.minX && minX < vp.maxX && maxY > vp.minY && minY < vp.maxY;
-  }
-
-  List<ConveyorItemSegment> _previewItemSegmentsForPath(
-      List<Offset> contextPath,
-      {required bool shouldProjectForkSource,
-      required int forkProjectionLimit}) {
-    if (contextPath.isEmpty) return const [];
-
-    final segments = <ConveyorItemSegment>[];
-    final maxContextEnd = contextPath.length;
-
-    for (final belt in project.conveyors) {
-      if (belt.path.isEmpty) continue;
-
-      if (shouldProjectForkSource) {
-        final forkIndex = _pathIndexOfCell(belt.path, contextPath.first);
-        if (forkIndex > 0) {
-          final projected = _projectForkSourceSegments(
-            belt,
-            forkIndex,
-            math.min(forkProjectionLimit, contextPath.length),
-            math.min(forkProjectionLimit, contextPath.length),
-          );
-          if (projected.isNotEmpty) {
-            segments.addAll(projected);
-            continue;
-          }
-        }
-      }
-
-      for (int beltStart = 0; beltStart < belt.path.length; beltStart++) {
-        for (int contextStart = 0;
-            contextStart < maxContextEnd;
-            contextStart++) {
-          if (!_sameCell(belt.path[beltStart], contextPath[contextStart])) {
-            continue;
-          }
-          if (beltStart > 0 &&
-              contextStart > 0 &&
-              _sameCell(
-                belt.path[beltStart - 1],
-                contextPath[contextStart - 1],
-              )) {
-            continue;
-          }
-
-          var length = 0;
-          while (beltStart + length < belt.path.length &&
-              contextStart + length < maxContextEnd &&
-              _sameCell(
-                belt.path[beltStart + length],
-                contextPath[contextStart + length],
-              )) {
-            length++;
-          }
-          if (length <= 0) continue;
-
-          segments.addAll(
-            belt
-                .clippedItemSegments(
-                  beltStart,
-                  beltStart + length,
-                  clearFreezeProgress: true,
-                )
-                .map((segment) => segment.shifted(contextStart))
-                .where((segment) => segment.hasItems),
-          );
-          break;
-        }
-      }
-    }
-
-    segments.sort((a, b) => a.drainCount.compareTo(b.drainCount));
-    return segments;
-  }
-
-  List<ConveyorItemSegment> _projectForkSourceSegments(
-    ConveyorBelt belt,
-    int forkIndex,
-    int contextLength,
-    int projectedEnd,
-  ) {
-    final projected = <ConveyorItemSegment>[];
-    final sourceEnd = math.min(contextLength, belt.path.length);
-    for (final segment in belt.clippedItemSegments(
-      0,
-      sourceEnd,
-      clearFreezeProgress: true,
-    )) {
-      final fill = math
-          .max(segment.fillCount, projectedEnd)
-          .clamp(0, contextLength)
-          .toInt();
-      final drain = segment.drainCount.clamp(0, contextLength).toInt();
-      if (fill <= drain) continue;
-      projected.add(ConveyorItemSegment(
-        itemId: segment.itemId,
-        fillCount: fill,
-        drainCount: drain,
-      ));
-    }
-    return projected;
-  }
-
-  int _pathIndexOfCell(List<Offset> path, Offset cell) {
-    for (int i = 0; i < path.length; i++) {
-      if (_sameCell(path[i], cell)) return i;
-    }
-    return -1;
-  }
-
-  bool _sameCell(Offset a, Offset b) {
-    return a.dx.round() == b.dx.round() && a.dy.round() == b.dy.round();
-  }
-
-  /// 渲染设备的静态部分到指定 Canvas（用于预渲染缓存）
-  void _renderBuildingStatic(Canvas canvas, PlacedBuilding pb, double cellSize,
-      int detailLevel, Map<String, int> portConnections) {
-    Recipe? recipe;
-    if (pb.activeRecipeId != null && detailLevel >= 1) {
-      recipe = dataLoader.getRecipe(pb.activeRecipeId!);
-    }
-
-    if (pb.building.id == RefiningUnitConfig.id) {
-      RefiningUnitRenderer.render(
-        canvas, pb.building, 0, 0, cellSize, 0,
-        activeRecipe: recipe,
-        isBlocked: pb.isBlocked,
-        productionProgress: 0, // 静态部分不含进度条
-        portConnections: portConnections,
-        detailLevel: detailLevel,
-      );
-    } else if (pb.building.id == DepotLoaderConfig.id ||
-        pb.building.id == DepotUnloaderConfig.id) {
-      DepotAccessRenderer.render(
-        canvas,
-        pb.building,
-        0,
-        0,
-        cellSize,
-        0,
-        activeRecipe: recipe,
-        isBlocked: pb.isBlocked,
-        productionProgress: 0,
-        portConnections: portConnections,
-        detailLevel: detailLevel,
-      );
-    } else if (LogisticsUnitRenderer.isLogisticsUnit(pb.building.id)) {
-      LogisticsUnitRenderer.render(
-        canvas,
-        pb.building,
-        0,
-        0,
-        cellSize,
-        0,
-        activeRecipe: recipe,
-        isBlocked: pb.isBlocked,
-        productionProgress: 0,
-        portConnections: portConnections,
-        detailLevel: detailLevel,
-      );
-    } else {
-      BuildingRenderer.renderBuilding(
-        canvas,
-        pb.building,
-        0,
-        0,
-        cellSize,
-        0,
-        activeRecipe: recipe,
-        isBlocked: pb.isBlocked,
-        productionProgress: 0,
-        portConnections: portConnections,
-        detailLevel: detailLevel,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _EditorPainter oldDelegate) {
-    return repaintTrigger != oldDelegate.repaintTrigger ||
-        project != oldDelegate.project ||
-        dataLoader != oldDelegate.dataLoader ||
-        cellSize != oldDelegate.cellSize ||
-        placingBuilding != oldDelegate.placingBuilding ||
-        placingRotation != oldDelegate.placingRotation ||
-        mouseGridPos != oldDelegate.mouseGridPos ||
-        hoveredBuilding != oldDelegate.hoveredBuilding ||
-        conveyorMode != oldDelegate.conveyorMode ||
-        conveyorPathInvalid != oldDelegate.conveyorPathInvalid ||
-        conveyorForkCell != oldDelegate.conveyorForkCell ||
-        conveyorHasCommittedPath != oldDelegate.conveyorHasCommittedPath ||
-        conveyorIncomingDirection != oldDelegate.conveyorIncomingDirection ||
-        previewContextExtension != oldDelegate.previewContextExtension ||
-        !_listEquals(previewBridgeCells, oldDelegate.previewBridgeCells) ||
-        !_listEquals(
-            conveyorConfirmedPath, oldDelegate.conveyorConfirmedPath) ||
-        !_listEquals(conveyorPreviewPath, oldDelegate.conveyorPreviewPath) ||
-        !_setEquals(
-            conveyorPreviewOccupied, oldDelegate.conveyorPreviewOccupied) ||
-        displayScale != oldDelegate.displayScale ||
-        displayOffsetX != oldDelegate.displayOffsetX ||
-        displayOffsetY != oldDelegate.displayOffsetY ||
-        displayAngle != oldDelegate.displayAngle ||
-        isLongPressing != oldDelegate.isLongPressing ||
-        longPressScreenPos != oldDelegate.longPressScreenPos ||
-        longPressProgress != oldDelegate.longPressProgress ||
-        movingBuilding != oldDelegate.movingBuilding ||
-        movingRotation != oldDelegate.movingRotation;
-  }
-
-  bool _listEquals<T>(List<T>? a, List<T>? b) {
-    if (a == null && b == null) return true;
-    if (a == null || b == null) return false;
-    if (a.length != b.length) return false;
-    for (int i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
-
-  bool _setEquals<T>(Set<T>? a, Set<T>? b) {
-    if (a == null && b == null) return true;
-    if (a == null || b == null) return false;
-    if (a.length != b.length) return false;
-    return a.containsAll(b);
-  }
-}
-
-/// 视口区域（世界坐标）
-class _Viewport {
-  final double minX, minY, maxX, maxY;
-  const _Viewport(this.minX, this.minY, this.maxX, this.maxY);
 }

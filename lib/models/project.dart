@@ -118,6 +118,7 @@ class PlacedBuilding {
   static const String _beltBridgeId = 'belt_bridge_1x1';
   static const String _bridgeLanePrefix = '__bridge_lane__';
   static const String _splitterId = 'splitter_1x1';
+  static const String _convergerId = 'converger_1x1';
 
   final String id;
   final Building building;
@@ -138,6 +139,15 @@ class PlacedBuilding {
   /// 分流器循环分配索引（0=left, 1=up, 2=right）
   /// 记录下一个要分配的输出方向，实现 左→上→右 循环分配
   int splitterCycleIndex = 0;
+
+  /// 汇流器循环接收索引，记录下一个要接收的输入方向
+  /// 按传送带创建顺序循环选择输入方向
+  int convergerCycleIndex = 0;
+
+  /// 汇流器 FCFS（先到先得）机制：记录每个输入方向物品到达末端的时间戳序号。
+  /// key: 输入方向（left/up/right），value: 到达序号（值越小越早到达，优先处理）
+  /// 当物品到达传送带末端时记录序号，处理完成后清除，实现先到先得。
+  Map<String, int> convergerArrivalTimestamps = {};
 
   PlacedBuilding({
     required this.id,
@@ -354,6 +364,12 @@ class PlacedBuilding {
     if (!isSplitter) return;
     outputItems.removeWhere((key, value) => key.startsWith(_splitterSlotKey));
   }
+
+  // ===== 汇流器（Converger）循环接收机制 =====
+  // 汇流器从多条输入传送带轮流接收物品，合并到单一输出传送带。
+  // FCFS（先到先得）：物品到达传送带末端时记录到达序号，按顺序处理。
+
+  bool get isConverger => building.id == _convergerId;
 
   /// 旋转后的有效宽度（90°/270° 时宽高互换）
   int get effectiveWidth =>
@@ -694,10 +710,12 @@ class ConveyorBelt {
     if (endLimit <= 0) return false;
 
     if (itemSegments.isEmpty) {
+      // 不再设置 skipAdvanceOnce：-2.0→null 修复后渲染器使用全局 arrowProgress
+      // 实现平滑动画，物品无需在 position 0（建筑遮挡格）额外停留一个 tick。
+      // 之前的 skipAdvanceOnce 会导致物品在遮挡格停留约 2 秒，cell 1 持续显示箭头。
       itemSegments.add(ConveyorItemSegment(
         itemId: sourceItemId,
         fillCount: 1.clamp(0, endLimit).toInt(),
-        skipAdvanceOnce: skipAdvanceOnce,
       ));
       syncLegacyFromSegments();
       return true;
@@ -716,12 +734,12 @@ class ConveyorBelt {
     }
 
     if (first.drainCount <= 0) return false;
+    // 不再设置 skipAdvanceOnce（原因同 EMPTY 分支）
     itemSegments.insert(
       0,
       ConveyorItemSegment(
         itemId: sourceItemId,
         fillCount: 1.clamp(0, math.min(first.drainCount, endLimit)).toInt(),
-        skipAdvanceOnce: skipAdvanceOnce,
       ),
     );
     syncLegacyFromSegments();
@@ -787,9 +805,8 @@ class ConveyorBelt {
       return false;
     }
     downstream.fillCount--;
-    if (downstream.fillCount < path.length) {
-      downstream.freezeProgress = null;
-    }
+    // Fix H6a: 不清除 freezeProgress，避免物品从中心 (0.5) 跳到起点 (0.0)
+    // advanceItemSegments 会根据新位置决定是否保持冻结
     syncLegacyFromSegments();
     return true;
   }
@@ -827,6 +844,9 @@ class ConveyorBelt {
             segment.itemId == activeSourceItemId;
         if (isFedBySource) {
           // 一次性推送（如分流器）：本 tick 未扩展则按死胡同模式推进
+          // 推进时不再设置 -2.0，改为 null。让物品使用全局 arrowProgress
+          // 连续移动，渲染状态机会在到达上限时渐进式重新冻结（-1.0 → -0.5 → 0.5），
+          // 不会出现"分批次"或"变成箭头"的视觉问题。
           if (!sourceExtendedThisTick &&
               segment.fillCount < limit) {
             segment.fillCount++;
@@ -837,6 +857,9 @@ class ConveyorBelt {
           continue;
         }
         if (segment.fillCount < limit) {
+          // 推进时不再设置 -2.0，改为 null。让物品使用全局 arrowProgress
+          // 连续移动，渲染状态机会在到达上限时渐进式重新冻结（-1.0 → -0.5 → 0.5），
+          // 不会出现"分批次"或"变成箭头"的视觉问题。
           segment.fillCount++;
           segment.drainCount++;
           segment.freezeProgress = null;

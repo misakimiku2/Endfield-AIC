@@ -527,8 +527,20 @@ class TransportBeltRenderer {
             i < sourceSegments.length ? sourceSegments[i] : segment;
         // 物品段到达其独立上限（无论是死胡同末端还是被前方物品挡住）都应冻结，
         // 不再依赖 isDeadEnd —— 连接到建筑物的传送带上的中间物品也需要冻结。
+        // Plan E: -2.0 = 推进后冻结（渲染按 0.5），当 arrowProgress >= 0.5 时解冻，
+        // 让物品从 0.5→1.0 平滑动画，避免 tick 后从 0.5 跳回 0.0
+        if (sourceSegment.freezeProgress == -2.0 &&
+            arrowProgress >= 0.5) {
+          sourceSegment.freezeProgress = null;
+        }
+        // 仅最后一段在抵达终端极限时按 fillCount>=limit 冻结；
+        // 非末段不应被 fillCount>=下一段drainCount 冻结，否则不同物品
+        // 在汇流器输出带上会因 B.fillCount>=A.drainCount 而停滞成块
+        // （表现为：A 走到 3 中心时 B 停在 2 中心，A 进入 4 时 B/C 突然刷新到 A 后面）。
+        // 非末段只保留显式 freezeProgress != null 的冻结来源。
+        final isLastSegment = i == renderSegments.length - 1;
         final shouldFreezeSegment = sourceSegment.freezeProgress != null ||
-            segment.fillCount >= limit;
+            (isLastSegment && segment.fillCount >= limit);
         if (shouldFreezeSegment && sourceSegment.freezeProgress == null) {
           // 阶段 0→1：物品刚刚到达停止位置，标记为 -1.0（等待自然流入）
           sourceSegment.freezeProgress = -1.0;
@@ -842,8 +854,9 @@ class TransportBeltRenderer {
           if (i >= segmentDrain && i < segmentFill) {
             cellItemImage = segmentImages?[segment.itemId];
             final frozen = segment.freezeProgress;
-            if (frozen != null && frozen > 0) {
-              cellArrowProgress = frozen;
+            // Plan E: -2.0 渲染时按 0.5 冻结（推进后临时冻结，等待解冻）
+            if (frozen != null && (frozen > 0 || frozen == -2.0)) {
+              cellArrowProgress = frozen == -2.0 ? 0.5 : frozen;
             }
             break;
           }
