@@ -68,6 +68,10 @@ class _ConveyorBeltDialogState extends State<ConveyorBeltDialog>
   final List<_ItemAnim> _itemAnims = [];
   int _spawnCounter = 0;
 
+  /// 稳定的物品ID列表：保持顺序不变，新物品追加到末尾，
+  /// 已存在的物品不会改变位置，仅在完全消失时才移除。
+  final List<String> _stableDistinctItemIds = [];
+
   static const double _trackLength = 480.0;
   static const double _trackWidth = 54.0;
   static const double _itemSize = 40.0;
@@ -81,13 +85,19 @@ class _ConveyorBeltDialogState extends State<ConveyorBeltDialog>
       duration: const Duration(milliseconds: 2000),
     )..repeat();
 
+    // 初始化稳定列表
+    _stableDistinctItemIds.addAll(_collectDistinctItemIds());
+
     _spawnTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
       if (mounted) _spawnItem();
     });
 
     // 定时刷新以同步传送带物品状态
     _simTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
-      if (mounted) setState(() {});
+      if (mounted) {
+        _syncStableItemIds();
+        setState(() {});
+      }
     });
   }
 
@@ -102,8 +112,8 @@ class _ConveyorBeltDialogState extends State<ConveyorBeltDialog>
     super.dispose();
   }
 
-  /// 产线上所有不同物品类型（去重，保留顺序）
-  List<String> get _distinctItemIds {
+  /// 收集产线上当前所有不同的物品ID（每次实时计算）
+  List<String> _collectDistinctItemIds() {
     final seen = <String>{};
     final result = <String>[];
     for (final b in widget.allBelts) {
@@ -117,11 +127,30 @@ class _ConveyorBeltDialogState extends State<ConveyorBeltDialog>
     return result;
   }
 
+  /// 将当前产线上的物品同步到稳定列表中：
+  /// 保持已存在物品的顺序，新物品追加到末尾，
+  /// 已完全消失的物品才移除。
+  void _syncStableItemIds() {
+    final current = _collectDistinctItemIds();
+    final currentSet = current.toSet();
+    final stableSet = _stableDistinctItemIds.toSet();
+
+    // 移除已完全消失的物品
+    _stableDistinctItemIds.removeWhere((id) => !currentSet.contains(id));
+
+    // 追加新出现的物品（保持当前顺序中新物品之间的相对顺序）
+    for (final id in current) {
+      if (!stableSet.contains(id)) {
+        _stableDistinctItemIds.add(id);
+      }
+    }
+  }
+
   /// 产线上是否有任何物品
-  bool get _hasAnyItem => _distinctItemIds.isNotEmpty;
+  bool get _hasAnyItem => _stableDistinctItemIds.isNotEmpty;
 
   void _spawnItem() {
-    final itemIds = _distinctItemIds;
+    final itemIds = _stableDistinctItemIds;
     if (itemIds.isEmpty) return;
 
     // 多个物品时依次循环播放
@@ -509,7 +538,7 @@ class _ConveyorBeltDialogState extends State<ConveyorBeltDialog>
   }
 
   Widget _buildItemGridsSection() {
-    final itemIds = _distinctItemIds;
+    final itemIds = _stableDistinctItemIds;
 
     if (itemIds.isEmpty) {
       // 空传送带：显示一个灰色空网格 + 禁用的收取按钮

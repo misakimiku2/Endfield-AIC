@@ -47,11 +47,15 @@ class _DepotLoaderPanelState extends State<DepotLoaderPanel> {
     super.dispose();
   }
 
-  /// 查找连接到仓库存货口输入端口的传送带上的物品ID
-  String? _detectIncomingItemId() {
+  /// 查找连接到仓库存货口输入端口的传送带上的所有不同物品ID
+  /// 返回 (所有不同物品ID列表, 当前正在进入的物品ID)
+  (List<String>, String?) _detectAllIncomingItemIds() {
     final pb = widget.placedBuilding;
     const cellSize = 48.0;
     const threshold = 30.0;
+
+    final allItemIds = <String>{};
+    String? currentIncomingId;
 
     for (final port in pb.inputPorts) {
       final portWorld = port.worldPosition(
@@ -66,22 +70,48 @@ class _DepotLoaderPanelState extends State<DepotLoaderPanel> {
         if (belt.path.length < 2) continue;
         // 输入端口连接传送带的终点
         if ((belt.end - portWorld).distance < threshold) {
-          // 优先使用传送带上的物品ID
-          if (belt.itemId.isNotEmpty) return belt.itemId;
-          // 其次检查 itemSegments
+          // 收集传送带上所有的不同物品类型
           for (final seg in belt.itemSegments) {
-            if (seg.itemId.isNotEmpty) return seg.itemId;
+            if (seg.itemId.isNotEmpty) {
+              allItemIds.add(seg.itemId);
+            }
+          }
+          // 当前正在进入仓库存货口的物品（传送带末端物品）
+          // belt.itemId 是传送带起始端物品，应使用末端物品
+          final downstreamId = belt.downstreamItemId();
+          if (downstreamId != null && downstreamId.isNotEmpty) {
+            currentIncomingId ??= downstreamId;
           }
         }
       }
     }
-    return null;
+    // 排序保证卡片顺序稳定，不受 Set 迭代顺序影响
+    final sortedIds = allItemIds.toList()..sort();
+    return (sortedIds, currentIncomingId);
   }
 
   @override
   Widget build(BuildContext context) {
-    // 检测当前正在输入的物品
-    final incomingItemId = _detectIncomingItemId();
+    // 检测传送带上的所有不同物品 + 当前正在进入的物品
+    final (allItemIds, currentIncomingId) = _detectAllIncomingItemIds();
+
+    // 构建物品条目列表
+    final itemEntries = <DepotItemEntry>[];
+    for (final itemId in allItemIds) {
+      final item = widget.dataLoader.getItem(itemId);
+      if (item != null) {
+        final isActive = itemId == currentIncomingId;
+        final quantity = widget.project.getWarehouseItemCount(itemId);
+        itemEntries.add(DepotItemEntry(
+          item: item,
+          isActive: isActive,
+          warehouseQuantity: quantity,
+        ));
+      }
+    }
+
+    // 兼容旧逻辑：取第一个物品用于单个仓库卡片
+    final incomingItemId = currentIncomingId;
     final incomingItem = incomingItemId != null
         ? widget.dataLoader.getItem(incomingItemId)
         : null;
@@ -116,14 +146,22 @@ class _DepotLoaderPanelState extends State<DepotLoaderPanel> {
         const SizedBox(height: 20),
         Expanded(
           child: Center(
-            child: DepotGridTile(
-              item: incomingItem,
-              isInput: true,
-              showNoIcon: true,
-              showButton: false,
-              warehouseQuantity: warehouseQuantity,
-              onToggleAddMode: () {},
-            ),
+            child: itemEntries.isNotEmpty
+                ? DepotGridTile(
+                    allItems: itemEntries,
+                    isInput: true,
+                    showNoIcon: true,
+                    showButton: false,
+                    onToggleAddMode: () {},
+                  )
+                : DepotGridTile(
+                    item: incomingItem,
+                    isInput: true,
+                    showNoIcon: true,
+                    showButton: false,
+                    warehouseQuantity: warehouseQuantity,
+                    onToggleAddMode: () {},
+                  ),
           ),
         ),
         const SizedBox(height: 14),
