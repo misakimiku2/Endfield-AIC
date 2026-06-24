@@ -540,9 +540,6 @@ class TransportBeltRenderer {
         if (shouldFreezeSegment && fp == -0.75) {
           sourceSegment.freezeProgress = -1.0;
         }
-        if (!shouldFreezeSegment && (fp == -0.75 || fp == -1.0 || fp == -0.5)) {
-          sourceSegment.freezeProgress = -3.0;
-        }
         if (shouldFreezeSegment && fp == -1.0) {
           if (arrowProgress < 0.5) {
             sourceSegment.freezeProgress = -0.5;
@@ -552,12 +549,6 @@ class TransportBeltRenderer {
           if (arrowProgress >= 0.5) {
             sourceSegment.freezeProgress = 0.5;
           }
-        }
-        if (!shouldFreezeSegment && fp == 0.5) {
-          sourceSegment.freezeProgress = -3.0;
-        }
-        if (shouldFreezeSegment && fp == -3.0) {
-          sourceSegment.freezeProgress = 0.5;
         }
         final newFp = sourceSegment.freezeProgress;
         frozenAhead = newFp != null && newFp != -3.0;

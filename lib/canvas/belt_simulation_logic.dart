@@ -722,6 +722,9 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
       if (shouldFreeze && fp == null) {
         segment.freezeProgress = -0.75;
       }
+      if (shouldFreeze && fp == -3.0) {
+        segment.freezeProgress = -0.75;
+      }
       if (!shouldFreeze && (fp == -0.75 || fp == -1.0 || fp == -0.5)) {
         segment.freezeProgress = -3.0;
       }
