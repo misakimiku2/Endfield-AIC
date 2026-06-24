@@ -636,30 +636,34 @@ class TransportBeltController {
     if (committedSourceBelt != null &&
         _isPathPrefix(committedSourceBelt.path, fullPath)) {
       state.itemSegments.addAll(
-        committedSourceBelt.shiftedItemSegments(0, clearFreezeProgress: true),
+        committedSourceBelt.shiftedItemSegments(0, clearFreezeProgress: false),
       );
       state.itemId = committedSourceBelt.itemId;
       state.itemFillCount = committedSourceBelt.itemFillCount;
       state.itemDrainCount = committedSourceBelt.itemDrainCount;
       state.phaseOffset = committedSourceBelt.phaseOffset;
+      state.deadEndFreezeProgress = committedSourceBelt.deadEndFreezeProgress;
       if (committedSourceBelt.lastItemFillCount > 0) {
         state.lastItemId = committedSourceBelt.lastItemId;
         state.lastItemFillCount = committedSourceBelt.lastItemFillCount;
         state.lastItemDrainCount = committedSourceBelt.lastItemDrainCount;
+        state.lastItemFreezeProgress = committedSourceBelt.lastItemFreezeProgress;
       }
     } else if (sourceBelt != null) {
       state.itemSegments.addAll(
-        sourceBelt.shiftedItemSegments(0, clearFreezeProgress: true),
+        sourceBelt.shiftedItemSegments(0, clearFreezeProgress: false),
       );
       state.itemId = sourceBelt.itemId;
       state.itemFillCount = sourceBelt.itemFillCount;
       state.itemDrainCount = sourceBelt.itemDrainCount;
       state.phaseOffset = sourceBelt.phaseOffset;
+      state.deadEndFreezeProgress = sourceBelt.deadEndFreezeProgress;
       // 源传送带的残留物品也继承
       if (sourceBelt.lastItemFillCount > 0) {
         state.lastItemId = sourceBelt.lastItemId;
         state.lastItemFillCount = sourceBelt.lastItemFillCount;
         state.lastItemDrainCount = sourceBelt.lastItemDrainCount;
+        state.lastItemFreezeProgress = sourceBelt.lastItemFreezeProgress;
       }
     } else if (forkSourceBelt != null && forkSourceIndex >= 0) {
       state.itemSegments.addAll(

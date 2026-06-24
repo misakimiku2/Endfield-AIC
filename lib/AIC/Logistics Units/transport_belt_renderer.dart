@@ -518,6 +518,7 @@ class TransportBeltRenderer {
           .where((segment) => segment.hasItems)
           .toList()
         ..sort((a, b) => a.drainCount.compareTo(b.drainCount));
+      bool frozenAhead = false;
       for (int i = renderSegments.length - 1; i >= 0; i--) {
         final segment = renderSegments[i];
         final limit = i + 1 < renderSegments.length
@@ -525,44 +526,42 @@ class TransportBeltRenderer {
             : belt.path.length;
         final sourceSegment =
             i < sourceSegments.length ? sourceSegments[i] : segment;
-        // 物品段到达其独立上限（无论是死胡同末端还是被前方物品挡住）都应冻结，
-        // 不再依赖 isDeadEnd —— 连接到建筑物的传送带上的中间物品也需要冻结。
-        // Plan E: -2.0 = 推进后冻结（渲染按 0.5），当 arrowProgress >= 0.5 时解冻，
-        // 让物品从 0.5→1.0 平滑动画，避免 tick 后从 0.5 跳回 0.0
         if (sourceSegment.freezeProgress == -2.0 &&
             arrowProgress >= 0.5) {
           sourceSegment.freezeProgress = null;
         }
-        // 仅最后一段在抵达终端极限时按 fillCount>=limit 冻结；
-        // 非末段不应被 fillCount>=下一段drainCount 冻结，否则不同物品
-        // 在汇流器输出带上会因 B.fillCount>=A.drainCount 而停滞成块
-        // （表现为：A 走到 3 中心时 B 停在 2 中心，A 进入 4 时 B/C 突然刷新到 A 后面）。
-        // 非末段只保留显式 freezeProgress != null 的冻结来源。
+        final fp = sourceSegment.freezeProgress;
         final isLastSegment = i == renderSegments.length - 1;
-        final shouldFreezeSegment = sourceSegment.freezeProgress != null ||
-            (isLastSegment && segment.fillCount >= limit);
-        if (shouldFreezeSegment && sourceSegment.freezeProgress == null) {
-          // 阶段 0→1：物品刚刚到达停止位置，标记为 -1.0（等待自然流入）
+        final atLimit = segment.fillCount >= limit;
+        final shouldFreezeSegment = atLimit && (isLastSegment || frozenAhead);
+        if (shouldFreezeSegment && fp == null) {
+          sourceSegment.freezeProgress = -0.75;
+        }
+        if (shouldFreezeSegment && fp == -0.75) {
           sourceSegment.freezeProgress = -1.0;
         }
-        if (shouldFreezeSegment && sourceSegment.freezeProgress == -1.0) {
-          // 阶段 1→2：等待 arrowProgress 降到 0.5 以下（物品已通过入口半区）
+        if (!shouldFreezeSegment && (fp == -0.75 || fp == -1.0 || fp == -0.5)) {
+          sourceSegment.freezeProgress = -3.0;
+        }
+        if (shouldFreezeSegment && fp == -1.0) {
           if (arrowProgress < 0.5) {
             sourceSegment.freezeProgress = -0.5;
           }
         }
-        if (shouldFreezeSegment && sourceSegment.freezeProgress == -0.5) {
-          // 阶段 2→3：等待 arrowProgress 回升到 0.5（物品已自然流到格子中央）
+        if (shouldFreezeSegment && fp == -0.5) {
           if (arrowProgress >= 0.5) {
             sourceSegment.freezeProgress = 0.5;
           }
         }
-        if (!shouldFreezeSegment &&
-            isDeadEnd &&
-            sourceSegment.freezeProgress != null) {
-          sourceSegment.freezeProgress = null;
+        if (!shouldFreezeSegment && fp == 0.5) {
+          sourceSegment.freezeProgress = -3.0;
         }
-        segment.freezeProgress = sourceSegment.freezeProgress;
+        if (shouldFreezeSegment && fp == -3.0) {
+          sourceSegment.freezeProgress = 0.5;
+        }
+        final newFp = sourceSegment.freezeProgress;
+        frozenAhead = newFp != null && newFp != -3.0;
+        segment.freezeProgress = newFp;
       }
       belt.syncLegacyFromSegments();
     }
@@ -854,16 +853,15 @@ class TransportBeltRenderer {
           if (i >= segmentDrain && i < segmentFill) {
             cellItemImage = segmentImages?[segment.itemId];
             final frozen = segment.freezeProgress;
-            // Plan E: -2.0 渲染时按 0.5 冻结（推进后临时冻结，等待解冻）
-            if (frozen != null && (frozen > 0 || frozen == -2.0)) {
+            if (frozen == -3.0) {
+              cellArrowProgress = arrowProgress < 0.5 ? 0.5 : arrowProgress;
+            } else if (frozen != null && (frozen > 0 || frozen == -2.0)) {
               cellArrowProgress = frozen == -2.0 ? 0.5 : frozen;
             }
             break;
           }
         }
       } else {
-        // 判断当前格子的物品状态：当前物品优先，其次残留物品，最后指针
-        // 新模型：纯整数比较，物品位置由 arrowProgress 统一驱动
         final cellLastFilled =
             lastItemImage != null && i >= lastDrainCount && i < lastFillCount;
         final cellCurrentFilled = !cellLastFilled &&

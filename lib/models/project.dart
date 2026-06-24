@@ -727,6 +727,9 @@ class ConveyorBelt {
           ? itemSegments[1].drainCount.clamp(0, path.length).toInt()
           : endLimit;
       if (first.fillCount >= limit) return false;
+      final fp = first.freezeProgress;
+      final isFreezing = fp != null && fp != -3.0;
+      if (isFreezing) return false;
       first.fillCount++;
       first.freezeProgress = null;
       syncLegacyFromSegments();
@@ -763,7 +766,10 @@ class ConveyorBelt {
       final limit = itemSegments.length > 1
           ? itemSegments[1].drainCount.clamp(0, path.length).toInt()
           : endLimit;
-      return first.fillCount < limit;
+      if (first.fillCount >= limit) return false;
+      final fp = first.freezeProgress;
+      final isFreezing = fp != null && fp != -3.0;
+      return !isFreezing;
     }
 
     // 当第一个段的 fillCount 已到达传送带末端（endLimit），
@@ -815,10 +821,6 @@ class ConveyorBelt {
     required bool isDeadEnd,
     String? activeSourceItemId,
     int? terminalLimit,
-    /// 在本 tick 中 pushSourceItem 是否已成功扩展/插入了物品。
-    /// 若为 false 且存在 FedBySource 段（如分流器一次性推送），
-    /// 则以死胡同模式同时增长 fillCount 和 drainCount，
-    /// 让单物品作为 1 格宽的块沿传送带移动。
     bool sourceExtendedThisTick = false,
   }) {
     ensureItemSegmentsFromLegacy();
@@ -842,28 +844,22 @@ class ConveyorBelt {
             segment.drainCount == 0 &&
             activeSourceItemId != null &&
             segment.itemId == activeSourceItemId;
-        if (isFedBySource) {
-          // 一次性推送（如分流器）：本 tick 未扩展则按死胡同模式推进
-          // 推进时不再设置 -2.0，改为 null。让物品使用全局 arrowProgress
-          // 连续移动，渲染状态机会在到达上限时渐进式重新冻结（-1.0 → -0.5 → 0.5），
-          // 不会出现"分批次"或"变成箭头"的视觉问题。
-          if (!sourceExtendedThisTick &&
-              segment.fillCount < limit) {
+        final fp = segment.freezeProgress;
+        final isFreezing = fp != null && fp != -3.0;
+        final canAdvance = segment.fillCount < limit;
+        if (canAdvance) {
+          if (isFreezing) {
+            segment.freezeProgress = -3.0;
+            changed = true;
+          } else {
+            if (isFedBySource && sourceExtendedThisTick) {
+              continue;
+            }
             segment.fillCount++;
             segment.drainCount++;
             segment.freezeProgress = null;
             changed = true;
           }
-          continue;
-        }
-        if (segment.fillCount < limit) {
-          // 推进时不再设置 -2.0，改为 null。让物品使用全局 arrowProgress
-          // 连续移动，渲染状态机会在到达上限时渐进式重新冻结（-1.0 → -0.5 → 0.5），
-          // 不会出现"分批次"或"变成箭头"的视觉问题。
-          segment.fillCount++;
-          segment.drainCount++;
-          segment.freezeProgress = null;
-          changed = true;
         }
       }
     } else {
@@ -871,21 +867,33 @@ class ConveyorBelt {
         final isFedBySource = segment.drainCount == 0 &&
             activeSourceItemId != null &&
             segment.itemId == activeSourceItemId;
+        final fp = segment.freezeProgress;
+        final isFreezing = fp != null && fp != -3.0;
         if (isFedBySource) {
-          // 一次性推送（如分流器）：本 tick 未扩展则按死胡同模式推进
-          if (!sourceExtendedThisTick &&
-              segment.fillCount < endLimit) {
-            segment.fillCount++;
+          final canAdvance = segment.fillCount < endLimit;
+          if (canAdvance) {
+            if (isFreezing) {
+              segment.freezeProgress = -3.0;
+              changed = true;
+            } else if (!sourceExtendedThisTick) {
+              segment.fillCount++;
+              segment.drainCount++;
+              segment.freezeProgress = null;
+              changed = true;
+            }
+          }
+          continue;
+        }
+        final canAdvance = segment.drainCount < segment.fillCount;
+        if (canAdvance) {
+          if (isFreezing) {
+            segment.freezeProgress = -3.0;
+            changed = true;
+          } else {
             segment.drainCount++;
             segment.freezeProgress = null;
             changed = true;
           }
-          continue;
-        }
-        if (segment.drainCount < segment.fillCount) {
-          segment.drainCount++;
-          segment.freezeProgress = null;
-          changed = true;
         }
       }
       itemSegments.removeWhere((segment) => !segment.hasItems);
@@ -908,15 +916,28 @@ class ConveyorBelt {
     }
     _sortItemSegments();
     final endLimit = path.length;
-    for (int i = 0; i < itemSegments.length; i++) {
+    bool frozenAhead = false;
+    for (int i = itemSegments.length - 1; i >= 0; i--) {
       final segment = itemSegments[i];
       if (!segment.hasItems) continue;
       final limit = i + 1 < itemSegments.length
           ? itemSegments[i + 1].drainCount.clamp(0, endLimit).toInt()
           : endLimit;
-      if (segment.fillCount >= limit && segment.freezeProgress == null) {
-        segment.freezeProgress = -1.0;
+      final isLastSegment = i == itemSegments.length - 1;
+      final atLimit = segment.fillCount >= limit;
+      final shouldFreeze = atLimit && (isLastSegment || frozenAhead);
+      final fp = segment.freezeProgress;
+      if (shouldFreeze && fp == null) {
+        segment.freezeProgress = -0.75;
       }
+      if (!shouldFreeze && (fp == -0.75 || fp == -1.0 || fp == -0.5)) {
+        segment.freezeProgress = -3.0;
+      }
+      if (!shouldFreeze && fp == 0.5) {
+        segment.freezeProgress = -3.0;
+      }
+      final newFp = segment.freezeProgress;
+      frozenAhead = newFp != null && newFp != -3.0;
     }
     syncLegacyFromSegments();
   }

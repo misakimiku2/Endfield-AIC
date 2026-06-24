@@ -136,22 +136,13 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
     final sourceItemId = _getAvailableOutputItemIdForBeltStart(belt);
     final isProducing = sourceItemId != null && sourceItemId.isNotEmpty;
 
-    // 推送式：如果源是分流器且位置 0 有物品，标记为 activeSourceItemId
-    // 以便 advanceItemSegments 识别该段为「一次性推送」（非连续生产）。
-    // 不再依赖 _splitterHasIncomingItem —— 一次性推送的物品应当自行沿
-    // 传送带前进并最终离开，无需输入带仍有物品来「保持」。
     var sourceExtendedThisTick = false;
     String? activeSourceItemId = isProducing ? sourceItemId : null;
     if (!isProducing && belt.itemSegments.isNotEmpty) {
       final firstSegment = belt.itemSegments.first;
       if (firstSegment.drainCount == 0) {
         if (firstSegment.skipAdvanceOnce) {
-          // 分流器/汇流器推送后首次 tick：跳过推进，让物品在 position 0
-          // （建筑遮挡格）停留一个 tick 周期，避免瞬移
           firstSegment.skipAdvanceOnce = false;
-          // Fix H1: 设置 activeSourceItemId 和 sourceExtendedThisTick=true，
-          // 让 advanceItemSegments 的 isFedBySource 分支跳过推进，
-          // 物品在 position 0 停留一个 tick，避免立即跳到 cell 1
           activeSourceItemId = firstSegment.itemId;
           sourceExtendedThisTick = true;
         } else {
@@ -165,6 +156,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
 
     var inventoryChanged = false;
     belt.ensureItemSegmentsFromLegacy();
+
     if (isProducing) {
       final pushed =
           belt.pushSourceItem(sourceItemId, terminalLimit: terminalLimit);
@@ -174,12 +166,14 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
             inventoryChanged;
       }
     }
+
     belt.advanceItemSegments(
       isDeadEnd: isDeadEnd || inputBuilding != null || inputBlocked,
       activeSourceItemId: activeSourceItemId,
       terminalLimit: terminalLimit,
       sourceExtendedThisTick: sourceExtendedThisTick,
     );
+
     if (inputBuilding != null) {
       inventoryChanged = _transferBeltOutputToBuilding(belt, inputBuilding) ||
           inventoryChanged;
@@ -188,9 +182,6 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
         limit: terminalLimit ?? belt.path.length,
       );
     } else if (isDeadEnd) {
-      // 死胡同传送带：物品到达各自极限后在实际传送带上设置冻结，
-      // 确保创建过程中（hidesTerminalCell）裁剪副本能继承冻结状态，
-      // 避免物品在末端反复跳转。
       belt.freezeDeadEndSegments();
     }
     _prevBeltItemIds[belt.id] = belt.itemId;
@@ -717,24 +708,28 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
     }
     belt.itemSegments.sort((a, b) => a.drainCount.compareTo(b.drainCount));
     final endLimit = limit.clamp(0, belt.path.length).toInt();
-    for (int i = 0; i < belt.itemSegments.length; i++) {
+    bool frozenAhead = false;
+    for (int i = belt.itemSegments.length - 1; i >= 0; i--) {
       final segment = belt.itemSegments[i];
       if (!segment.hasItems) continue;
-      final isLastSegment = i == belt.itemSegments.length - 1;
-      // 每个物品段有其独立的冻结上限：
-      // - 最后一段的上限是终端极限值（如传送带尽头或被阻塞位置）
-      // - 前方段落不再按 fillCount>=下一段drainCount 冻结，否则不同物品
-      //   在汇流器输出带上会因 B.fillCount>=A.drainCount 而停滞成块
-      //   （A 走到 3 中心时 B 停在 2 中心，A 进入 4 时 B/C 突然刷新到 A 后面）。
-      //   非末段只保留显式 freezeProgress != null 的冻结来源（由渲染器管理）。
       final segLimit = i + 1 < belt.itemSegments.length
           ? belt.itemSegments[i + 1].drainCount.clamp(0, belt.path.length).toInt()
           : endLimit;
-      if (isLastSegment &&
-          segment.fillCount >= segLimit &&
-          segment.freezeProgress == null) {
-        segment.freezeProgress = -1.0;
+      final isLastSegment = i == belt.itemSegments.length - 1;
+      final atLimit = segment.fillCount >= segLimit;
+      final shouldFreeze = atLimit && (isLastSegment || frozenAhead);
+      final fp = segment.freezeProgress;
+      if (shouldFreeze && fp == null) {
+        segment.freezeProgress = -0.75;
       }
+      if (!shouldFreeze && (fp == -0.75 || fp == -1.0 || fp == -0.5)) {
+        segment.freezeProgress = -3.0;
+      }
+      if (!shouldFreeze && fp == 0.5) {
+        segment.freezeProgress = -3.0;
+      }
+      final newFp = segment.freezeProgress;
+      frozenAhead = newFp != null && newFp != -3.0;
     }
     belt.syncLegacyFromSegments();
   }
