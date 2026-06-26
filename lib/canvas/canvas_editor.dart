@@ -3,20 +3,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import '../models/building.dart';
 import '../models/project.dart';
 import '../data/data_loader.dart';
+import '../state/project_notifier.dart';
+import '../constants/app_constants.dart';
 import '../AIC/equipment.dart';
 import 'conveyor_create_mode_hud.dart';
 import 'canvas_painter.dart';
 import 'canvas_utils.dart';
+import 'simulation_engine.dart';
 import '../widgets/conveyor_belt_dialog.dart';
 import 'belt_simulation_logic.dart';
 
 class CanvasEditor extends StatefulWidget {
-  final DataLoader dataLoader;
-  final ProjectState project;
-  final ValueChanged<ProjectState> onProjectChanged;
   final Building? placingBuilding;
   final VoidCallback? onBuildingPlaced;
   final ValueChanged<PlacedBuilding?>? onBuildingSelected;
@@ -25,9 +26,6 @@ class CanvasEditor extends StatefulWidget {
 
   const CanvasEditor({
     super.key,
-    required this.dataLoader,
-    required this.project,
-    required this.onProjectChanged,
     this.placingBuilding,
     this.onBuildingPlaced,
     this.onBuildingSelected,
@@ -66,7 +64,7 @@ class CanvasEditorState extends State<CanvasEditor>
   double _displayAngle = 0.0; // 当前显示角度（弧度）
   double _targetAngle = 0.0; // 目标角度（弧度）
 
-  static const double cellSize = 48.0;
+  static const double cellSize = AppConstants.cellSize;
   static const double _minScale = 0.25;
   static const double _maxScale = 5.0;
 
@@ -98,6 +96,10 @@ class CanvasEditorState extends State<CanvasEditor>
   // 端口连接缓存：building id -> port key -> 是否连接
   Map<String, Map<String, bool>> portConnectionsCache = {};
 
+  /// 端口连接缓存对应的 [ProjectNotifier.version]。
+  /// 不匹配时在绘制前自动重建（TD-006：替代多处手动触发）。
+  int _portConnectionsCacheVersion = -1;
+
   // 记录最近一次 onPointerDown 是否为左键
   bool _lastPointerWasPrimary = false;
 
@@ -112,10 +114,14 @@ class CanvasEditorState extends State<CanvasEditor>
     }
   }
 
-  ProjectState get _project => widget.project;
+  ProjectNotifier get _pn => context.read<ProjectNotifier>();
+  ProjectState get _project => _pn.project;
+  DataLoader get _dataLoader => context.read<DataLoader>();
 
-  /// 重新计算所有端口连接关系（仅在数据变更时调用）
-  void _rebuildPortConnectionsCache() {
+  /// 检测项目结构性变更（[ProjectNotifier.version] 变化），
+  /// 必要时重建端口连接缓存。在 build() 绘制前调用，避免缓存过期。
+  void _ensurePortConnectionsCacheFresh() {
+    if (_portConnectionsCacheVersion == _pn.version) return;
     portConnectionsCache = {};
     for (final pb in _project.buildings) {
       portConnectionsCache[pb.id] = pb.conveyorPortConnections(
@@ -123,6 +129,7 @@ class CanvasEditorState extends State<CanvasEditor>
         cellSize: cellSize,
       );
     }
+    _portConnectionsCacheVersion = _pn.version;
   }
 
   @override
@@ -137,11 +144,13 @@ class CanvasEditorState extends State<CanvasEditor>
     _ticker = createTicker(_onTick);
     beltCtrl = TransportBeltController(
       project: _project,
-      onProjectChanged: widget.onProjectChanged,
-      onRebuildCache: _rebuildPortConnectionsCache,
+      onProjectChanged: (_) => _pn.notifyChanged(),
+      // 端口连接缓存现按 ProjectNotifier.version 自动失效（TD-006），
+      // 此回调保留为 no-op 以兼容控制器签名。
+      onRebuildCache: () {},
       notifyListeners: () => setState(() {}),
       currentPhase: () => _beltArrowController.value,
-      getBuilding: widget.dataLoader.getBuilding,
+      getBuilding: _dataLoader.getBuilding,
     );
     _beltArrowController = AnimationController(
       vsync: this,
@@ -152,7 +161,7 @@ class CanvasEditorState extends State<CanvasEditor>
       onBeltAnimationFrame(_beltArrowController.value);
       // 跨零检测：从 >0.5 跳到 <0.5（即从 ~1.0 重置到 ~0.0）
     });
-    _rebuildPortConnectionsCache();
+    // 端口连接缓存在 build() 时按版本自动重建，无需在此手动初始化。
     TransportBeltRenderer.init();
     ConveyorCreateModeHudPainter.init(onReady: _forceRepaint);
     TransportBeltRenderer.onItemImageReady = _forceRepaint;
@@ -170,20 +179,8 @@ class CanvasEditorState extends State<CanvasEditor>
   @override
   void didUpdateWidget(covariant CanvasEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(widget.project, oldWidget.project)) {
-      if ((widget.project.offsetX - _targetOffsetX).abs() > 1 ||
-          (widget.project.offsetY - _targetOffsetY).abs() > 1 ||
-          (widget.project.scale - _targetScale).abs() > 0.01) {
-        _displayScale = widget.project.scale;
-        _displayOffsetX = widget.project.offsetX;
-        _displayOffsetY = widget.project.offsetY;
-        _targetScale = widget.project.scale;
-        _targetOffsetX = widget.project.offsetX;
-        _targetOffsetY = widget.project.offsetY;
-      }
-      // project 引用变化时重建端口连接缓存
-      _rebuildPortConnectionsCache();
-    }
+    // ProjectState 实例在 app 生命周期内稳定（导入是原地 clear+addAll），
+    // 故不再需要实例变更/偏移回退分支。端口连接缓存在各变更点显式重建。
     if (!identical(oldWidget.placingBuilding, widget.placingBuilding) &&
         widget.placingBuilding != null &&
         oldWidget.placingBuilding == null) {
@@ -194,9 +191,6 @@ class CanvasEditorState extends State<CanvasEditor>
       if (oldWidget.conveyorMode && !widget.conveyorMode) {
         beltCtrl.reset();
       }
-    }
-    if (!identical(widget.project, oldWidget.project)) {
-      beltCtrl.project = widget.project;
     }
   }
 
@@ -293,7 +287,7 @@ class CanvasEditorState extends State<CanvasEditor>
       );
     }
 
-    widget.onProjectChanged(_project);
+    _pn.notifyChanged();
     setState(() {});
   }
 
@@ -301,8 +295,7 @@ class CanvasEditorState extends State<CanvasEditor>
   void deleteBuilding(PlacedBuilding pb) {
     _project.buildings.remove(pb);
     _removePortBeltCells(pb);
-    _rebuildPortConnectionsCache();
-    widget.onProjectChanged(_project);
+    _pn.notifyChanged();
     setState(() {});
   }
 
@@ -540,7 +533,7 @@ class CanvasEditorState extends State<CanvasEditor>
       context,
       belt: belt,
       allBelts: allLineBelts,
-      dataLoader: widget.dataLoader,
+      dataLoader: _dataLoader,
       onStoreSingle: () => _removeBeltCell(targetBeltId, clickedCell),
       onStoreLine: () => _storeBeltLineByIds(lineIds),
       onCollectAll: () => _collectAllFromLine(allLineBelts),
@@ -652,16 +645,14 @@ class CanvasEditorState extends State<CanvasEditor>
         ));
       }
 
-      _rebuildPortConnectionsCache();
-      widget.onProjectChanged(_project);
+      _pn.notifyChanged();
     });
   }
 
   void _storeBeltLineByIds(Set<String> beltIds) {
     setState(() {
       _project.conveyors.removeWhere((b) => beltIds.contains(b.id));
-      _rebuildPortConnectionsCache();
-      widget.onProjectChanged(_project);
+      _pn.notifyChanged();
     });
   }
 
@@ -674,7 +665,7 @@ class CanvasEditorState extends State<CanvasEditor>
         });
       }
     }
-    widget.onProjectChanged(_project);
+    _pn.notifyChanged();
   }
 
   /// 收取产线上指定 itemId 的所有物品段
@@ -689,7 +680,7 @@ class CanvasEditorState extends State<CanvasEditor>
         });
       }
     }
-    widget.onProjectChanged(_project);
+    _pn.notifyChanged();
   }
 
   /// 检查建筑在指定位置是否会发生碰撞（建筑重叠或传送带重叠）
@@ -758,8 +749,7 @@ class CanvasEditorState extends State<CanvasEditor>
     _project.offsetX = _targetOffsetX;
     _project.offsetY = _targetOffsetY;
     _project.scale = _targetScale;
-    _rebuildPortConnectionsCache();
-    widget.onProjectChanged(_project);
+    _pn.notifyChanged();
     widget.onBuildingPlaced?.call();
   }
 
@@ -804,7 +794,7 @@ class CanvasEditorState extends State<CanvasEditor>
     _longPressStartTime = null;
     _longPressScreenPos = null;
 
-    widget.onProjectChanged(_project);
+    _pn.notifyChanged();
   }
 
   /// 移除设备输入/输出端口上的传送带格子
@@ -1095,8 +1085,7 @@ class CanvasEditorState extends State<CanvasEditor>
     _project.offsetX = _targetOffsetX;
     _project.offsetY = _targetOffsetY;
     _project.scale = _targetScale;
-    _rebuildPortConnectionsCache();
-    widget.onProjectChanged(_project);
+    _pn.notifyChanged();
   }
 
   void _handleSingleClick(Offset screenPos, Size size) {
@@ -1300,6 +1289,14 @@ class CanvasEditorState extends State<CanvasEditor>
 
   @override
   Widget build(BuildContext context) {
+    // 订阅两个状态源，驱动 CustomPaint 重绘：
+    // 1. 仿真引擎 tick（生产进度 / 传送带 flowProgress / isBlocked）
+    // 2. 项目结构性变更（放置 / 删除 / 传送带 / 导入 / 库存）
+    context.watch<SimulationEngine>();
+    context.watch<ProjectNotifier>();
+    // 端口连接缓存按版本自动失效（TD-006）：结构性变更触发 notifyChanged
+    // → version 自增 → 此处在绘制前重建过期缓存。
+    _ensurePortConnectionsCacheFresh();
     return Focus(
       onKeyEvent: _handleKeyEvent,
       autofocus: true,
@@ -1326,7 +1323,7 @@ class CanvasEditorState extends State<CanvasEditor>
               painter: EditorPainter(
                 repaintTrigger: _repaintTrigger,
                 project: _project,
-                dataLoader: widget.dataLoader,
+                dataLoader: _dataLoader,
                 cellSize: cellSize,
                 placingBuilding: widget.placingBuilding,
                 placingRotation: _placingRotation,

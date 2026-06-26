@@ -1,4 +1,5 @@
 import 'dart:ui';
+import '../utils/json_parse.dart';
 
 // ============================================================
 // 主 Isolate → 计算 Isolate 的同步消息
@@ -39,7 +40,7 @@ class SimSyncState {
         recipes: (json['recipes'] as List)
             .map((e) => SimRecipeData.fromJson(e as Map<String, dynamic>))
             .toList(),
-        speedMultiplier: (json['speedMultiplier'] as num).toDouble(),
+        speedMultiplier: json.getDouble('speedMultiplier'),
       );
 }
 
@@ -101,8 +102,8 @@ class SimBuildingData {
       SimBuildingData(
         id: json['id'] as String,
         buildingId: json['buildingId'] as String,
-        gridX: (json['gridX'] as num).toDouble(),
-        gridY: (json['gridY'] as num).toDouble(),
+        gridX: json.getDouble('gridX'),
+        gridY: json.getDouble('gridY'),
         rotation: json['rotation'] as int,
         activeRecipeId: json['activeRecipeId'] as String?,
         depotOutputItemId: (json['depotOutputItemId'] as String?) ?? '',
@@ -153,8 +154,8 @@ class SimPortData {
   factory SimPortData.fromJson(Map<String, dynamic> json) => SimPortData(
         index: json['index'] as int,
         type: json['type'] as String,
-        relativeX: (json['relativeX'] as num).toDouble(),
-        relativeY: (json['relativeY'] as num).toDouble(),
+        relativeX: json.getDouble('relativeX'),
+        relativeY: json.getDouble('relativeY'),
         direction: json['direction'] as String,
         portType: (json['portType'] as String?) ?? 'solid',
       );
@@ -212,11 +213,10 @@ class SimConveyorData {
       SimConveyorData(
         id: json['id'] as String,
         path: (json['path'] as List)
-            .map((p) =>
-                Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble()))
+            .map((p) => (p as Map).offset())
             .toList(),
         itemId: json['itemId'] as String? ?? '',
-        flowProgress: (json['flowProgress'] as num?)?.toDouble() ?? 0.0,
+        flowProgress: json.getDoubleOrDefault('flowProgress'),
         itemFillCount: (json['itemFillCount'] as num?)?.toInt() ?? 0,
         itemDrainCount: (json['itemDrainCount'] as num?)?.toInt() ?? 0,
         isBlocked: json['isBlocked'] as bool? ?? false,
@@ -224,10 +224,8 @@ class SimConveyorData {
         incomingDirection: json['incomingDirection'] as String?,
         lastItemFillCount: (json['lastItemFillCount'] as num?)?.toInt() ?? 0,
         lastItemDrainCount: (json['lastItemDrainCount'] as num?)?.toInt() ?? 0,
-        deadEndFreezeProgress:
-            (json['deadEndFreezeProgress'] as num?)?.toDouble(),
-        lastItemFreezeProgress:
-            (json['lastItemFreezeProgress'] as num?)?.toDouble(),
+        deadEndFreezeProgress: json.getDoubleOrNull('deadEndFreezeProgress'),
+        lastItemFreezeProgress: json.getDoubleOrNull('lastItemFreezeProgress'),
       );
 }
 
@@ -257,7 +255,7 @@ class SimRecipeData {
 
   factory SimRecipeData.fromJson(Map<String, dynamic> json) => SimRecipeData(
         id: json['id'] as String,
-        processTimeSeconds: (json['processTimeSeconds'] as num).toDouble(),
+        processTimeSeconds: json.getDouble('processTimeSeconds'),
         inputs: (json['inputs'] as List)
             .map((e) => SimRecipeIOData.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -354,7 +352,7 @@ class SimBuildingResult {
       SimBuildingResult(
         id: json['id'] as String,
         isBlocked: json['isBlocked'] as bool,
-        productionProgress: (json['productionProgress'] as num).toDouble(),
+        productionProgress: json.getDouble('productionProgress'),
         inputItemId: (json['inputItemId'] as String?) ?? '',
         inputItemCount: (json['inputItemCount'] as num?)?.toInt() ?? 0,
         activeRecipeId: json['activeRecipeId'] as String?,
@@ -407,16 +405,14 @@ class SimConveyorResult {
       SimConveyorResult(
         id: json['id'] as String,
         itemId: json['itemId'] as String? ?? '',
-        flowProgress: (json['flowProgress'] as num?)?.toDouble() ?? 0.0,
+        flowProgress: json.getDoubleOrDefault('flowProgress'),
         itemFillCount: (json['itemFillCount'] as num?)?.toInt() ?? 0,
         itemDrainCount: (json['itemDrainCount'] as num?)?.toInt() ?? 0,
         isBlocked: json['isBlocked'] as bool? ?? false,
         lastItemFillCount: (json['lastItemFillCount'] as num?)?.toInt() ?? 0,
         lastItemDrainCount: (json['lastItemDrainCount'] as num?)?.toInt() ?? 0,
-        deadEndFreezeProgress:
-            (json['deadEndFreezeProgress'] as num?)?.toDouble(),
-        lastItemFreezeProgress:
-            (json['lastItemFreezeProgress'] as num?)?.toDouble(),
+        deadEndFreezeProgress: json.getDoubleOrNull('deadEndFreezeProgress'),
+        lastItemFreezeProgress: json.getDoubleOrNull('lastItemFreezeProgress'),
       );
 }
 

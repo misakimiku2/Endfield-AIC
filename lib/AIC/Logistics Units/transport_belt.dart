@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/project.dart';
 import '../../models/building.dart';
+import '../../constants/app_constants.dart';
 
 part 'belt_cell_detection.dart';
 part 'belt_path_validation.dart';
@@ -62,7 +63,7 @@ class TransportBeltController {
   bool get hasCommittedPath => _committedBeltId != null;
 
   // === 静态工具 ===
-  static const double cellSize = 48.0;
+  static const double cellSize = AppConstants.cellSize;
 
   // === 公开 API ===
 

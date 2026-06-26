@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:provider/provider.dart';
 import 'data/data_loader.dart';
 import 'canvas/simulation_engine.dart';
+import 'state/project_notifier.dart';
 import 'pages/editor_page.dart';
 
 /// 物品图片在各处使用的 cacheWidth/cacheHeight 尺寸集合。
@@ -33,40 +35,48 @@ void main() async {
   await _precacheAllAssets();
 
   final simulationEngine = SimulationEngine(dataLoader);
+  final projectNotifier = ProjectNotifier(simulationEngine);
 
   runApp(EndfieldAICApp(
     dataLoader: dataLoader,
     simulationEngine: simulationEngine,
+    projectNotifier: projectNotifier,
   ));
 }
 
 class EndfieldAICApp extends StatelessWidget {
   final DataLoader dataLoader;
   final SimulationEngine simulationEngine;
+  final ProjectNotifier projectNotifier;
 
   const EndfieldAICApp({
     super.key,
     required this.dataLoader,
     required this.simulationEngine,
+    required this.projectNotifier,
   });
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: '终末地 AIC 规划工具',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF1A1A1A),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFFFFCC00),
-          surface: Color(0xFF2A2A2A),
+    return MultiProvider(
+      providers: [
+        Provider<DataLoader>.value(value: dataLoader),
+        ChangeNotifierProvider<SimulationEngine>.value(value: simulationEngine),
+        ChangeNotifierProvider<ProjectNotifier>.value(value: projectNotifier),
+      ],
+      child: MaterialApp(
+        title: '终末地 AIC 规划工具',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          brightness: Brightness.dark,
+          scaffoldBackgroundColor: const Color(0xFF1A1A1A),
+          colorScheme: const ColorScheme.dark(
+            primary: Color(0xFFFFCC00),
+            surface: Color(0xFF2A2A2A),
+          ),
+          fontFamily: 'Roboto',
         ),
-        fontFamily: 'Roboto',
-      ),
-      home: EditorPage(
-        dataLoader: dataLoader,
-        simulationEngine: simulationEngine,
+        home: const EditorPage(),
       ),
     );
   }

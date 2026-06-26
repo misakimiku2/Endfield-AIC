@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/project.dart';
 import '../data/data_loader.dart';
+import '../constants/app_constants.dart';
 import 'building_shared_widgets.dart';
 import 'depot_grid_tile.dart';
 
@@ -51,8 +52,8 @@ class _DepotLoaderPanelState extends State<DepotLoaderPanel> {
   /// 返回 (所有不同物品ID列表, 当前正在进入的物品ID)
   (List<String>, String?) _detectAllIncomingItemIds() {
     final pb = widget.placedBuilding;
-    const cellSize = 48.0;
-    const threshold = 30.0;
+    const cellSize = AppConstants.cellSize;
+    const threshold = AppConstants.portConnectionThreshold;
 
     final allItemIds = <String>{};
     String? currentIncomingId;

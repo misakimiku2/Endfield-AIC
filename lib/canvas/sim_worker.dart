@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:ui';
 
+import '../utils/json_parse.dart';
+import '../constants/app_constants.dart';
 import 'sim_protocol.dart';
 
 /// 计算 Isolate 的入口函数
@@ -24,9 +26,9 @@ class _SimWorker {
   int _revision = 0;
   bool _isRunning = false;
 
-  static const double _tickRate = 20.0;
-  static const double _cellSize = 48.0;
-  static const double _portConnectionThreshold = 30.0;
+  static const double _tickRate = AppConstants.simTickRate;
+  static const double _cellSize = AppConstants.cellSize;
+  static const double _portConnectionThreshold = AppConstants.portConnectionThreshold;
 
   _SimWorker(this._mainSendPort);
 
@@ -93,7 +95,7 @@ class _SimWorker {
           break;
         case 'setSpeed':
           _speedMultiplier =
-              (message['data']['speedMultiplier'] as num).toDouble();
+              (message['data'] as Map).getDouble('speedMultiplier');
           break;
       }
     }

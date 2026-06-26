@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/project.dart';
+import '../data/data_loader.dart';
+import '../state/project_notifier.dart';
+import '../constants/app_constants.dart';
 import '../AIC/equipment.dart';
 import 'canvas_editor.dart';
 
@@ -17,14 +21,17 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
 
   double _prevGlobalProgress = 0.0;
 
+  ProjectState get _project => context.read<ProjectNotifier>().project;
+  DataLoader get _dataLoader => context.read<DataLoader>();
+
   /// 传送带物品填充时钟滴答：每次 arrowProgress 跨零时触发
   /// 驱动所有传送带的 itemFillCount / itemDrainCount 增减
   // ignore: unused_element
   void _onBeltTick() {
-    final buildings = widget.project.buildings;
+    final buildings = _project.buildings;
 
     var inventoryChanged = false;
-    for (final belt in widget.project.conveyors) {
+    for (final belt in _project.conveyors) {
       if (belt.isBlocked) continue;
       if (belt.path.isEmpty) continue;
 
@@ -75,7 +82,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
     // 确保重绘（当从 AnimationController listener 触发时，ticker 可能已暂停）
     if (mounted) {
       if (inventoryChanged) {
-        widget.onProjectChanged(widget.project);
+        context.read<ProjectNotifier>().notifyChanged();
       }
       setState(() {});
     }
@@ -87,14 +94,14 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
     if (progressDelta < 0) progressDelta += 1.0;
     _prevGlobalProgress = globalProgress;
 
-    final activeIds = widget.project.conveyors.map((belt) => belt.id).toSet();
+    final activeIds = _project.conveyors.map((belt) => belt.id).toSet();
     _prevBeltProgressForTick.removeWhere((id, _) => !activeIds.contains(id));
 
-    final buildings = widget.project.buildings;
+    final buildings = _project.buildings;
     var inventoryChanged = false;
     var ticked = false;
 
-    for (final belt in widget.project.conveyors) {
+    for (final belt in _project.conveyors) {
       final progress = belt.animationProgress(globalProgress);
       final previous = _prevBeltProgressForTick[belt.id] ?? progress;
       if (previous > 0.5 && progress < 0.5) {
@@ -107,7 +114,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
 
     if (!mounted || !ticked) return;
     if (inventoryChanged) {
-      widget.onProjectChanged(widget.project);
+      context.read<ProjectNotifier>().notifyChanged();
     }
     setState(() {});
   }
@@ -235,7 +242,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
     final splitterCell =
         Offset(splitter.gridX.toDouble(), splitter.gridY.toDouble());
     final directions = <String>[];
-    for (final belt in widget.project.conveyors) {
+    for (final belt in _project.conveyors) {
       if (belt.path.isEmpty) continue;
       final start = belt.path.first;
       if (start.dx.round() == splitterCell.dx.round() &&
@@ -254,7 +261,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
       PlacedBuilding splitter, String direction) {
     final splitterCell =
         Offset(splitter.gridX.toDouble(), splitter.gridY.toDouble());
-    for (final belt in widget.project.conveyors) {
+    for (final belt in _project.conveyors) {
       if (belt.path.isEmpty) continue;
       final start = belt.path.first;
       if (start.dx.round() == splitterCell.dx.round() &&
@@ -275,7 +282,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
 
     // 计算末端阻塞情况（与 _tickSingleBeltOnce 相同的逻辑）
     final isDeadEnd =
-        !TransportBeltRenderer.isInputPort(belt.path.last, widget.project.buildings);
+        !TransportBeltRenderer.isInputPort(belt.path.last, _project.buildings);
     final inputBuilding =
         isDeadEnd ? null : _findInputBuildingAtCell(belt.path.last);
     final pendingOutputItemId =
@@ -393,7 +400,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
     final convergerCell =
         Offset(converger.gridX.toDouble(), converger.gridY.toDouble());
     final directions = <String>[];
-    for (final belt in widget.project.conveyors) {
+    for (final belt in _project.conveyors) {
       if (belt.path.isEmpty) continue;
       final end = belt.path.last;
       if (end.dx.round() == convergerCell.dx.round() &&
@@ -419,7 +426,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
         Offset(converger.gridX.toDouble(), converger.gridY.toDouble());
     // 输入端口方向转换为到达方向来匹配传送带
     final targetArrivalDir = _inputPortToArrivalDir(direction);
-    for (final belt in widget.project.conveyors) {
+    for (final belt in _project.conveyors) {
       if (belt.path.isEmpty) continue;
       final end = belt.path.last;
       if (end.dx.round() == convergerCell.dx.round() &&
@@ -452,7 +459,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
       PlacedBuilding converger) {
     final convergerCell =
         Offset(converger.gridX.toDouble(), converger.gridY.toDouble());
-    for (final belt in widget.project.conveyors) {
+    for (final belt in _project.conveyors) {
       if (belt.path.isEmpty) continue;
       final start = belt.path.first;
       if (start.dx.round() == convergerCell.dx.round() &&
@@ -546,7 +553,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
   PlacedBuilding? _findInputBuildingAtCell(Offset cell) {
     final gx = cell.dx.round();
     final gy = cell.dy.round();
-    for (final pb in widget.project.buildings) {
+    for (final pb in _project.buildings) {
       final rot = pb.rotation;
       final gw = pb.building.gridWidth;
       final gh = pb.building.gridHeight;
@@ -570,7 +577,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
   PlacedBuilding? _findOutputBuildingAtCell(Offset cell) {
     final gx = cell.dx.round();
     final gy = cell.dy.round();
-    for (final pb in widget.project.buildings) {
+    for (final pb in _project.buildings) {
       final rot = pb.rotation;
       final gw = pb.building.gridWidth;
       final gh = pb.building.gridHeight;
@@ -595,7 +602,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
   int? _calculateBeltTerminalLimit(ConveyorBelt belt) {
     if (belt.path.isEmpty) return null;
     final isDeadEnd =
-        !TransportBeltRenderer.isInputPort(belt.path.last, widget.project.buildings);
+        !TransportBeltRenderer.isInputPort(belt.path.last, _project.buildings);
     final inputBuilding =
         isDeadEnd ? null : _findInputBuildingAtCell(belt.path.last);
     final pendingOutputItemId =
@@ -675,7 +682,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
     }
     // 仓库存货口：直接增加全局仓库库存，不受 inputItemCount 限制
     if (building.building.id == DepotLoaderConfig.id) {
-      widget.project.incrementWarehouseItem(itemId);
+      _project.incrementWarehouseItem(itemId);
       belt.removeOutputReadyItem();
       return true;
     }
@@ -691,7 +698,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
   /// 根据输入物品自动选择匹配的配方
   void _autoSelectRecipe(PlacedBuilding building, String inputItemId) {
     final recipes =
-        widget.dataLoader.getRecipesForBuilding(building.building.id);
+        _dataLoader.getRecipesForBuilding(building.building.id);
     for (final recipe in recipes) {
       if (recipe.inputs.any((input) => input.itemId == inputItemId)) {
         building.activeRecipeId = recipe.id;
@@ -720,19 +727,22 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
       final shouldFreeze = atLimit && (isLastSegment || frozenAhead);
       final fp = segment.freezeProgress;
       if (shouldFreeze && fp == null) {
-        segment.freezeProgress = -0.75;
+        segment.freezeProgress = FreezeSentinels.newlyFrozen;
       }
-      if (shouldFreeze && fp == -3.0) {
-        segment.freezeProgress = -0.75;
+      if (shouldFreeze && fp == FreezeSentinels.clearing) {
+        segment.freezeProgress = FreezeSentinels.newlyFrozen;
       }
-      if (!shouldFreeze && (fp == -0.75 || fp == -1.0 || fp == -0.5)) {
-        segment.freezeProgress = -3.0;
+      if (!shouldFreeze &&
+          (fp == FreezeSentinels.newlyFrozen ||
+              fp == FreezeSentinels.waiting ||
+              fp == FreezeSentinels.midFrozen)) {
+        segment.freezeProgress = FreezeSentinels.clearing;
       }
-      if (!shouldFreeze && fp == 0.5) {
-        segment.freezeProgress = -3.0;
+      if (!shouldFreeze && fp == FreezeSentinels.settled) {
+        segment.freezeProgress = FreezeSentinels.clearing;
       }
       final newFp = segment.freezeProgress;
-      frozenAhead = newFp != null && newFp != -3.0;
+      frozenAhead = FreezeSentinels.isFreezing(newFp);
     }
     belt.syncLegacyFromSegments();
   }
@@ -740,7 +750,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
   String? _getAvailableOutputItemIdForBeltStart(ConveyorBelt belt) {
     if (belt.path.isEmpty) return null;
     final start = belt.path.first;
-    for (final pb in widget.project.buildings) {
+    for (final pb in _project.buildings) {
       final outputIndex = _findOutputPortIndexAtCell(pb, start);
       if (outputIndex == null) continue;
 
@@ -767,12 +777,12 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
         final itemId = pb.depotOutputItemId;
         if (itemId == null || itemId.isEmpty) return null;
         // 仓库库存为 0 时不再输出物品
-        if (widget.project.getWarehouseItemCount(itemId) <= 0) return null;
+        if (_project.getWarehouseItemCount(itemId) <= 0) return null;
         return itemId;
       }
 
       final recipe = pb.activeRecipeId != null
-          ? widget.dataLoader.getRecipe(pb.activeRecipeId!)
+          ? _dataLoader.getRecipe(pb.activeRecipeId!)
           : null;
       if (recipe == null || recipe.outputs.isEmpty) return null;
       final output = recipe.outputs.length > outputIndex
@@ -787,7 +797,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
   bool _consumeOutputItemForBeltStart(ConveyorBelt belt, String itemId) {
     if (belt.path.isEmpty || itemId.isEmpty) return false;
     final start = belt.path.first;
-    for (final pb in widget.project.buildings) {
+    for (final pb in _project.buildings) {
       final outputIndex = _findOutputPortIndexAtCell(pb, start);
       if (outputIndex == null) continue;
       if (pb.isBeltBridge) {
@@ -808,7 +818,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
       }
       if (pb.building.id == DepotUnloaderConfig.id) {
         // 仓库取货口输出物品时减少全局仓库库存
-        widget.project.decrementWarehouseItem(itemId);
+        _project.decrementWarehouseItem(itemId);
         return false;
       }
       return pb.consumeOutputItem(itemId, 1);

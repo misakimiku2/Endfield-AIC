@@ -1,4 +1,5 @@
 import 'dart:ui';
+import '../utils/json_parse.dart';
 
 class PortDefinition {
   final double relativeX;
@@ -15,8 +16,8 @@ class PortDefinition {
 
   factory PortDefinition.fromJson(Map<String, dynamic> json) {
     return PortDefinition(
-      relativeX: (json['relative_x'] as num).toDouble(),
-      relativeY: (json['relative_y'] as num).toDouble(),
+      relativeX: json.getDouble('relative_x'),
+      relativeY: json.getDouble('relative_y'),
       direction: json['direction'] as String,
       portType: (json['port_type'] as String?) ?? 'solid',
     );
@@ -85,7 +86,7 @@ class Building {
       maxInputs: json['max_inputs'] as int,
       maxOutputs: json['max_outputs'] as int,
       ports: PortsLayout.fromJson(json['ports'] as Map<String, dynamic>),
-      powerConsumption: (json['power_consumption'] as num?)?.toDouble() ?? 0,
+      powerConsumption: json.getDoubleOrDefault('power_consumption'),
       svgAssetPath: (json['svg_asset'] as String?) ?? '',
       logoAssetPath: (json['logo_asset'] as String?) ?? '',
     );

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../models/project.dart';
 import '../../models/item.dart';
+import '../../constants/app_constants.dart';
 
 class TransportBeltRenderer {
   static const double _cellMargin = 3.0;
@@ -526,7 +527,7 @@ class TransportBeltRenderer {
             : belt.path.length;
         final sourceSegment =
             i < sourceSegments.length ? sourceSegments[i] : segment;
-        if (sourceSegment.freezeProgress == -2.0 &&
+        if (sourceSegment.freezeProgress == FreezeSentinels.rendererWaiting &&
             arrowProgress >= 0.5) {
           sourceSegment.freezeProgress = null;
         }
@@ -535,23 +536,23 @@ class TransportBeltRenderer {
         final atLimit = segment.fillCount >= limit;
         final shouldFreezeSegment = atLimit && (isLastSegment || frozenAhead);
         if (shouldFreezeSegment && fp == null) {
-          sourceSegment.freezeProgress = -0.75;
+          sourceSegment.freezeProgress = FreezeSentinels.newlyFrozen;
         }
-        if (shouldFreezeSegment && fp == -0.75) {
-          sourceSegment.freezeProgress = -1.0;
+        if (shouldFreezeSegment && fp == FreezeSentinels.newlyFrozen) {
+          sourceSegment.freezeProgress = FreezeSentinels.waiting;
         }
-        if (shouldFreezeSegment && fp == -1.0) {
+        if (shouldFreezeSegment && fp == FreezeSentinels.waiting) {
           if (arrowProgress < 0.5) {
-            sourceSegment.freezeProgress = -0.5;
+            sourceSegment.freezeProgress = FreezeSentinels.midFrozen;
           }
         }
-        if (shouldFreezeSegment && fp == -0.5) {
+        if (shouldFreezeSegment && fp == FreezeSentinels.midFrozen) {
           if (arrowProgress >= 0.5) {
-            sourceSegment.freezeProgress = 0.5;
+            sourceSegment.freezeProgress = FreezeSentinels.settled;
           }
         }
         final newFp = sourceSegment.freezeProgress;
-        frozenAhead = newFp != null && newFp != -3.0;
+        frozenAhead = FreezeSentinels.isFreezing(newFp);
         segment.freezeProgress = newFp;
       }
       belt.syncLegacyFromSegments();
@@ -569,19 +570,19 @@ class TransportBeltRenderer {
         isDeadEnd && lastFull && renderSegments.isEmpty;
 
     if (shouldFreezeCurrent && belt.deadEndFreezeProgress == null) {
-      // 阶段 0→1：物品刚刚到达停止位置，标记为 -1.0（等待自然流入）
-      belt.deadEndFreezeProgress = -1.0;
+      // 阶段 0→1：物品刚刚到达停止位置，标记为 waiting（等待自然流入）
+      belt.deadEndFreezeProgress = FreezeSentinels.waiting;
     }
-    if (shouldFreezeCurrent && belt.deadEndFreezeProgress == -1.0) {
+    if (shouldFreezeCurrent && belt.deadEndFreezeProgress == FreezeSentinels.waiting) {
       // 阶段 1→2：等待 arrowProgress 降到 0.5 以下（物品已通过入口半区）
       if (arrowProgress < 0.5) {
-        belt.deadEndFreezeProgress = -0.5;
+        belt.deadEndFreezeProgress = FreezeSentinels.midFrozen;
       }
     }
-    if (shouldFreezeCurrent && belt.deadEndFreezeProgress == -0.5) {
+    if (shouldFreezeCurrent && belt.deadEndFreezeProgress == FreezeSentinels.midFrozen) {
       // 阶段 2→3：等待 arrowProgress 回升到 0.5（物品已自然流到格子中央）
       if (arrowProgress >= 0.5) {
-        belt.deadEndFreezeProgress = 0.5;
+        belt.deadEndFreezeProgress = FreezeSentinels.settled;
       }
     }
     if (!shouldFreezeCurrent && belt.deadEndFreezeProgress != null) {
@@ -590,19 +591,19 @@ class TransportBeltRenderer {
     }
 
     if (shouldFreezeLast && belt.lastItemFreezeProgress == null) {
-      // 阶段 0→1：物品刚刚到达停止位置，标记为 -1.0（等待自然流入）
-      belt.lastItemFreezeProgress = -1.0;
+      // 阶段 0→1：物品刚刚到达停止位置，标记为 waiting（等待自然流入）
+      belt.lastItemFreezeProgress = FreezeSentinels.waiting;
     }
-    if (shouldFreezeLast && belt.lastItemFreezeProgress == -1.0) {
+    if (shouldFreezeLast && belt.lastItemFreezeProgress == FreezeSentinels.waiting) {
       // 阶段 1→2：等待 arrowProgress 降到 0.5 以下
       if (arrowProgress < 0.5) {
-        belt.lastItemFreezeProgress = -0.5;
+        belt.lastItemFreezeProgress = FreezeSentinels.midFrozen;
       }
     }
-    if (shouldFreezeLast && belt.lastItemFreezeProgress == -0.5) {
+    if (shouldFreezeLast && belt.lastItemFreezeProgress == FreezeSentinels.midFrozen) {
       // 阶段 2→3：等待 arrowProgress 回升到 0.5
       if (arrowProgress >= 0.5) {
-        belt.lastItemFreezeProgress = 0.5;
+        belt.lastItemFreezeProgress = FreezeSentinels.settled;
       }
     }
     if (!shouldFreezeLast && belt.lastItemFreezeProgress != null) {
@@ -844,10 +845,12 @@ class TransportBeltRenderer {
           if (i >= segmentDrain && i < segmentFill) {
             cellItemImage = segmentImages?[segment.itemId];
             final frozen = segment.freezeProgress;
-            if (frozen == -3.0) {
+            if (frozen == FreezeSentinels.clearing) {
               cellArrowProgress = arrowProgress < 0.5 ? 0.5 : arrowProgress;
-            } else if (frozen != null && (frozen > 0 || frozen == -2.0)) {
-              cellArrowProgress = frozen == -2.0 ? 0.5 : frozen;
+            } else if (frozen != null &&
+                (frozen > 0 || frozen == FreezeSentinels.rendererWaiting)) {
+              cellArrowProgress =
+                  frozen == FreezeSentinels.rendererWaiting ? 0.5 : frozen;
             }
             break;
           }

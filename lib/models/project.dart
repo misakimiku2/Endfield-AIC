@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui';
 import 'building.dart';
+import '../constants/app_constants.dart';
 
 class PortState {
   final int index;
@@ -17,24 +18,31 @@ class PortState {
     this.linkedItemId,
   });
 
-  Offset worldPosition(double gridX, double gridY, double cellSize,
-      int gridWidth, int gridHeight,
-      {int rotation = 0}) {
-    double rX = definition.relativeX;
-    double rY = definition.relativeY;
+  /// 计算端口在网格坐标系中的位置（已考虑建筑旋转），返回 (wx, wy)。
+  /// [worldPosition] 将其乘以 cellSize 得到像素坐标；
+  /// [gridPosition] 将其取整得到网格坐标。
+  math.Point<double> _calculatePortPosition(
+    double gridX,
+    double gridY,
+    int gridWidth,
+    int gridHeight, {
+    int rotation = 0,
+  }) {
+    final double rX = definition.relativeX;
+    final double rY = definition.relativeY;
 
-    double localGridX = (rX == 1.0)
+    final double localGridX = (rX == 1.0)
         ? (gridWidth - 1).toDouble()
         : (rX * gridWidth).floorToDouble();
-    double localGridY = (rY == 1.0)
+    final double localGridY = (rY == 1.0)
         ? (gridHeight - 1).toDouble()
         : (rY * gridHeight).floorToDouble();
 
-    double rx = localGridX + 0.5;
-    double ry = localGridY + 0.5;
+    final double rx = localGridX + 0.5;
+    final double ry = localGridY + 0.5;
 
-    double cx = rx - gridWidth / 2.0;
-    double cy = ry - gridHeight / 2.0;
+    final double cx = rx - gridWidth / 2.0;
+    final double cy = ry - gridHeight / 2.0;
 
     double rcx, rcy;
     switch (rotation % 4) {
@@ -57,55 +65,25 @@ class PortState {
         break;
     }
 
-    double wx = gridX + rcx + gridWidth / 2.0;
-    double wy = gridY + rcy + gridHeight / 2.0;
+    final double wx = gridX + rcx + gridWidth / 2.0;
+    final double wy = gridY + rcy + gridHeight / 2.0;
 
-    return Offset(wx * cellSize, wy * cellSize);
+    return math.Point<double>(wx, wy);
+  }
+
+  Offset worldPosition(double gridX, double gridY, double cellSize,
+      int gridWidth, int gridHeight,
+      {int rotation = 0}) {
+    final pos = _calculatePortPosition(gridX, gridY, gridWidth, gridHeight,
+        rotation: rotation);
+    return Offset(pos.x * cellSize, pos.y * cellSize);
   }
 
   Offset gridPosition(double gridX, double gridY, int gridWidth, int gridHeight,
       {int rotation = 0}) {
-    double rX = definition.relativeX;
-    double rY = definition.relativeY;
-
-    double localGridX = (rX == 1.0)
-        ? (gridWidth - 1).toDouble()
-        : (rX * gridWidth).floorToDouble();
-    double localGridY = (rY == 1.0)
-        ? (gridHeight - 1).toDouble()
-        : (rY * gridHeight).floorToDouble();
-
-    double rx = localGridX + 0.5;
-    double ry = localGridY + 0.5;
-
-    double cx = rx - gridWidth / 2.0;
-    double cy = ry - gridHeight / 2.0;
-
-    double rcx, rcy;
-    switch (rotation % 4) {
-      case 1:
-        rcx = -cy;
-        rcy = cx;
-        break;
-      case 2:
-        rcx = -cx;
-        rcy = -cy;
-        break;
-      case 3:
-        rcx = cy;
-        rcy = -cx;
-        break;
-      case 0:
-      default:
-        rcx = cx;
-        rcy = cy;
-        break;
-    }
-
-    double wx = gridX + rcx + gridWidth / 2.0;
-    double wy = gridY + rcy + gridHeight / 2.0;
-
-    return Offset(wx.floorToDouble(), wy.floorToDouble());
+    final pos = _calculatePortPosition(gridX, gridY, gridWidth, gridHeight,
+        rotation: rotation);
+    return Offset(pos.x.floorToDouble(), pos.y.floorToDouble());
   }
 }
 
@@ -116,7 +94,6 @@ class PlacedBuilding {
   /// 传送带仍通过通道机制中转。容量设为1确保反压快速传播。
   static const int maxBridgeLaneItemCount = 1;
   static const String _beltBridgeId = 'belt_bridge_1x1';
-  static const String _bridgeLanePrefix = '__bridge_lane__';
   static const String _splitterId = 'splitter_1x1';
   static const String _convergerId = 'converger_1x1';
 
@@ -140,9 +117,14 @@ class PlacedBuilding {
   /// 记录下一个要分配的输出方向，实现 左→上→右 循环分配
   int splitterCycleIndex = 0;
 
-  /// 汇流器循环接收索引，记录下一个要接收的输入方向
-  /// 按传送带创建顺序循环选择输入方向
-  int convergerCycleIndex = 0;
+  /// 分流器内部缓冲槽位（至多 1 个物品）。null 表示槽位空。
+  /// 当所有输出带满时，物品暂存于此，槽位满后输入端堵塞。
+  String? splitterBufferedItemId;
+  String? splitterBufferedDirection;
+
+  /// 物流桥每条输出通道（方向）上的物品。key=输出方向，value=itemId（容量1）。
+  /// 物流桥作为传送带终点/起点时，物品经此通道中转。
+  Map<String, String> bridgeLaneItems = {};
 
   /// 汇流器 FCFS（先到先得）机制：记录每个输入方向物品到达末端的时间戳序号。
   /// key: 输入方向（left/up/right），value: 到达序号（值越小越早到达，优先处理）
@@ -245,32 +227,18 @@ class PlacedBuilding {
     }
   }
 
-  String _bridgeLanePrefixFor(String outputDirection) =>
-      '$_bridgeLanePrefix${_normalizeBridgeDirection(outputDirection)}__';
-
-  String _bridgeLaneKey(String outputDirection, String itemId) =>
-      '${_bridgeLanePrefixFor(outputDirection)}$itemId';
-
+  /// 获取物流桥指定输出方向通道上的物品 ID（通道容量为 1）。
   String? bridgeItemIdForOutputDirection(String outputDirection) {
     if (!isBeltBridge) return null;
-    final prefix = _bridgeLanePrefixFor(outputDirection);
-    for (final entry in outputItems.entries) {
-      if (entry.value <= 0 || !entry.key.startsWith(prefix)) continue;
-      return entry.key.substring(prefix.length);
-    }
-    return null;
+    return bridgeLaneItems[_normalizeBridgeDirection(outputDirection)];
   }
 
+  /// 物流桥指定输出方向通道上的物品数量（0 或 1，容量为 1）。
   int bridgeItemCountForOutputDirection(String outputDirection) {
     if (!isBeltBridge) return 0;
-    final prefix = _bridgeLanePrefixFor(outputDirection);
-    var count = 0;
-    for (final entry in outputItems.entries) {
-      if (entry.key.startsWith(prefix)) {
-        count += entry.value;
-      }
-    }
-    return count;
+    return bridgeLaneItems.containsKey(_normalizeBridgeDirection(outputDirection))
+        ? 1
+        : 0;
   }
 
   bool canAcceptBridgeInputItem(String itemId, String outputDirection) {
@@ -285,21 +253,16 @@ class PlacedBuilding {
 
   bool acceptBridgeInputItem(String itemId, String outputDirection) {
     if (!canAcceptBridgeInputItem(itemId, outputDirection)) return false;
-    final key = _bridgeLaneKey(outputDirection, itemId);
-    outputItems[key] = (outputItems[key] ?? 0) + 1;
+    bridgeLaneItems[_normalizeBridgeDirection(outputDirection)] = itemId;
     return true;
   }
 
   bool consumeBridgeOutputItem(String itemId, String outputDirection) {
     if (!isBeltBridge || itemId.isEmpty) return false;
-    final key = _bridgeLaneKey(outputDirection, itemId);
-    final current = outputItems[key] ?? 0;
-    if (current <= 0) return false;
-    if (current == 1) {
-      outputItems.remove(key);
-    } else {
-      outputItems[key] = current - 1;
-    }
+    final dir = _normalizeBridgeDirection(outputDirection);
+    final current = bridgeLaneItems[dir];
+    if (current != itemId) return false;
+    bridgeLaneItems.remove(dir);
     return true;
   }
 
@@ -311,58 +274,26 @@ class PlacedBuilding {
 
   bool get isSplitter => building.id == _splitterId;
 
-  static const String _splitterSlotKey = '__splitter_slot__';
-
   /// 分流器内部缓冲：是否有物品等待输出
   bool get splitterBufferOccupied {
     if (!isSplitter) return false;
-    return outputItems.keys.any((key) => key.startsWith(_splitterSlotKey));
-  }
-
-  /// 获取缓冲槽位中的物品 ID
-  String? get splitterBufferedItemId {
-    if (!isSplitter) return null;
-    for (final entry in outputItems.entries) {
-      if (entry.key.startsWith(_splitterSlotKey) && entry.value > 0) {
-        // key 格式: __splitter_slot__<direction>__<itemId>
-        final withoutPrefix = entry.key.substring(_splitterSlotKey.length);
-        final sepIdx = withoutPrefix.indexOf('__');
-        if (sepIdx > 0) {
-          return withoutPrefix.substring(sepIdx + 2);
-        }
-      }
-    }
-    return null;
-  }
-
-  /// 获取缓冲槽位中物品的目标输出方向
-  String? get splitterBufferedDirection {
-    if (!isSplitter) return null;
-    for (final entry in outputItems.entries) {
-      if (entry.key.startsWith(_splitterSlotKey) && entry.value > 0) {
-        final withoutPrefix = entry.key.substring(_splitterSlotKey.length);
-        final sepIdx = withoutPrefix.indexOf('__');
-        if (sepIdx > 0) {
-          return withoutPrefix.substring(0, sepIdx);
-        }
-      }
-    }
-    return null;
+    return splitterBufferedItemId != null;
   }
 
   /// 尝试将物品放入分流器缓冲槽位。若已有物品则失败。
   bool acceptIntoBuffer(String itemId, String direction) {
     if (!isSplitter || itemId.isEmpty || direction.isEmpty) return false;
     if (splitterBufferOccupied) return false;
-    final key = '$_splitterSlotKey${direction}__$itemId';
-    outputItems[key] = 1;
+    splitterBufferedItemId = itemId;
+    splitterBufferedDirection = direction;
     return true;
   }
 
   /// 消费分流器缓冲槽位中的物品。
   void consumeFromBuffer() {
     if (!isSplitter) return;
-    outputItems.removeWhere((key, value) => key.startsWith(_splitterSlotKey));
+    splitterBufferedItemId = null;
+    splitterBufferedDirection = null;
   }
 
   // ===== 汇流器（Converger）循环接收机制 =====
@@ -402,8 +333,8 @@ class PlacedBuilding {
 
   Map<String, bool> conveyorPortConnections(
     Iterable<ConveyorBelt> conveyors, {
-    double cellSize = 48.0,
-    double threshold = 30.0,
+    double cellSize = AppConstants.cellSize,
+    double threshold = AppConstants.portConnectionThreshold,
   }) {
     final connections = <String, bool>{};
     for (final belt in conveyors) {
@@ -560,7 +491,7 @@ class ConveyorBelt {
     }
   }
 
-  static const double _cellSize = 48.0;
+  static const double _cellSize = AppConstants.cellSize;
 
   Offset get start => path.isNotEmpty
       ? Offset(path.first.dx * _cellSize + _cellSize / 2,
@@ -728,7 +659,7 @@ class ConveyorBelt {
           : endLimit;
       if (first.fillCount >= limit) return false;
       final fp = first.freezeProgress;
-      final isFreezing = fp != null && fp != -3.0;
+      final isFreezing = FreezeSentinels.isFreezing(fp);
       if (isFreezing) return false;
       first.fillCount++;
       first.freezeProgress = null;
@@ -768,7 +699,7 @@ class ConveyorBelt {
           : endLimit;
       if (first.fillCount >= limit) return false;
       final fp = first.freezeProgress;
-      final isFreezing = fp != null && fp != -3.0;
+      final isFreezing = FreezeSentinels.isFreezing(fp);
       return !isFreezing;
     }
 
@@ -845,11 +776,11 @@ class ConveyorBelt {
             activeSourceItemId != null &&
             segment.itemId == activeSourceItemId;
         final fp = segment.freezeProgress;
-        final isFreezing = fp != null && fp != -3.0;
+        final isFreezing = FreezeSentinels.isFreezing(fp);
         final canAdvance = segment.fillCount < limit;
         if (canAdvance) {
           if (isFreezing) {
-            segment.freezeProgress = -3.0;
+            segment.freezeProgress = FreezeSentinels.clearing;
             changed = true;
           } else {
             if (isFedBySource && sourceExtendedThisTick) {
@@ -868,12 +799,12 @@ class ConveyorBelt {
             activeSourceItemId != null &&
             segment.itemId == activeSourceItemId;
         final fp = segment.freezeProgress;
-        final isFreezing = fp != null && fp != -3.0;
+        final isFreezing = FreezeSentinels.isFreezing(fp);
         if (isFedBySource) {
           final canAdvance = segment.fillCount < endLimit;
           if (canAdvance) {
             if (isFreezing) {
-              segment.freezeProgress = -3.0;
+              segment.freezeProgress = FreezeSentinels.clearing;
               changed = true;
             } else if (!sourceExtendedThisTick) {
               segment.fillCount++;
@@ -887,7 +818,7 @@ class ConveyorBelt {
         final canAdvance = segment.drainCount < segment.fillCount;
         if (canAdvance) {
           if (isFreezing) {
-            segment.freezeProgress = -3.0;
+            segment.freezeProgress = FreezeSentinels.clearing;
             changed = true;
           } else {
             segment.drainCount++;
@@ -928,19 +859,22 @@ class ConveyorBelt {
       final shouldFreeze = atLimit && (isLastSegment || frozenAhead);
       final fp = segment.freezeProgress;
       if (shouldFreeze && fp == null) {
-        segment.freezeProgress = -0.75;
+        segment.freezeProgress = FreezeSentinels.newlyFrozen;
       }
-      if (shouldFreeze && fp == -3.0) {
-        segment.freezeProgress = -0.75;
+      if (shouldFreeze && fp == FreezeSentinels.clearing) {
+        segment.freezeProgress = FreezeSentinels.newlyFrozen;
       }
-      if (!shouldFreeze && (fp == -0.75 || fp == -1.0 || fp == -0.5)) {
-        segment.freezeProgress = -3.0;
+      if (!shouldFreeze &&
+          (fp == FreezeSentinels.newlyFrozen ||
+              fp == FreezeSentinels.waiting ||
+              fp == FreezeSentinels.midFrozen)) {
+        segment.freezeProgress = FreezeSentinels.clearing;
       }
-      if (!shouldFreeze && fp == 0.5) {
-        segment.freezeProgress = -3.0;
+      if (!shouldFreeze && fp == FreezeSentinels.settled) {
+        segment.freezeProgress = FreezeSentinels.clearing;
       }
       final newFp = segment.freezeProgress;
-      frozenAhead = newFp != null && newFp != -3.0;
+      frozenAhead = FreezeSentinels.isFreezing(newFp);
     }
     syncLegacyFromSegments();
   }

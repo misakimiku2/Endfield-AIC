@@ -2,35 +2,33 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import '../models/building.dart';
 import '../models/project.dart';
 import '../data/data_loader.dart';
 import '../canvas/canvas_editor.dart';
 import '../canvas/simulation_engine.dart';
+import '../state/project_notifier.dart';
+import '../utils/json_parse.dart';
 import '../widgets/equipment_dock.dart';
 import '../widgets/floating_action_buttons.dart';
 import '../widgets/building_detail_dialog.dart';
 
 class EditorPage extends StatefulWidget {
-  final DataLoader dataLoader;
-  final SimulationEngine simulationEngine;
-
-  const EditorPage({
-    super.key,
-    required this.dataLoader,
-    required this.simulationEngine,
-  });
+  const EditorPage({super.key});
 
   @override
   State<EditorPage> createState() => _EditorPageState();
 }
 
 class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
-  late ProjectState _project;
   Building? _placingBuilding;
   PlacedBuilding? _selectedBuilding;
   bool _conveyorMode = false;
   final GlobalKey<CanvasEditorState> _canvasKey = GlobalKey();
+
+  /// 当前项目数据（从 [ProjectNotifier] 读取，实例在 app 生命周期内稳定）。
+  ProjectState get _project => context.read<ProjectNotifier>().project;
 
   // 错误提示 Toast 状态
   String? _toastMessage;
@@ -50,16 +48,11 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _project = ProjectState();
-    widget.simulationEngine.attach(_project);
-    // 监听仿真引擎的 tick 结果，触发 UI 重绘
-    widget.simulationEngine.addListener(_onSimTick);
-    widget.simulationEngine.start();
-    // 异步初始化计算 Isolate
-    widget.simulationEngine.init().then((_) {
-      // Isolate 就绪后同步当前状态
-      widget.simulationEngine.attach(_project);
-    });
+    // ProjectNotifier 在构造时已把 project 引用交给引擎，这里无需再 attach。
+    final engine = context.read<SimulationEngine>();
+    engine.start();
+    // 异步初始化计算 Isolate，就绪后重新同步当前项目状态
+    engine.init().then((_) => engine.attach(_project));
     _toastController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
@@ -68,14 +61,9 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
 
   @override
   void dispose() {
-    widget.simulationEngine.removeListener(_onSimTick);
     _toastTimer?.cancel();
     _toastController.dispose();
     super.dispose();
-  }
-
-  void _onSimTick() {
-    setState(() {});
   }
 
   void _showErrorToast(String message) {
@@ -121,7 +109,7 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
       BuildingDetailDialog.show(
         context,
         placedBuilding: pb,
-        dataLoader: widget.dataLoader,
+        dataLoader: context.read<DataLoader>(),
         project: _project,
         conveyors: _project.conveyors,
         onMove: () {
@@ -132,11 +120,10 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
           setState(() {
             _selectedBuilding = null;
           });
-          widget.simulationEngine.attach(_project);
+          context.read<ProjectNotifier>().notifyChanged();
         },
         onInventoryChanged: () {
-          setState(() {});
-          widget.simulationEngine.attach(_project);
+          context.read<ProjectNotifier>().notifyChanged();
         },
         onOutputItemSelected: (itemId) {
           _setDepotOutputItem(pb, itemId);
@@ -160,8 +147,7 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
     for (final port in pb.outputPorts) {
       port.linkedItemId = itemId;
     }
-    widget.simulationEngine.attach(_project);
-    setState(() {});
+    context.read<ProjectNotifier>().notifyChanged();
   }
 
   void _toggleConveyorMode() {
@@ -285,19 +271,20 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
 
     if (data['buildings'] != null) {
       for (final bd in data['buildings']) {
-        final buildingId = bd['building_id'] as String;
-        final building = widget.dataLoader.getBuilding(buildingId);
+        final b = bd as Map<String, dynamic>;
+        final buildingId = b['building_id'] as String;
+        final building = context.read<DataLoader>().getBuilding(buildingId);
         if (building != null) {
           newBuildings.add(PlacedBuilding(
             id: 'building_${DateTime.now().millisecondsSinceEpoch}_${newBuildings.length}',
             building: building,
-            gridX: (bd['grid_x'] as num).toDouble(),
-            gridY: (bd['grid_y'] as num).toDouble(),
-            rotation: bd['rotation'] as int? ?? 0,
-            activeRecipeId: bd['recipe_id'] as String?,
-            inputItemId: bd['input_item_id'] as String?,
-            inputItemCount: (bd['input_item_count'] as num?)?.toInt() ?? 0,
-            outputItems: (bd['output_items'] as Map<String, dynamic>?)
+            gridX: b.getDouble('grid_x'),
+            gridY: b.getDouble('grid_y'),
+            rotation: b['rotation'] as int? ?? 0,
+            activeRecipeId: b['recipe_id'] as String?,
+            inputItemId: b['input_item_id'] as String?,
+            inputItemCount: (b['input_item_count'] as num?)?.toInt() ?? 0,
+            outputItems: (b['output_items'] as Map<String, dynamic>?)
                     ?.map((k, v) => MapEntry(k, v as int)) ??
                 {},
           ));
@@ -307,19 +294,17 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
 
     if (data['conveyors'] != null) {
       for (final cd in data['conveyors']) {
+        final c = cd as Map<String, dynamic>;
         final path = <Offset>[];
-        if (cd['path'] != null) {
-          for (final p in cd['path']) {
-            path.add(Offset(
-              (p['x'] as num).toDouble(),
-              (p['y'] as num).toDouble(),
-            ));
+        if (c['path'] != null) {
+          for (final p in c['path']) {
+            path.add((p as Map).offset());
           }
-        } else if (cd['start_x'] != null && cd['end_x'] != null) {
-          final sx = ((cd['start_x'] as num).toDouble() / 48.0).floor();
-          final sy = ((cd['start_y'] as num).toDouble() / 48.0).floor();
-          final ex = ((cd['end_x'] as num).toDouble() / 48.0).floor();
-          final ey = ((cd['end_y'] as num).toDouble() / 48.0).floor();
+        } else if (c['start_x'] != null && c['end_x'] != null) {
+          final sx = (c.getDouble('start_x') / 48.0).floor();
+          final sy = (c.getDouble('start_y') / 48.0).floor();
+          final ex = (c.getDouble('end_x') / 48.0).floor();
+          final ey = (c.getDouble('end_y') / 48.0).floor();
 
           if (sx != ex) {
             final dx = ex > sx ? 1 : -1;
@@ -340,16 +325,15 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
           newConveyors.add(ConveyorBelt(
             id: 'belt_${DateTime.now().millisecondsSinceEpoch}_${newConveyors.length}',
             path: path,
-            itemId: cd['item_id'] as String? ?? '',
-            phaseOffset: (cd['phase_offset'] as num?)?.toDouble() ?? 0.0,
-            itemSegments: ((cd['item_segments'] as List?) ?? const [])
+            itemId: c['item_id'] as String? ?? '',
+            phaseOffset: c.getDoubleOrDefault('phase_offset'),
+            itemSegments: ((c['item_segments'] as List?) ?? const [])
                 .map((s) => s as Map<String, dynamic>)
                 .map((s) => ConveyorItemSegment(
                       itemId: s['item_id'] as String? ?? '',
                       fillCount: (s['fill_count'] as num?)?.toInt() ?? 0,
                       drainCount: (s['drain_count'] as num?)?.toInt() ?? 0,
-                      freezeProgress:
-                          (s['freeze_progress'] as num?)?.toDouble(),
+                      freezeProgress: s.getDoubleOrNull('freeze_progress'),
                     ))
                 .toList(),
           ));
@@ -357,20 +341,18 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
       }
     }
 
-    setState(() {
-      _project.buildings
-        ..clear()
-        ..addAll(newBuildings);
-      _project.conveyors
-        ..clear()
-        ..addAll(newConveyors);
-      widget.simulationEngine.attach(_project);
-    });
+    _project.buildings
+      ..clear()
+      ..addAll(newBuildings);
+    _project.conveyors
+      ..clear()
+      ..addAll(newConveyors);
+    context.read<ProjectNotifier>().notifyChanged();
   }
 
   Building? _getBuildingByKey(int keyIndex) {
     if (keyIndex < 0 || keyIndex >= _dockOrder.length) return null;
-    return widget.dataLoader.getBuilding(_dockOrder[keyIndex]);
+    return context.read<DataLoader>().getBuilding(_dockOrder[keyIndex]);
   }
 
   bool _handleKeyDown(KeyEvent event) {
@@ -476,14 +458,6 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
                   Positioned.fill(
                     child: CanvasEditor(
                       key: _canvasKey,
-                      dataLoader: widget.dataLoader,
-                      project: _project,
-                      onProjectChanged: (p) {
-                        setState(() {
-                          _project = p;
-                          widget.simulationEngine.attach(p);
-                        });
-                      },
                       placingBuilding: _placingBuilding,
                       onBuildingPlaced: _onBuildingPlaced,
                       onBuildingSelected: _onBuildingTapped,
@@ -506,7 +480,7 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
                     bottom: 0,
                     child: Center(
                       child: EquipmentDock(
-                        dataLoader: widget.dataLoader,
+                        dataLoader: context.read<DataLoader>(),
                         selectedBuilding: _placingBuilding,
                         onBuildingSelected: _onDockBuildingSelected,
                       ),
@@ -609,6 +583,8 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
   }
 
   Widget _speedControl() {
+    // watch 引擎：速度变化时引擎会 notifyListeners，刷新高亮
+    final engine = context.watch<SimulationEngine>();
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
@@ -618,10 +594,9 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [0.25, 0.5, 1.0, 2.0, 4.0].map((speed) {
-          final isActive =
-              (widget.simulationEngine.speedMultiplier - speed).abs() < 0.01;
+          final isActive = (engine.speedMultiplier - speed).abs() < 0.01;
           return GestureDetector(
-            onTap: () => widget.simulationEngine.speedMultiplier = speed,
+            onTap: () => engine.speedMultiplier = speed,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
               decoration: BoxDecoration(
@@ -644,6 +619,9 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
   }
 
   Widget _buildStatusBar() {
+    // watch 引擎：缩放比例由画布在平移/缩放时写回 project，按 tick 节奏刷新
+    context.watch<SimulationEngine>();
+    final project = context.read<ProjectNotifier>().project;
     return Container(
       height: 24,
       decoration: const BoxDecoration(
@@ -654,17 +632,17 @@ class _EditorPageState extends State<EditorPage> with TickerProviderStateMixin {
       child: Row(
         children: [
           Text(
-            '设备: ${_project.buildings.length}',
+            '设备: ${project.buildings.length}',
             style: const TextStyle(color: Color(0xFF888888), fontSize: 10),
           ),
           const SizedBox(width: 16),
           Text(
-            '传送带: ${_project.conveyors.length}',
+            '传送带: ${project.conveyors.length}',
             style: const TextStyle(color: Color(0xFF888888), fontSize: 10),
           ),
           const SizedBox(width: 16),
           Text(
-            '缩放: ${(_project.scale * 100).toStringAsFixed(0)}%',
+            '缩放: ${(project.scale * 100).toStringAsFixed(0)}%',
             style: const TextStyle(color: Color(0xFF888888), fontSize: 10),
           ),
           const Spacer(),

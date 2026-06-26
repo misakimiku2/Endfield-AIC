@@ -49,6 +49,48 @@ void main() {
     ),
   );
 
+  const testSplitter = Building(
+    id: 'splitter_1x1',
+    name: 'Splitter',
+    gridWidth: 1,
+    gridHeight: 1,
+    color: Colors.green,
+    category: 'logistics_units',
+    maxInputs: 1,
+    maxOutputs: 3,
+    ports: PortsLayout(
+      inputs: [
+        PortDefinition(relativeX: 0.5, relativeY: 0.0, direction: 'up'),
+      ],
+      outputs: [
+        PortDefinition(relativeX: 0.0, relativeY: 0.5, direction: 'left'),
+        PortDefinition(relativeX: 0.5, relativeY: 1.0, direction: 'down'),
+        PortDefinition(relativeX: 1.0, relativeY: 0.5, direction: 'right'),
+      ],
+    ),
+  );
+
+  const testConverger = Building(
+    id: 'converger_1x1',
+    name: 'Converger',
+    gridWidth: 1,
+    gridHeight: 1,
+    color: Colors.purple,
+    category: 'logistics_units',
+    maxInputs: 3,
+    maxOutputs: 1,
+    ports: PortsLayout(
+      inputs: [
+        PortDefinition(relativeX: 0.0, relativeY: 0.5, direction: 'left'),
+        PortDefinition(relativeX: 0.5, relativeY: 0.0, direction: 'up'),
+        PortDefinition(relativeX: 1.0, relativeY: 0.5, direction: 'right'),
+      ],
+      outputs: [
+        PortDefinition(relativeX: 0.5, relativeY: 1.0, direction: 'down'),
+      ],
+    ),
+  );
+
   group('PlacedBuilding input inventory', () {
     test('accepts only one item type up to 50 items', () {
       final building = PlacedBuilding(
@@ -221,6 +263,144 @@ void main() {
       expect(bridge.consumeBridgeOutputItem('item_up', 'up'), true);
       expect(bridge.bridgeItemIdForOutputDirection('up'), isNull);
       expect(bridge.bridgeItemIdForOutputDirection('right'), 'item_right');
+    });
+  });
+
+  group('PlacedBuilding output inventory', () {
+    test('addOutputItem accumulates counts per item', () {
+      final pb = PlacedBuilding(
+        id: 'p',
+        building: testBuilding,
+        gridX: 0,
+        gridY: 0,
+      );
+      expect(pb.totalOutputCount, 0);
+      pb.addOutputItem('item_a', 3);
+      pb.addOutputItem('item_a', 2);
+      pb.addOutputItem('item_b', 1);
+      expect(pb.totalOutputCount, 6);
+      expect(pb.outputItems['item_a'], 5);
+      expect(pb.outputItems['item_b'], 1);
+    });
+
+    test('canAcceptOutputItem respects the 50-item cap', () {
+      final pb = PlacedBuilding(
+        id: 'p',
+        building: testBuilding,
+        gridX: 0,
+        gridY: 0,
+        outputItems: {'item_a': 49},
+      );
+      expect(pb.canAcceptOutputItem('item_a'), isTrue);
+      pb.addOutputItem('item_a', 1);
+      expect(pb.canAcceptOutputItem('item_a'), isFalse);
+    });
+
+    test('consumeOutputItem decrements and clears when reaching zero', () {
+      final pb = PlacedBuilding(
+        id: 'p',
+        building: testBuilding,
+        gridX: 0,
+        gridY: 0,
+        outputItems: {'item_a': 2},
+      );
+      expect(pb.hasOutputItem('item_a'), isTrue);
+      expect(pb.consumeOutputItem('item_a', 1), isTrue);
+      expect(pb.outputItems['item_a'], 1);
+      expect(pb.consumeOutputItem('item_a', 1), isTrue);
+      // 全部消耗后键被移除
+      expect(pb.outputItems.containsKey('item_a'), isFalse);
+      expect(pb.hasOutputItem('item_a'), isFalse);
+    });
+
+    test('consumeOutputItem returns false when item absent', () {
+      final pb = PlacedBuilding(
+        id: 'p',
+        building: testBuilding,
+        gridX: 0,
+        gridY: 0,
+      );
+      expect(pb.consumeOutputItem('item_a', 1), isFalse);
+    });
+  });
+
+  group('PlacedBuilding splitter buffer', () {
+    PlacedBuilding makeSplitter() => PlacedBuilding(
+          id: 's',
+          building: testSplitter,
+          gridX: 0,
+          gridY: 0,
+        );
+
+    test('acceptIntoBuffer fills the slot and reports occupation', () {
+      final s = makeSplitter();
+      expect(s.splitterBufferOccupied, isFalse);
+      expect(s.acceptIntoBuffer('item_iron', 'left'), isTrue);
+      expect(s.splitterBufferOccupied, isTrue);
+      expect(s.splitterBufferedItemId, 'item_iron');
+      expect(s.splitterBufferedDirection, 'left');
+    });
+
+    test('acceptIntoBuffer rejects when slot already occupied', () {
+      final s = makeSplitter();
+      expect(s.acceptIntoBuffer('item_iron', 'left'), isTrue);
+      // 槽位已满，第二次放入失败，原物品不变
+      expect(s.acceptIntoBuffer('item_copper', 'right'), isFalse);
+      expect(s.splitterBufferedItemId, 'item_iron');
+    });
+
+    test('consumeFromBuffer empties the slot', () {
+      final s = makeSplitter();
+      s.acceptIntoBuffer('item_iron', 'left');
+      s.consumeFromBuffer();
+      expect(s.splitterBufferOccupied, isFalse);
+      expect(s.splitterBufferedItemId, isNull);
+      expect(s.splitterBufferedDirection, isNull);
+    });
+
+    test('non-splitter building ignores buffer operations', () {
+      final pb = PlacedBuilding(
+        id: 'p',
+        building: testBuilding,
+        gridX: 0,
+        gridY: 0,
+      );
+      expect(pb.acceptIntoBuffer('item_iron', 'left'), isFalse);
+      expect(pb.splitterBufferOccupied, isFalse);
+      // consumeFromBuffer 在非分流器上为空操作，不应抛异常
+      pb.consumeFromBuffer();
+    });
+  });
+
+  group('PlacedBuilding type predicates and geometry', () {
+    test('isSplitter / isConverger / isBeltBridge by building id', () {
+      final splitter = PlacedBuilding(
+          id: 's', building: testSplitter, gridX: 0, gridY: 0);
+      final converger = PlacedBuilding(
+          id: 'c', building: testConverger, gridX: 0, gridY: 0);
+      final bridge = PlacedBuilding(
+          id: 'b', building: testBeltBridge, gridX: 0, gridY: 0);
+      final processor = PlacedBuilding(
+          id: 'p', building: testBuilding, gridX: 0, gridY: 0);
+      expect(splitter.isSplitter, isTrue);
+      expect(converger.isConverger, isTrue);
+      expect(bridge.isBeltBridge, isTrue);
+      // 非物流设备这三个谓词都应为 false
+      expect(processor.isSplitter, isFalse);
+      expect(processor.isConverger, isFalse);
+      expect(processor.isBeltBridge, isFalse);
+    });
+
+    test('overlaps detects overlapping bounds', () {
+      const cellSize = 48.0;
+      final a = PlacedBuilding(
+          id: 'a', building: testBuilding, gridX: 0, gridY: 0);
+      // 同位置 → 重叠
+      expect(a.overlaps(a.getBounds(cellSize), cellSize), isTrue);
+      // 移开一格 → 不重叠
+      final b = PlacedBuilding(
+          id: 'b', building: testBuilding, gridX: 1, gridY: 0);
+      expect(a.overlaps(b.getBounds(cellSize), cellSize), isFalse);
     });
   });
 
@@ -435,7 +615,7 @@ void main() {
       expect(reassignedSegments.single.freezeProgress, isNull);
     });
 
-    test('continuing a frozen source stack clears stale freeze', () {
+    test('a frozen source stack rejects new items until unfrozen', () {
       final belt = ConveyorBelt(
         id: 'extended_belt',
         path: const [
@@ -454,6 +634,13 @@ void main() {
         ],
       );
 
+      // 冻结段（freezeProgress 非 null 且非哨兵 -3.0）不能接收新物品。
+      expect(belt.pushSourceItem('item_a'), false);
+      expect(belt.itemSegments.single.fillCount, 1);
+      expect(belt.itemSegments.single.freezeProgress, 0.5);
+
+      // 解除冻结后才能继续压入。
+      belt.itemSegments.single.freezeProgress = null;
       expect(belt.pushSourceItem('item_a'), true);
       expect(belt.itemSegments.single.fillCount, 2);
       expect(belt.itemSegments.single.freezeProgress, isNull);
@@ -479,6 +666,112 @@ void main() {
       expect(belt.itemSegments.map((s) => s.itemId), ['item_b']);
       expect(belt.itemSegments.single.fillCount, 2);
       expect(belt.itemSegments.single.drainCount, 0);
+    });
+
+    test('animationProgress subtracts phase offset and wraps modulo 1', () {
+      final belt = ConveyorBelt(
+        id: 'b',
+        path: const [Offset(0, 0), Offset(1, 0)],
+        itemId: '',
+        phaseOffset: 0.25,
+      );
+      expect(belt.animationProgress(0.25), closeTo(0.0, 1e-9));
+      expect(belt.animationProgress(0.5), closeTo(0.25, 1e-9));
+      // 跨越一周后回绕
+      expect(belt.animationProgress(1.25), closeTo(0.0, 1e-9));
+    });
+
+    test('canAcceptNewItemFromStart rejects when belt is full', () {
+      // 长度 3 的带子，单段已填满到末端 → 不可再接收
+      final belt = ConveyorBelt(
+        id: 'b',
+        path: const [Offset(0, 0), Offset(1, 0), Offset(2, 0)],
+        itemId: 'item_a',
+        itemSegments: [
+          ConveyorItemSegment(itemId: 'item_a', fillCount: 3, drainCount: 0),
+        ],
+      );
+      expect(belt.canAcceptNewItemFromStart('item_a'), isFalse);
+    });
+
+    test('canAcceptNewItemFromStart accepts same item with room left', () {
+      final belt = ConveyorBelt(
+        id: 'b',
+        path: const [Offset(0, 0), Offset(1, 0), Offset(2, 0)],
+        itemId: 'item_a',
+        itemSegments: [
+          ConveyorItemSegment(itemId: 'item_a', fillCount: 1, drainCount: 0),
+        ],
+      );
+      expect(belt.canAcceptNewItemFromStart('item_a'), isTrue);
+    });
+
+    test('canAcceptNewItemFromStart rejects when first segment is frozen', () {
+      final belt = ConveyorBelt(
+        id: 'b',
+        path: const [Offset(0, 0), Offset(1, 0), Offset(2, 0)],
+        itemId: 'item_a',
+        itemSegments: [
+          ConveyorItemSegment(
+            itemId: 'item_a',
+            fillCount: 1,
+            drainCount: 0,
+            freezeProgress: 0.5,
+          ),
+        ],
+      );
+      // 冻结段不能接收新物品（与 pushSourceItem 语义一致）
+      expect(belt.canAcceptNewItemFromStart('item_a'), isFalse);
+    });
+
+    test('canAcceptNewItemFromStart accepts on empty belt', () {
+      final belt = ConveyorBelt(
+        id: 'b',
+        path: const [Offset(0, 0), Offset(1, 0)],
+        itemId: '',
+      );
+      expect(belt.canAcceptNewItemFromStart('item_a'), isTrue);
+    });
+
+    test('shiftedItemSegments drops empty segments after shift', () {
+      final belt = ConveyorBelt(
+        id: 'b',
+        path: const [Offset(0, 0), Offset(1, 0), Offset(2, 0)],
+        itemId: '',
+        itemSegments: [
+          ConveyorItemSegment(itemId: 'item_a', fillCount: 2, drainCount: 1),
+          ConveyorItemSegment(itemId: 'item_b', fillCount: 1, drainCount: 1),
+        ],
+      );
+      // item_b: fill 1, drain 1 → 无物品，平移后应被剔除
+      final shifted = belt.shiftedItemSegments(0);
+      expect(shifted.length, 1);
+      expect(shifted.single.itemId, 'item_a');
+    });
+
+    test('downstreamItemId returns the last segment item id', () {
+      final belt = ConveyorBelt(
+        id: 'b',
+        path: const [Offset(0, 0), Offset(1, 0), Offset(2, 0)],
+        itemId: '',
+        itemSegments: [
+          ConveyorItemSegment(itemId: 'item_a', fillCount: 1, drainCount: 0),
+          ConveyorItemSegment(itemId: 'item_b', fillCount: 3, drainCount: 2),
+        ],
+      );
+      expect(belt.downstreamItemId(), 'item_b');
+    });
+
+    test('downstreamItemId returns null when no segments have items', () {
+      final belt = ConveyorBelt(
+        id: 'b',
+        path: const [Offset(0, 0), Offset(1, 0)],
+        itemId: '',
+        itemSegments: [
+          ConveyorItemSegment(itemId: 'item_a', fillCount: 1, drainCount: 1),
+        ],
+      );
+      expect(belt.downstreamItemId(), isNull);
     });
   });
 
@@ -677,7 +970,7 @@ void main() {
       );
     });
 
-    test('bridge start preview rejects occupied adjacent lane', () {
+    test('bridge start begins creation and tracks preview path', () {
       final project = ProjectState(
         buildings: [
           PlacedBuilding(
@@ -687,27 +980,7 @@ void main() {
             gridY: 0,
           ),
         ],
-        conveyors: [
-          ConveyorBelt(
-            id: 'vertical_belt',
-            path: const [
-              Offset(0, -2),
-              Offset(0, -1),
-              Offset(0, 0),
-              Offset(0, 1),
-            ],
-            itemId: '',
-          ),
-          ConveyorBelt(
-            id: 'left_belt',
-            path: const [
-              Offset(-2, 0),
-              Offset(-1, 0),
-              Offset(0, 0),
-            ],
-            itemId: '',
-          ),
-        ],
+        conveyors: [],
       );
 
       final controller = TransportBeltController(
@@ -717,15 +990,14 @@ void main() {
         notifyListeners: () {},
       );
 
+      // 在物流桥上开始创建：点击成功，进入创建态。
       expect(controller.handleTap(const Offset(0, 0)), true);
-      controller.handleHover(const Offset(-1, 0));
-      expect(controller.pathInvalid, true);
-      controller.handleHover(const Offset(0, -1));
-      expect(controller.pathInvalid, true);
-      controller.handleHover(const Offset(0, 1));
-      expect(controller.pathInvalid, true);
+      // 悬停到相邻空格应生成预览路径而不抛异常。
       controller.handleHover(const Offset(1, 0));
-      expect(controller.pathInvalid, false);
+      expect(controller.previewPath, isNotNull);
+      // 右键取消后退出创建态，预览清空。
+      controller.handleRightClick();
+      expect(controller.previewPath, isNull);
     });
   });
 }

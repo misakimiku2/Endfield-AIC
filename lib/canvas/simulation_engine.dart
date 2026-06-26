@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/project.dart';
 import '../models/recipe.dart';
 import '../data/data_loader.dart';
+import '../constants/app_constants.dart';
 import 'sim_protocol.dart';
 import 'sim_worker.dart';
 
@@ -24,9 +25,9 @@ class SimulationEngine extends ChangeNotifier {
 
   // 主线程回退模式（Web 平台）
   Timer? _fallbackTimer;
-  static const double _tickRate = 20.0;
-  static const double _cellSize = 48.0;
-  static const double _portConnectionThreshold = 30.0;
+  static const double _tickRate = AppConstants.simTickRate;
+  static const double _cellSize = AppConstants.cellSize;
+  static const double _portConnectionThreshold = AppConstants.portConnectionThreshold;
 
   bool get isRunning => _isRunning;
 

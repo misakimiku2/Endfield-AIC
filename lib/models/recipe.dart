@@ -1,3 +1,5 @@
+import '../utils/json_parse.dart';
+
 class RecipeIO {
   final String itemId;
   final int amount;
@@ -36,7 +38,7 @@ class Recipe {
       id: json['id'] as String,
       name: (json['name'] as String).replaceAll('精炼', ''),
       allowedBuildings: List<String>.from(json['allowed_buildings'] as List),
-      processTimeSeconds: (json['process_time_seconds'] as num).toDouble(),
+      processTimeSeconds: json.getDouble('process_time_seconds'),
       inputs: (json['inputs'] as List)
           .map((e) => RecipeIO.fromJson(e as Map<String, dynamic>))
           .toList(),
