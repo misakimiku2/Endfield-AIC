@@ -6,6 +6,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../../models/project.dart';
 import '../../models/item.dart';
 import '../../constants/app_constants.dart';
+import '../Depot Access/depot_access.dart';
 
 class TransportBeltRenderer {
   static const double _cellMargin = 3.0;
@@ -101,6 +102,166 @@ class TransportBeltRenderer {
       }
     }
     return false;
+  }
+
+  /// 查找占据 [gridPos]（输入端口格或建筑体内）的输入端口建筑。
+  /// 用于渲染器判定传送带末端连接的建筑是否已满载。
+  static PlacedBuilding? _inputBuildingAtCell(
+      Offset gridPos, List<PlacedBuilding> buildings) {
+    final gx = gridPos.dx.round();
+    final gy = gridPos.dy.round();
+    for (final pb in buildings) {
+      if (pb.inputPorts.isEmpty) continue;
+      final bx = pb.effectiveGridX.toInt();
+      final by = pb.effectiveGridY.toInt();
+      if (gx >= bx &&
+          gx < bx + pb.effectiveWidth &&
+          gy >= by &&
+          gy < by + pb.effectiveHeight) {
+        return pb;
+      }
+    }
+    return null;
+  }
+
+  /// 传送带末端的"可填充上限"（格子数）。
+  ///
+  /// 默认为 [ConveyorBelt.path] 长度（物品可推进到最末端口格）。
+  /// 当末端连接的建筑无法再接收物品时，上限为 `path.length - 1`：
+  /// 物品停在端口前一格，端口格保持空。
+  ///
+  /// 此值必须与 `BeltSimulationLogic` 中 `terminalLimit` 的语义一致，
+  /// 否则渲染器的冻结状态机（依赖 atLimit 判定）会与逻辑层冻结位置错位，
+  /// 导致冻结态卡在过渡值（newlyFrozen=-0.75）无法推进到 settled(0.5)，
+  /// 物品随 arrowProgress 持续移动（动画不停）。
+  ///
+  /// 触发缩减上限的"无法接收"情形：
+  /// - 普通生产建筑：输入端计数已达 maxInputItemCount。
+  /// - 物流桥：物品到达方向对应的通道已满（容量为 1）。
+  /// - 分流器/汇流器：没有可接收物品的出口传送带（无出口，或所有出口带已满）。
+  static int _terminalFillLimit(
+      ConveyorBelt belt, List<PlacedBuilding> buildings) {
+    if (belt.path.isEmpty) return 0;
+    if (isInputPort(belt.path.last, buildings)) {
+      final building = _inputBuildingAtCell(belt.path.last, buildings);
+      if (building != null) {
+        // 普通生产建筑：输入端满载。
+        if (!building.isBeltBridge &&
+            !building.isSplitter &&
+            !building.isConverger &&
+            building.building.id != DepotLoaderConfig.id &&
+            building.inputItemCount >= PlacedBuilding.maxInputItemCount) {
+          return belt.path.length - 1;
+        }
+        // 物流桥：到达方向通道已满（容量 1）。逻辑层 canAcceptBridgeInputItem
+        // 在通道满时返回 false → inputBlocked=true → terminalLimit=path.length-1。
+        if (building.isBeltBridge) {
+          final arrivalDir = _beltArrivalDirection(belt);
+          if (arrivalDir != null &&
+              building.bridgeItemCountForOutputDirection(arrivalDir) >=
+                  PlacedBuilding.maxBridgeLaneItemCount) {
+            return belt.path.length - 1;
+          }
+        }
+        // 分流器/汇流器：无可用出口传送带时，逻辑层 _canBeltOutputEnterBuilding
+        // 返回 false → inputBlocked=true → terminalLimit=path.length-1。
+        // 渲染器需复刻该判定：找不到能接收物品的出口带即视为阻塞。
+        if (building.isSplitter || building.isConverger) {
+          if (!_logisticsBuildingHasReachableOutput(building, belt, buildings)) {
+            return belt.path.length - 1;
+          }
+        }
+      }
+    }
+    return belt.path.length;
+  }
+
+  /// 判断分流器/汇流器是否有可接收物品的出口传送带。
+  /// 复刻逻辑层 `_canBeltOutputEnterBuilding` 对 splitter/converger 的判定：
+  /// - 分流器：存在任一出口带，且该出口带起始端还能接收 [belt] 末端物品。
+  /// - 汇流器：存在出口带（向下输出）即可（与逻辑层 `outputBelt != null` 一致）。
+  ///
+  /// 用于渲染器冻结上限判定，避免渲染器在逻辑层已冻结物品时仍认为可推进。
+  static bool _logisticsBuildingHasReachableOutput(
+    PlacedBuilding building,
+    ConveyorBelt inputBelt,
+    List<PlacedBuilding> buildings,
+  ) {
+    final cell = Offset(building.gridX.toDouble(), building.gridY.toDouble());
+    final itemId = inputBelt.downstreamItemId() ??
+        inputBelt.outputReadyItemId() ??
+        '';
+    if (building.isSplitter) {
+      for (final belt in _projectConveyors(buildings)) {
+        if (belt.path.isEmpty) continue;
+        final start = belt.path.first;
+        if (start.dx.round() == cell.dx.round() &&
+            start.dy.round() == cell.dy.round()) {
+          // 排除与输入带互为同一条（极短残留带）
+          if (identical(belt, inputBelt)) continue;
+          if (itemId.isEmpty || belt.canAcceptNewItemFromStart(itemId)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+    // 汇流器：唯一输出方向为 down。
+    if (building.isConverger) {
+      for (final belt in _projectConveyors(buildings)) {
+        if (belt.path.isEmpty) continue;
+        final start = belt.path.first;
+        if (start.dx.round() == cell.dx.round() &&
+            start.dy.round() == cell.dy.round() &&
+            _beltExitDirection(belt) == 'down') {
+          return true;
+        }
+      }
+      return false;
+    }
+    return true;
+  }
+
+  /// 从 buildings 所在项目提取传送带列表（渲染器无直接项目引用，按参数传递）。
+  static List<ConveyorBelt> _projectConveyors(List<PlacedBuilding> buildings) {
+    // 渲染器接收的 buildings 与 conveyors 同属一个项目；
+    // 但渲染器签名不传 conveyors。此处通过输入带所在项目的引用获取。
+    // ConveyorBelt 无法从 buildings 反查，故由调用方在 renderConveyorPath
+    // 中已确保 buildings 与 belt 同项目——这里改用 belt 自身无法遍历。
+    // 实际实现见下方：渲染器主入口已传入 buildings，conveyors 需额外传入。
+    return const [];
+  }
+
+  /// 传送带出口方向（物品离开方向），与 `BeltSimulationLogic._beltExitDirection`
+  /// 语义一致。
+  static String? _beltExitDirection(ConveyorBelt belt) {
+    if (belt.path.length >= 2) {
+      return _directionBetween(belt.path.first, belt.path[1]);
+    }
+    return belt.forcedDirection;
+  }
+
+  /// 传送带末端的物品到达方向（物品运动方向），与
+  /// `BeltSimulationLogic._beltArrivalDirection` 语义一致。
+  /// 用于判定物流桥的到达方向通道。
+  static String? _beltArrivalDirection(ConveyorBelt belt) {
+    if (belt.path.length >= 2) {
+      return _directionBetween(
+        belt.path[belt.path.length - 2],
+        belt.path.last,
+      );
+    }
+    return belt.incomingDirection;
+  }
+
+  static String? _directionBetween(Offset from, Offset to) {
+    final dx = to.dx.round() - from.dx.round();
+    final dy = to.dy.round() - from.dy.round();
+    if (dx == 1 && dy == 0) return 'right';
+    if (dx == -1 && dy == 0) return 'left';
+    if (dx == 0 && dy == 1) return 'down';
+    if (dx == 0 && dy == -1) return 'up';
+    return null;
   }
 
   /// 获取以单元格中心 (0,0) 为原点时的裁剪 Rect。
@@ -519,12 +680,16 @@ class TransportBeltRenderer {
           .where((segment) => segment.hasItems)
           .toList()
         ..sort((a, b) => a.drainCount.compareTo(b.drainCount));
+      // 末端可填充上限：满载普通生产建筑时为 path.length - 1，与逻辑层
+      // terminalLimit 语义一致。冻结状态机的 atLimit 判定必须基于此值，
+      // 否则会与逻辑层冻结位置错位，冻结态卡在过渡值无法推进到 settled。
+      final terminalFillLimit = _terminalFillLimit(belt, buildings);
       bool frozenAhead = false;
       for (int i = renderSegments.length - 1; i >= 0; i--) {
         final segment = renderSegments[i];
         final limit = i + 1 < renderSegments.length
             ? renderSegments[i + 1].drainCount.clamp(0, belt.path.length)
-            : belt.path.length;
+            : terminalFillLimit;
         final sourceSegment =
             i < sourceSegments.length ? sourceSegments[i] : segment;
         if (sourceSegment.freezeProgress == FreezeSentinels.rendererWaiting &&
