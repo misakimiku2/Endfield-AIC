@@ -54,7 +54,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
       final isProducing = sourceItemId != null && sourceItemId.isNotEmpty;
 
       belt.ensureItemSegmentsFromLegacy();
-      if (isProducing) {
+      if (isProducing && !inputBlocked) {
         final pushed =
             belt.pushSourceItem(sourceItemId, terminalLimit: terminalLimit);
         if (pushed) {
@@ -65,7 +65,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
       }
       belt.advanceItemSegments(
         isDeadEnd: isDeadEnd || inputBuilding != null || inputBlocked,
-        activeSourceItemId: isProducing ? sourceItemId : null,
+        activeSourceItemId: (isProducing && !inputBlocked) ? sourceItemId : null,
         terminalLimit: terminalLimit,
       );
       if (inputBuilding != null) {
@@ -164,7 +164,10 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
     var inventoryChanged = false;
     belt.ensureItemSegmentsFromLegacy();
 
-    if (isProducing) {
+    // 当输入端已满（inputBlocked）时，停止从源推送物品，避免：
+    // 1. 物品在传送带上无限排队导致源设备输出库存耗尽
+    // 2. Isolate 异步消费与主线程推送的竞争导致物品持续涌入
+    if (isProducing && !inputBlocked) {
       final pushed =
           belt.pushSourceItem(sourceItemId, terminalLimit: terminalLimit);
       if (pushed) {
@@ -172,6 +175,9 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
         inventoryChanged = _consumeOutputItemForBeltStart(belt, sourceItemId) ||
             inventoryChanged;
       }
+    } else if (isProducing && inputBlocked) {
+      // 输入端满时，源不再推送，activeSourceItemId 置空
+      activeSourceItemId = null;
     }
 
     belt.advanceItemSegments(
@@ -621,6 +627,18 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
 
     // 若建筑当前不可接收（如分流器缓冲槽已满），则不尝试传输
     if (!_canBeltOutputEnterBuilding(belt, building, itemId)) return false;
+
+    // 兜底守卫：输入端达到容量上限时直接拒绝传输。
+    // 防止主线程与 Isolate 异步同步导致的竞争：Isolate 同步可能短暂降低
+    // inputItemCount，使 _canBeltOutputEnterBuilding 通过，但实际输入端已满。
+    // 物流桥/分流器/汇流器/仓库有其独立的容量管理，不受此限制。
+    if (building.inputItemCount >= PlacedBuilding.maxInputItemCount &&
+        !building.isBeltBridge &&
+        !building.isSplitter &&
+        !building.isConverger &&
+        building.building.id != DepotLoaderConfig.id) {
+      return false;
+    }
 
     if (building.isBeltBridge) {
       final outputDirection = _beltArrivalDirection(belt);

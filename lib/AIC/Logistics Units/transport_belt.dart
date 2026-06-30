@@ -298,6 +298,16 @@ class TransportBeltController {
     } else {
     }
 
+    // 禁止将传送带终点连接到生产设备的输出端口（1x1物流桥除外）
+    // 传送带是单向的，输出端口只能作为传送带起点（物品从设备流向传送带），
+    // 不能作为传送带终点。物流桥因其1x1多端口特性作为例外。
+    final endPortInfo = _findPortAtCell(gridPos);
+    if (endPortInfo != null &&
+        endPortInfo.type == 'output' &&
+        !endPortInfo.building.isBeltBridge) {
+      return false;
+    }
+
     // 允许设备输入端口的格子作为传送带终点
     // 注意：_isCellDeviceInputPort 对1x1建筑无效（端口坐标在格边缘而非格中心），
     // 需同时用 _isCellInBuilding + _buildingAtCellHasInputPort 补检。
@@ -1042,6 +1052,11 @@ class TransportBeltController {
     final mergeBelt = _findBeltStartCell(mouseGridPos!);
     // 检查鼠标是否悬停在设备输入端口
     final isInputPort = _isCellDeviceInputPort(mouseGridPos!);
+    // 检查鼠标是否悬停在设备输出端口（非物流桥）：用于预览寻路，但标记为不可创建
+    final mousePortInfo = _findPortAtCell(mouseGridPos!);
+    final isOutputPortPreview = mousePortInfo != null &&
+        mousePortInfo.type == 'output' &&
+        !mousePortInfo.building.isBeltBridge;
 
     Offset? excludeCell;
     if (mergeBelt != null) {
@@ -1050,7 +1065,7 @@ class TransportBeltController {
       if (!alreadyInPath) {
         excludeCell = mouseGridPos!;
       }
-    } else if (isInputPort) {
+    } else if (isInputPort || isOutputPortPreview) {
       excludeCell = mouseGridPos!;
     }
 
@@ -1123,6 +1138,11 @@ class TransportBeltController {
         if (!_hasIndependentBeltCell(prospectivePath)) {
           pathInvalid = true;
         }
+      }
+
+      // 输出端口可正确寻路，但标记为不可创建（红色预览）
+      if (!pathInvalid && isOutputPortPreview) {
+        pathInvalid = true;
       }
     }
 

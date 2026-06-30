@@ -31,6 +31,10 @@ class SimulationEngine extends ChangeNotifier {
 
   bool get isRunning => _isRunning;
 
+  /// 跟踪上一次 Isolate 返回的建筑数据，用于计算增量（delta）而非直接覆盖。
+  /// key=建筑ID，value=上次 Isolate 同步的 inputItemCount / outputItems。
+  final Map<String, _IsolateBuildingSnapshot> _prevIsolateBuildingSnapshots = {};
+
   bool _hasOutputSpace(ConveyorBelt belt) {
     belt.ensureItemSegmentsFromLegacy();
     if (belt.itemSegments.isNotEmpty) {
@@ -94,7 +98,11 @@ class SimulationEngine extends ChangeNotifier {
     }
   }
 
-  /// 将 tick 结果应用到主线程的 project 数据
+  /// 将 tick 结果应用到主线程的 project 数据。
+  ///
+  /// 使用增量（delta）方式更新 inputItemCount 和 outputItems，
+  /// 避免直接覆盖主线程上由 BeltSimulationLogic 在同一帧内新增/消费的值。
+  /// 直接覆盖会导致输入端溢出（Bug: Isolate 快照覆盖传送带仿真新增的物品）。
   void _applyTickResult(SimTickResult result) {
     if (_project == null) return;
 
@@ -106,13 +114,44 @@ class SimulationEngine extends ChangeNotifier {
 
         pb.isBlocked = br.isBlocked;
         pb.productionProgress = br.productionProgress;
-        pb.inputItemId = br.inputItemId.isEmpty ? null : br.inputItemId;
-        pb.inputItemCount = br.inputItemCount;
         if (br.activeRecipeId != null) {
           pb.activeRecipeId = br.activeRecipeId;
         }
-        // 同步输出库存
-        pb.outputItems = Map<String, int>.from(br.outputItems);
+
+        final prev = _prevIsolateBuildingSnapshots[pb.id];
+        if (prev != null) {
+          // 增量更新 inputItemCount：仅应用 Isolate 消耗的增量
+          final consumed = prev.inputItemCount - br.inputItemCount;
+          if (consumed > 0) {
+            pb.inputItemCount =
+                (pb.inputItemCount - consumed).clamp(0, 999999);
+            if (pb.inputItemCount <= 0) {
+              pb.inputItemCount = 0;
+              pb.inputItemId = null;
+            } else if (br.inputItemId.isNotEmpty) {
+              pb.inputItemId = br.inputItemId;
+            }
+          }
+
+          // 增量更新 outputItems：仅增加 Isolate 新产出的物品
+          for (final entry in br.outputItems.entries) {
+            final prevCount = prev.outputItems[entry.key] ?? 0;
+            final produced = entry.value - prevCount;
+            if (produced > 0) {
+              pb.addOutputItem(entry.key, produced);
+            }
+          }
+        } else {
+          // 首次同步：直接设置基准值
+          pb.inputItemId = br.inputItemId.isEmpty ? null : br.inputItemId;
+          pb.inputItemCount = br.inputItemCount;
+          pb.outputItems = Map<String, int>.from(br.outputItems);
+        }
+
+        _prevIsolateBuildingSnapshots[pb.id] = _IsolateBuildingSnapshot(
+          inputItemCount: br.inputItemCount,
+          outputItems: Map<String, int>.from(br.outputItems),
+        );
       }
     }
 
@@ -496,4 +535,17 @@ class SimulationEngine extends ChangeNotifier {
     _isolate?.kill(priority: Isolate.immediate);
     super.dispose();
   }
+}
+
+/// Isolate 同步快照：记录上一次 Isolate 返回的建筑状态，用于增量（delta）计算。
+///
+/// 避免 `_applyTickResult` 直接覆盖主线程上的 inputItemCount 和 outputItems，
+/// 导致传送带仿真在同一帧内新增/消费的物品被丢弃。
+class _IsolateBuildingSnapshot {
+  final int inputItemCount;
+  final Map<String, int> outputItems;
+  const _IsolateBuildingSnapshot({
+    required this.inputItemCount,
+    required this.outputItems,
+  });
 }
