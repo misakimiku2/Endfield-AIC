@@ -77,7 +77,7 @@ void main() {
       ),
     );
 
-    await driveBelts(tester, 20);
+    await driveBelts(tester, 40);
     return belt;
   }
 

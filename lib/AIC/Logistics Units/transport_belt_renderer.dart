@@ -140,7 +140,8 @@ class TransportBeltRenderer {
   /// - 物流桥：物品到达方向对应的通道已满（容量为 1）。
   /// - 分流器/汇流器：没有可接收物品的出口传送带（无出口，或所有出口带已满）。
   static int _terminalFillLimit(
-      ConveyorBelt belt, List<PlacedBuilding> buildings) {
+      ConveyorBelt belt, List<PlacedBuilding> buildings,
+      {List<ConveyorBelt>? conveyors}) {
     if (belt.path.isEmpty) return 0;
     if (isInputPort(belt.path.last, buildings)) {
       final building = _inputBuildingAtCell(belt.path.last, buildings);
@@ -167,7 +168,7 @@ class TransportBeltRenderer {
         // 返回 false → inputBlocked=true → terminalLimit=path.length-1。
         // 渲染器需复刻该判定：找不到能接收物品的出口带即视为阻塞。
         if (building.isSplitter || building.isConverger) {
-          if (!_logisticsBuildingHasReachableOutput(building, belt, buildings)) {
+          if (!_logisticsBuildingHasReachableOutput(building, belt, buildings, conveyors)) {
             return belt.path.length - 1;
           }
         }
@@ -186,13 +187,14 @@ class TransportBeltRenderer {
     PlacedBuilding building,
     ConveyorBelt inputBelt,
     List<PlacedBuilding> buildings,
+    List<ConveyorBelt>? conveyors,
   ) {
     final cell = Offset(building.gridX.toDouble(), building.gridY.toDouble());
     final itemId = inputBelt.downstreamItemId() ??
         inputBelt.outputReadyItemId() ??
         '';
     if (building.isSplitter) {
-      for (final belt in _projectConveyors(buildings)) {
+      for (final belt in conveyors ?? const []) {
         if (belt.path.isEmpty) continue;
         final start = belt.path.first;
         if (start.dx.round() == cell.dx.round() &&
@@ -208,7 +210,7 @@ class TransportBeltRenderer {
     }
     // 汇流器：唯一输出方向为 down。
     if (building.isConverger) {
-      for (final belt in _projectConveyors(buildings)) {
+      for (final belt in conveyors ?? const []) {
         if (belt.path.isEmpty) continue;
         final start = belt.path.first;
         if (start.dx.round() == cell.dx.round() &&
@@ -220,16 +222,6 @@ class TransportBeltRenderer {
       return false;
     }
     return true;
-  }
-
-  /// 从 buildings 所在项目提取传送带列表（渲染器无直接项目引用，按参数传递）。
-  static List<ConveyorBelt> _projectConveyors(List<PlacedBuilding> buildings) {
-    // 渲染器接收的 buildings 与 conveyors 同属一个项目；
-    // 但渲染器签名不传 conveyors。此处通过输入带所在项目的引用获取。
-    // ConveyorBelt 无法从 buildings 反查，故由调用方在 renderConveyorPath
-    // 中已确保 buildings 与 belt 同项目——这里改用 belt 自身无法遍历。
-    // 实际实现见下方：渲染器主入口已传入 buildings，conveyors 需额外传入。
-    return const [];
   }
 
   /// 传送带出口方向（物品离开方向），与 `BeltSimulationLogic._beltExitDirection`
@@ -631,6 +623,7 @@ class TransportBeltRenderer {
     Map<String, Item>? allItems,
     bool hideTerminalBackground = false,
     Set<Offset>? hiddenBackgroundCells,
+    List<ConveyorBelt>? conveyors,
   }) {
     if (belt.path.isEmpty) return;
 
@@ -683,7 +676,7 @@ class TransportBeltRenderer {
       // 末端可填充上限：满载普通生产建筑时为 path.length - 1，与逻辑层
       // terminalLimit 语义一致。冻结状态机的 atLimit 判定必须基于此值，
       // 否则会与逻辑层冻结位置错位，冻结态卡在过渡值无法推进到 settled。
-      final terminalFillLimit = _terminalFillLimit(belt, buildings);
+      final terminalFillLimit = _terminalFillLimit(belt, buildings, conveyors: conveyors);
       bool frozenAhead = false;
       for (int i = renderSegments.length - 1; i >= 0; i--) {
         final segment = renderSegments[i];

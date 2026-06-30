@@ -327,7 +327,8 @@ class EditorPainter extends CustomPainter {
                 clippedBelt.animationProgress(beltArrowController.value),
             lastItem: lastItem,
             allItems: dataLoader.items,
-            hiddenBackgroundCells: bridgeHiddenCells);
+            hiddenBackgroundCells: bridgeHiddenCells,
+            conveyors: project.conveyors);
       } else {
         TransportBeltRenderer.renderConveyorPath(
             canvas, belt, item, cellSize, project.buildings,
@@ -336,7 +337,8 @@ class EditorPainter extends CustomPainter {
             lastItem: lastItem,
             allItems: dataLoader.items,
             hideTerminalBackground: hidesTerminalCell,
-            hiddenBackgroundCells: bridgeHiddenCells);
+            hiddenBackgroundCells: bridgeHiddenCells,
+            conveyors: project.conveyors);
       }
     }
 

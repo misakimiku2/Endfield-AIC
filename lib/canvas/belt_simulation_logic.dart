@@ -54,7 +54,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
       final isProducing = sourceItemId != null && sourceItemId.isNotEmpty;
 
       belt.ensureItemSegmentsFromLegacy();
-      if (isProducing && !inputBlocked) {
+      if (isProducing) {
         final pushed =
             belt.pushSourceItem(sourceItemId, terminalLimit: terminalLimit);
         if (pushed) {
@@ -65,7 +65,7 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
       }
       belt.advanceItemSegments(
         isDeadEnd: isDeadEnd || inputBuilding != null || inputBlocked,
-        activeSourceItemId: (isProducing && !inputBlocked) ? sourceItemId : null,
+        activeSourceItemId: isProducing ? sourceItemId : null,
         terminalLimit: terminalLimit,
       );
       if (inputBuilding != null) {
@@ -164,10 +164,11 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
     var inventoryChanged = false;
     belt.ensureItemSegmentsFromLegacy();
 
-    // 当输入端已满（inputBlocked）时，停止从源推送物品，避免：
-    // 1. 物品在传送带上无限排队导致源设备输出库存耗尽
-    // 2. Isolate 异步消费与主线程推送的竞争导致物品持续涌入
-    if (isProducing && !inputBlocked) {
+    // 输入端阻塞（inputBlocked）时，terminalLimit 已限制物品推进上限
+    // （path.length-1），物品在端口前一格冻结。此时仍应从源推送，
+    // 让物品在传送带上排队填满到 terminalLimit 为止，再自然停止。
+    // 否则传送带上只有一个初始物品，不会形成满带队列。
+    if (isProducing) {
       final pushed =
           belt.pushSourceItem(sourceItemId, terminalLimit: terminalLimit);
       if (pushed) {
@@ -175,9 +176,6 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
         inventoryChanged = _consumeOutputItemForBeltStart(belt, sourceItemId) ||
             inventoryChanged;
       }
-    } else if (isProducing && inputBlocked) {
-      // 输入端满时，源不再推送，activeSourceItemId 置空
-      activeSourceItemId = null;
     }
 
     belt.advanceItemSegments(
@@ -749,6 +747,16 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
       }
       if (shouldFreeze && fp == FreezeSentinels.clearing) {
         segment.freezeProgress = FreezeSentinels.newlyFrozen;
+      }
+      // 冻结状态机推进（逻辑层主动推进全部过渡态，不依赖渲染器的 arrowProgress 条件）
+      if (shouldFreeze && fp == FreezeSentinels.newlyFrozen) {
+        segment.freezeProgress = FreezeSentinels.waiting;
+      }
+      if (shouldFreeze && fp == FreezeSentinels.waiting) {
+        segment.freezeProgress = FreezeSentinels.midFrozen;
+      }
+      if (shouldFreeze && fp == FreezeSentinels.midFrozen) {
+        segment.freezeProgress = FreezeSentinels.settled;
       }
       if (!shouldFreeze &&
           (fp == FreezeSentinels.newlyFrozen ||
