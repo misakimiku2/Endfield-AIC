@@ -8,6 +8,7 @@ import 'data/data_loader.dart';
 import 'canvas/simulation_engine.dart';
 import 'state/project_notifier.dart';
 import 'pages/editor_page.dart';
+import 'utils/error_handler.dart';
 
 /// 物品图片在各处使用的 cacheWidth/cacheHeight 尺寸集合。
 /// Image.asset 使用 cacheWidth/cacheHeight 时会内部包装为 ResizeImage，
@@ -16,6 +17,9 @@ const _itemCacheSizes = [120, 162, 168, 192, 210, 279, 384];
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 安装框架级错误捕获，让 widget 构建异常、未捕获 async 错误也进入统一 handler。
+  installFrameworkErrorHandlers();
 
   // 提升 imageCache 容量以容纳原始图 + 多尺寸缩放版本
   PaintingBinding.instance.imageCache.maximumSize = 1000;
@@ -94,7 +98,7 @@ Future<void> _precacheAllAssets() async {
   final pngPaths = manifest.keys.where((k) => k.endsWith('.png')).toList();
   final svgPaths = manifest.keys.where((k) => k.endsWith('.svg')).toList();
 
-  debugPrint('[precache] 开始预加载: ${pngPaths.length} PNG, ${svgPaths.length} SVG, '
+  Logger.info('[precache] 开始预加载: ${pngPaths.length} PNG, ${svgPaths.length} SVG, '
       '${_itemCacheSizes.length} 种缩放尺寸');
   final stopwatch = Stopwatch()..start();
 
@@ -104,7 +108,7 @@ Future<void> _precacheAllAssets() async {
     ...svgPaths.map(_precacheSvg),
   ]);
 
-  debugPrint('[precache] 原始分辨率完成: ${stopwatch.elapsedMilliseconds}ms, '
+  Logger.info('[precache] 原始分辨率完成: ${stopwatch.elapsedMilliseconds}ms, '
       'imageCache: ${PaintingBinding.instance.imageCache.currentSize} entries / '
       '${(PaintingBinding.instance.imageCache.currentSizeBytes / 1024 / 1024).toStringAsFixed(1)}MB');
 
@@ -117,12 +121,12 @@ Future<void> _precacheAllAssets() async {
         _precacheResizedPng(path, size),
   ]);
 
-  debugPrint('[precache] 缩放尺寸完成: ${resizeStopwatch.elapsedMilliseconds}ms, '
+  Logger.info('[precache] 缩放尺寸完成: ${resizeStopwatch.elapsedMilliseconds}ms, '
       'imageCache: ${PaintingBinding.instance.imageCache.currentSize} entries / '
       '${(PaintingBinding.instance.imageCache.currentSizeBytes / 1024 / 1024).toStringAsFixed(1)}MB');
 
   stopwatch.stop();
-  debugPrint('[precache] 全部完成，总耗时: ${stopwatch.elapsedMilliseconds}ms');
+  Logger.info('[precache] 全部完成，总耗时: ${stopwatch.elapsedMilliseconds}ms');
 }
 
 /// 预加载 PNG 图片到 imageCache（原始分辨率）
@@ -143,8 +147,14 @@ Future<void> _precachePngImage(String path) async {
     );
     stream.addListener(listener);
     await completer.future;
-  } catch (e) {
-    debugPrint('[precache] PNG 原始加载失败: $path -> $e');
+  } catch (e, stackTrace) {
+    AppError(
+      message: 'PNG 原始加载失败: $path -> $e',
+      severity: ErrorSeverity.warning,
+      code: 'PRECACHE_PNG_LOAD_FAILED',
+      stackTrace: stackTrace,
+      context: {'path': path},
+    ).report();
   }
 }
 
@@ -176,7 +186,13 @@ Future<void> _precacheResizedPng(String path, int size) async {
 Future<void> _precacheSvg(String path) async {
   try {
     await vg.loadPicture(SvgAssetLoader(path), null);
-  } catch (e) {
-    debugPrint('[precache] SVG 加载失败: $path -> $e');
+  } catch (e, stackTrace) {
+    AppError(
+      message: 'SVG 加载失败: $path -> $e',
+      severity: ErrorSeverity.warning,
+      code: 'PRECACHE_SVG_LOAD_FAILED',
+      stackTrace: stackTrace,
+      context: {'path': path},
+    ).report();
   }
 }

@@ -7,6 +7,7 @@ import '../../models/project.dart';
 import '../../models/item.dart';
 import '../../constants/app_constants.dart';
 import '../Depot Access/depot_access.dart';
+import '../../utils/error_handler.dart';
 
 class TransportBeltRenderer {
   static const double _cellMargin = 3.0;
@@ -444,8 +445,13 @@ class TransportBeltRenderer {
       _pointerPicture = results[6];
       _previewPointerPicture = results[7];
       _initialized = true;
-    } catch (e) {
-      debugPrint('Failed to load conveyor belt SVGs: $e');
+    } catch (e, stackTrace) {
+      AppError(
+        message: 'Failed to load conveyor belt SVGs: $e',
+        severity: ErrorSeverity.warning,
+        code: 'BELT_SVG_LOAD_FAILED',
+        stackTrace: stackTrace,
+      ).report();
     } finally {
       _initializing = false;
     }
@@ -472,8 +478,14 @@ class TransportBeltRenderer {
       final frame = await codec.getNextFrame();
       _itemImageCache[assetPath] = frame.image;
       onItemImageReady?.call();
-    } catch (e) {
-      debugPrint('Failed to load item image: $e');
+    } catch (e, stackTrace) {
+      AppError(
+        message: 'Failed to load item image: $e',
+        severity: ErrorSeverity.warning,
+        code: 'ITEM_IMAGE_LOAD_FAILED',
+        stackTrace: stackTrace,
+        context: {'assetPath': assetPath},
+      ).report();
     } finally {
       _itemImageLoading.remove(assetPath);
     }

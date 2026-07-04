@@ -6,6 +6,7 @@ import '../../models/building.dart';
 import '../../models/recipe.dart';
 import '../../constants/building_ids.dart';
 import '../../canvas/building_renderer.dart';
+import '../../utils/error_handler.dart';
 
 /// 仓库存货口配置
 class DepotLoaderConfig {
@@ -128,8 +129,13 @@ class DepotAccessRenderer {
 
       // 4. 通知外部刷新
       onReady?.call();
-    } catch (e) {
-      debugPrint('Failed to load depot access SVGs: $e');
+    } catch (e, stackTrace) {
+      AppError(
+        message: 'Failed to load depot access SVGs: $e',
+        severity: ErrorSeverity.warning,
+        code: 'DEPOT_SVG_INIT_FAILED',
+        stackTrace: stackTrace,
+      ).report();
     } finally {
       _initializing = false;
     }
@@ -353,8 +359,14 @@ class DepotAccessRenderer {
       final PictureInfo picture = await vg.loadPicture(SvgStringLoader(cleanedSvg), null);
       _baseSvgCache[stateKey] = picture;
       _onReadyCallback?.call();
-    } catch (e) {
-      debugPrint('Failed to preload base depot SVG for state $stateKey: $e');
+    } catch (e, stackTrace) {
+      AppError(
+        message: 'Failed to preload base depot SVG for state $stateKey: $e',
+        severity: ErrorSeverity.warning,
+        code: 'DEPOT_SVG_BASE_FAILED',
+        stackTrace: stackTrace,
+        context: {'stateKey': stateKey},
+      ).report();
       _baseSvgCache.remove(stateKey);
     }
   }

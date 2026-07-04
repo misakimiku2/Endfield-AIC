@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:isolate';
 
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart';
 
 import '../constants/app_constants.dart';
 import '../data/data_loader.dart';
 import '../models/project.dart';
+import '../utils/error_handler.dart';
 import 'sim_protocol.dart';
 import 'sim_worker.dart';
 import 'simulation_backend.dart';
@@ -55,8 +56,13 @@ class IsolateSimulationBackend implements SimulationBackend {
         simWorkerEntry,
         _mainReceivePort!.sendPort,
       );
-    } catch (e) {
-      debugPrint('[IsolateSimulationBackend] Isolate 初始化失败: $e');
+    } catch (e, stackTrace) {
+      AppError(
+        message: '[IsolateSimulationBackend] Isolate 初始化失败: $e',
+        severity: ErrorSeverity.error,
+        code: 'ISOLATE_SPAWN_FAILED',
+        stackTrace: stackTrace,
+      ).report();
       _mainSubscription?.cancel();
       _mainReceivePort?.close();
       _mainReceivePort = null;

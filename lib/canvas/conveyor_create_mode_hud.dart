@@ -4,6 +4,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import '../utils/error_handler.dart';
+
 /// Screen-space HUD shown while drawing conveyor belts.
 ///
 /// All three sides share a **single global pattern function** so that stripes
@@ -61,8 +63,13 @@ class ConveyorCreateModeHudPainter {
       );
       _initialized = true;
       onReady?.call();
-    } catch (e) {
-      debugPrint('Failed to load HUD SVG: $e');
+    } catch (e, stackTrace) {
+      AppError(
+        message: 'Failed to load HUD SVG: $e',
+        severity: ErrorSeverity.warning,
+        code: 'HUD_SVG_LOAD_FAILED',
+        stackTrace: stackTrace,
+      ).report();
     } finally {
       _initializing = false;
     }

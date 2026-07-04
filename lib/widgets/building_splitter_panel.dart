@@ -7,6 +7,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../models/project.dart';
 import '../models/item.dart';
 import '../data/data_loader.dart';
+import '../utils/error_handler.dart';
 import 'building_shared_widgets.dart';
 
 /// 分流器专用面板：以等轴测 3D 视图展示 1 输入 → 3 输出的分配原理。
@@ -186,7 +187,7 @@ class _SplitterPanelState extends State<SplitterPanel>
             final anyOutputBlocked = outputDirs.any(
                 (d) => _isOutputBlocked(d));
             final blocked = selfBlocked || (outputDirs.isNotEmpty && anyOutputBlocked);
-            debugPrint('[SplitterPanel] 输入传送带 self=$selfBlocked, anyOutBlk=$anyOutputBlocked, final=$blocked');
+            Logger.debug('[SplitterPanel] 输入传送带 self=$selfBlocked, anyOutBlk=$anyOutputBlocked, final=$blocked');
             return blocked;
           }
         }
@@ -206,7 +207,7 @@ class _SplitterPanelState extends State<SplitterPanel>
         if (exitDir == direction) {
           final blocked = belt.isBlocked ||
               _isBeltStuck(belt);
-          debugPrint('[SplitterPanel] 输出$direction 传送带 isBlocked=${belt.isBlocked}, stuck=${_isBeltStuck(belt)}, final=$blocked, path=${belt.path.map((e) => '(${e.dx.toInt()},${e.dy.toInt()})')}');
+          Logger.debug('[SplitterPanel] 输出$direction 传送带 isBlocked=${belt.isBlocked}, stuck=${_isBeltStuck(belt)}, final=$blocked, path=${belt.path.map((e) => '(${e.dx.toInt()},${e.dy.toInt()})')}');
           return blocked;
         }
       }
@@ -350,7 +351,7 @@ class _SplitterPanelState extends State<SplitterPanel>
                     final sUp = _state(outputDirs.contains('up'), _isOutputBlocked('up'));
                     final sLeft = _state(outputDirs.contains('left'), _isOutputBlocked('left'));
                     final sRight = _state(outputDirs.contains('right'), _isOutputBlocked('right'));
-                    debugPrint('[SplitterPanel] 状态: input=$sInput(up=$inputConnected,blk=$inputBlocked) up=$sUp left=$sLeft right=$sRight  outputDirs=$outputDirs');
+                    Logger.debug('[SplitterPanel] 状态: input=$sInput(up=$inputConnected,blk=$inputBlocked) up=$sUp left=$sLeft right=$sRight  outputDirs=$outputDirs');
 
                     return Stack(
                       clipBehavior: Clip.none,

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_svg/flutter_svg.dart';
 import '../models/item.dart';
+import '../utils/error_handler.dart';
 import 'building_shared_widgets.dart';
 import 'item_description_dialog.dart';
 
@@ -201,10 +202,10 @@ class ResourceGridTileState extends State<ResourceGridTile>
                       frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
                         if (!_imageLogged) {
                           _imageLogged = true;
-                          debugPrint('[ResourceGridTile] 图片显示: '
-                              '${widget.item.name}, '
-                              '同步加载=$wasSynchronouslyLoaded, '
-                              '有帧=${frame != null}');
+      Logger.debug('[ResourceGridTile] 图片显示: '
+          '${widget.item.name}, '
+          '同步加载=$wasSynchronouslyLoaded, '
+          '有帧=${frame != null}');
                         }
                         return child;
                       },

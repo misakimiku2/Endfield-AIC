@@ -8,6 +8,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../models/project.dart';
 import '../data/data_loader.dart';
 import '../constants/building_ids.dart';
+import '../utils/error_handler.dart';
 import 'building_shared_widgets.dart';
 import 'building_resource_panel.dart';
 import 'building_depot_panel.dart';
@@ -143,7 +144,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog>
     _allItems = _buildResourceList();
     _refreshFilteredItems();
     _loadLogo();
-    debugPrint('[BuildingDetailDialog] initState: ${widget.placedBuilding.building.name}, '
+    Logger.debug('[BuildingDetailDialog] initState: ${widget.placedBuilding.building.name}, '
         '物品总数=${_allItems.length}, 当前标签物品数=${_cachedFilteredItems.length}');
     // 预缓存所有物品图片（使用与 ResourceGridTile 相同的 ResizeImage 尺寸 279x279），
     // 避免滚动/切换标签时从磁盘加载导致空白→图片的延迟。
@@ -151,7 +152,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final cache = PaintingBinding.instance.imageCache;
-      debugPrint('[BuildingDetailDialog] 预缓存前 imageCache: ${cache.currentSize} entries / '
+      Logger.debug('[BuildingDetailDialog] 预缓存前 imageCache: ${cache.currentSize} entries / '
           '${(cache.currentSizeBytes / 1024 / 1024).toStringAsFixed(1)}MB');
       for (final item in _allItems) {
         if (item.imageAssetPath.isNotEmpty) {
@@ -234,7 +235,7 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog>
     final tabCategory = _tabLabels[_resourceTabIndex];
     _cachedFilteredItems =
         _allItems.where((item) => item.category == tabCategory).toList();
-    debugPrint('[BuildingDetailDialog] 切换标签 -> $tabCategory, '
+    Logger.debug('[BuildingDetailDialog] 切换标签 -> $tabCategory, '
         '物品数=${_cachedFilteredItems.length}');
   }
 

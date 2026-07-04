@@ -6,6 +6,7 @@ import '../../models/building.dart';
 import '../../models/recipe.dart';
 import '../../constants/building_ids.dart';
 import '../../canvas/building_renderer.dart';
+import '../../utils/error_handler.dart';
 
 /// 精炼炉配置常量
 class RefiningUnitConfig {
@@ -186,8 +187,13 @@ class RefiningUnitRenderer {
 
       // 4. 通知外部刷新
       onReady?.call();
-    } catch (e) {
-      debugPrint('Failed to load refining unit SVGs: $e');
+    } catch (e, stackTrace) {
+      AppError(
+        message: 'Failed to load refining unit SVGs: $e',
+        severity: ErrorSeverity.warning,
+        code: 'REFINING_SVG_INIT_FAILED',
+        stackTrace: stackTrace,
+      ).report();
     } finally {
       _initializing = false;
     }
@@ -470,8 +476,14 @@ class RefiningUnitRenderer {
           await vg.loadPicture(SvgStringLoader(cleanedSvg), null);
       _baseSvgCache[solidKey] = picture;
       _onReadyCallback?.call();
-    } catch (e) {
-      debugPrint('Failed to preload base SVG for state $solidKey: $e');
+    } catch (e, stackTrace) {
+      AppError(
+        message: 'Failed to preload base SVG for state $solidKey: $e',
+        severity: ErrorSeverity.warning,
+        code: 'REFINING_SVG_BASE_FAILED',
+        stackTrace: stackTrace,
+        context: {'stateKey': solidKey},
+      ).report();
       _baseSvgCache.remove(solidKey);
     }
   }
@@ -491,9 +503,14 @@ class RefiningUnitRenderer {
           await vg.loadPicture(SvgStringLoader(cleanedSvg), null);
       _liquidExportCache[exportKey] = picture;
       _onReadyCallback?.call();
-    } catch (e) {
-      debugPrint(
-          'Failed to preload liquid export SVG for state $exportKey: $e');
+    } catch (e, stackTrace) {
+      AppError(
+        message: 'Failed to preload liquid export SVG for state $exportKey: $e',
+        severity: ErrorSeverity.warning,
+        code: 'REFINING_SVG_EXPORT_FAILED',
+        stackTrace: stackTrace,
+        context: {'stateKey': exportKey},
+      ).report();
       _liquidExportCache.remove(exportKey);
     }
   }
@@ -513,9 +530,14 @@ class RefiningUnitRenderer {
           await vg.loadPicture(SvgStringLoader(cleanedSvg), null);
       _liquidImportCache[importKey] = picture;
       _onReadyCallback?.call();
-    } catch (e) {
-      debugPrint(
-          'Failed to preload liquid import SVG for state $importKey: $e');
+    } catch (e, stackTrace) {
+      AppError(
+        message: 'Failed to preload liquid import SVG for state $importKey: $e',
+        severity: ErrorSeverity.warning,
+        code: 'REFINING_SVG_IMPORT_FAILED',
+        stackTrace: stackTrace,
+        context: {'stateKey': importKey},
+      ).report();
       _liquidImportCache.remove(importKey);
     }
   }

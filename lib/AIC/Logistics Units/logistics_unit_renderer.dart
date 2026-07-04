@@ -5,6 +5,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../../models/building.dart';
 import '../../models/recipe.dart';
 import '../../constants/building_ids.dart';
+import '../../utils/error_handler.dart';
 
 class LogisticsUnitRenderer {
   static const String beltBridgeId = BuildingIds.beltBridge1x1;
@@ -60,8 +61,13 @@ class LogisticsUnitRenderer {
       _initialized = true;
       _cacheVersion++;
       onReady?.call();
-    } catch (e) {
-      debugPrint('Failed to load logistics unit SVGs: $e');
+    } catch (e, stackTrace) {
+      AppError(
+        message: 'Failed to load logistics unit SVGs: $e',
+        severity: ErrorSeverity.warning,
+        code: 'LOGISTICS_SVG_INIT_FAILED',
+        stackTrace: stackTrace,
+      ).report();
     } finally {
       _initializing = false;
     }
