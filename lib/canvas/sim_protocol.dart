@@ -415,23 +415,3 @@ class SimConveyorResult {
         lastItemFreezeProgress: json.getDoubleOrNull('lastItemFreezeProgress'),
       );
 }
-
-// ============================================================
-// 控制消息
-// ============================================================
-
-/// 主 Isolate 发送给计算 Isolate 的控制消息
-class SimControlMessage {
-  final String type; // 'sync', 'start', 'stop', 'setSpeed'
-  final Map<String, dynamic>? data;
-
-  const SimControlMessage({required this.type, this.data});
-
-  Map<String, dynamic> toJson() => {'type': type, 'data': data};
-
-  factory SimControlMessage.fromJson(Map<String, dynamic> json) =>
-      SimControlMessage(
-        type: json['type'] as String,
-        data: json['data'] as Map<String, dynamic>?,
-      );
-}

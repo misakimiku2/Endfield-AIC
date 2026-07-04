@@ -4,12 +4,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../models/building.dart';
 import '../../models/recipe.dart';
+import '../../constants/building_ids.dart';
 
 class LogisticsUnitRenderer {
-  static const String beltBridgeId = 'belt_bridge_1x1';
-  static const String splitterId = 'splitter_1x1';
-  static const String convergerId = 'converger_1x1';
-  static const String itemControlPortId = 'item_control_port_1x1';
+  static const String beltBridgeId = BuildingIds.beltBridge1x1;
+  static const String splitterId = BuildingIds.splitter1x1;
+  static const String convergerId = BuildingIds.converger1x1;
+  static const String itemControlPortId = BuildingIds.itemControlPort1x1;
 
   static const Set<String> logisticsUnitIds = {
     beltBridgeId,

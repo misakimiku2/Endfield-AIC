@@ -4,11 +4,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../models/building.dart';
 import '../../models/recipe.dart';
+import '../../constants/building_ids.dart';
 import '../../canvas/building_renderer.dart';
 
 /// 精炼炉配置常量
 class RefiningUnitConfig {
-  static const String id = 'refining_unit_3x3';
+  static const String id = BuildingIds.refiningUnit3x3;
   static const String name = '精炼炉';
   static const int gridWidth = 3;
   static const int gridHeight = 3;

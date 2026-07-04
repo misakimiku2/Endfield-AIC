@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../models/project.dart';
 import '../data/data_loader.dart';
+import '../constants/building_ids.dart';
 import 'building_shared_widgets.dart';
 import 'building_resource_panel.dart';
 import 'building_depot_panel.dart';
@@ -98,19 +99,19 @@ class _BuildingDetailDialogState extends State<BuildingDetailDialog>
   String? _selectedOutputItemId;
 
   bool get _isDepotUnloader =>
-      widget.placedBuilding.building.id == 'depot_unloader_3x1';
+      widget.placedBuilding.building.id == BuildingIds.depotUnloader3x1;
 
   bool get _isDepotLoader =>
-      widget.placedBuilding.building.id == 'depot_loader_3x1';
+      widget.placedBuilding.building.id == BuildingIds.depotLoader3x1;
 
   bool get _isLogisticsBridge =>
-      widget.placedBuilding.building.id == 'belt_bridge_1x1';
+      widget.placedBuilding.building.id == BuildingIds.beltBridge1x1;
 
   bool get _isSplitter =>
-      widget.placedBuilding.building.id == 'splitter_1x1';
+      widget.placedBuilding.building.id == BuildingIds.splitter1x1;
 
   bool get _isConverger =>
-      widget.placedBuilding.building.id == 'converger_1x1';
+      widget.placedBuilding.building.id == BuildingIds.converger1x1;
 
   bool get _isSynthesisBuilding => !_isDepotUnloader &&
       !_isDepotLoader &&

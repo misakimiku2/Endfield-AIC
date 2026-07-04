@@ -65,8 +65,8 @@ class CanvasEditorState extends State<CanvasEditor>
   double _targetAngle = 0.0; // 目标角度（弧度）
 
   static const double cellSize = AppConstants.cellSize;
-  static const double _minScale = 0.25;
-  static const double _maxScale = 5.0;
+  static const double _minScale = UiConstants.minScale;
+  static const double _maxScale = UiConstants.maxScale;
 
   // 功能1: 悬停高亮
   PlacedBuilding? _hoveredBuilding;

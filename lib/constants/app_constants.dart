@@ -14,6 +14,40 @@ class AppConstants {
 
   /// 仿真 tick 频率（每秒步数）。
   static const double simTickRate = 20.0;
+
+  /// 建筑输入库存格上限。
+  ///
+  /// `PlacedBuilding.maxInputItemCount` 与 Isolate 端（无法 import 模型层）
+  /// 共享同一来源，避免单边修改导致主线程/Isolate 漂移。
+  static const int maxInputItemCount = 50;
+
+  /// 建筑输出库存格上限。
+  ///
+  /// `PlacedBuilding.maxOutputItemCount` 与 Isolate 端共享同一来源。
+  static const int maxOutputItemCount = 50;
+
+  /// 仿真速度倍率下限（speedMultiplier 的 clamp 下界）。
+  static const double minSpeedMultiplier = 0.25;
+
+  /// 仿真速度倍率上限（speedMultiplier 的 clamp 上界）。
+  static const double maxSpeedMultiplier = 10.0;
+
+  /// inputItemCount 增量更新时的 clamp 上界（防溢出）。
+  static const int inputItemCountClampCeiling = 999999;
+
+  /// 传送带 flowProgress 回绕阈值（超过则归零，避免浮点数累积误差）。
+  static const double flowProgressWrapThreshold = 100000;
+}
+
+/// 画布交互相关的 UI 常量。
+class UiConstants {
+  UiConstants._();
+
+  /// 画布最小缩放比例。
+  static const double minScale = 0.25;
+
+  /// 画布最大缩放比例。
+  static const double maxScale = 5.0;
 }
 
 /// 传送带物品段的冻结状态机哨兵值。

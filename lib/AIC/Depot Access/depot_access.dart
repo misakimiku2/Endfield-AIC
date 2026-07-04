@@ -4,11 +4,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../models/building.dart';
 import '../../models/recipe.dart';
+import '../../constants/building_ids.dart';
 import '../../canvas/building_renderer.dart';
 
 /// 仓库存货口配置
 class DepotLoaderConfig {
-  static const String id = 'depot_loader_3x1';
+  static const String id = BuildingIds.depotLoader3x1;
   static const String name = '仓库存货口';
   static const int gridWidth = 3;
   static const int gridHeight = 1;
@@ -34,7 +35,7 @@ class DepotLoaderConfig {
 
 /// 仓库取货口配置
 class DepotUnloaderConfig {
-  static const String id = 'depot_unloader_3x1';
+  static const String id = BuildingIds.depotUnloader3x1;
   static const String name = '仓库取货口';
   static const int gridWidth = 3;
   static const int gridHeight = 1;

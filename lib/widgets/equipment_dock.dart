@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/building.dart';
 import '../data/data_loader.dart';
+import '../constants/building_ids.dart';
 
 class EquipmentDock extends StatefulWidget {
   final DataLoader dataLoader;
@@ -27,13 +28,13 @@ class _EquipmentDockState extends State<EquipmentDock>
   static const double _sideMargin = 80.0;
 
   static const List<String> _dockOrder = [
-    'refining_unit_3x3',
-    'depot_loader_3x1',
-    'depot_unloader_3x1',
-    'belt_bridge_1x1',
-    'splitter_1x1',
-    'converger_1x1',
-    'item_control_port_1x1',
+    BuildingIds.refiningUnit3x3,
+    BuildingIds.depotLoader3x1,
+    BuildingIds.depotUnloader3x1,
+    BuildingIds.beltBridge1x1,
+    BuildingIds.splitter1x1,
+    BuildingIds.converger1x1,
+    BuildingIds.itemControlPort1x1,
   ];
 
   @override

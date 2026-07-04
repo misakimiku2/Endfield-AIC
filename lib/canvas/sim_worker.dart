@@ -4,6 +4,7 @@ import 'dart:ui';
 
 import '../utils/json_parse.dart';
 import '../constants/app_constants.dart';
+import '../constants/building_ids.dart';
 import 'sim_protocol.dart';
 
 /// 计算 Isolate 的入口函数
@@ -175,7 +176,7 @@ class _SimWorker {
 
       // 更新流动进度
       double newFlow = belt.flowProgress + dt * 60;
-      if (newFlow > 100000) newFlow = 0;
+      if (newFlow > AppConstants.flowProgressWrapThreshold) newFlow = 0;
 
       // 检查源设备是否阻塞
       final startPos = _beltStart(belt);
@@ -204,7 +205,7 @@ class _SimWorker {
       var pb = _buildings[i];
 
       // 仓库取货口：不需要配方，直接将 depotOutputItemId 推送到连接的传送带
-      if (pb.buildingId == 'depot_unloader_3x1') {
+      if (pb.buildingId == BuildingIds.depotUnloader3x1) {
         _produceDepotOutput(pb);
         continue;
       }
@@ -271,7 +272,7 @@ class _SimWorker {
         pb.outputItems.values.fold<int>(0, (sum, count) => sum + count);
     final outputAmount =
         recipe.outputs.fold<int>(0, (sum, output) => sum + output.amount);
-    return totalOutputCount + outputAmount <= 50;
+    return totalOutputCount + outputAmount <= AppConstants.maxOutputItemCount;
   }
 
   String? _findMatchingRecipe(String buildingId, String inputItemId) {
@@ -345,73 +346,6 @@ class _SimWorker {
     );
   }
 
-  /// 将输出库存中的物品推送到连接的传送带
-  void _pushOutputToBelts(SimBuildingData pb, int buildingIndex) {
-    if (pb.outputItems.isEmpty) return;
-    final recipe = _recipes.where((r) => r.id == pb.activeRecipeId).firstOrNull;
-    if (recipe == null) return;
-
-    var remainingItems = Map<String, int>.from(pb.outputItems);
-
-    for (final port in pb.outputPorts) {
-      if (remainingItems.isEmpty) break;
-      final portWorld = _portWorldPosition(port, pb);
-      for (int ci = 0; ci < _conveyors.length; ci++) {
-        if (remainingItems.isEmpty) break;
-        final belt = _conveyors[ci];
-        if ((_beltStart(belt) - portWorld).distance <
-            _portConnectionThreshold) {
-          if (!_hasOutputSpace(belt)) continue;
-          // 按配方输出顺序确定该端口应推送的物品
-          final outputIndex = port.index;
-          final output = outputIndex < recipe.outputs.length
-              ? recipe.outputs[outputIndex]
-              : recipe.outputs.first;
-          if (remainingItems[output.itemId] == null ||
-              remainingItems[output.itemId]! <= 0) continue;
-          // 推送物品：保留传送带现有状态，只更新 itemId
-          _conveyors[ci] = SimConveyorData(
-            id: belt.id,
-            path: belt.path,
-            itemId: belt.itemId.isNotEmpty ? belt.itemId : output.itemId,
-            flowProgress: belt.flowProgress,
-            itemFillCount: belt.itemFillCount,
-            itemDrainCount: belt.itemDrainCount,
-            isBlocked: belt.isBlocked,
-            lastItemFillCount: belt.lastItemFillCount,
-            lastItemDrainCount: belt.lastItemDrainCount,
-            deadEndFreezeProgress: belt.deadEndFreezeProgress,
-            lastItemFreezeProgress: belt.lastItemFreezeProgress,
-          );
-          remainingItems[output.itemId] = remainingItems[output.itemId]! - 1;
-          if (remainingItems[output.itemId]! <= 0) {
-            remainingItems.remove(output.itemId);
-          }
-          break;
-        }
-      }
-    }
-
-    // 更新建筑的输出库存
-    _buildings[buildingIndex] = SimBuildingData(
-      id: pb.id,
-      buildingId: pb.buildingId,
-      gridX: pb.gridX,
-      gridY: pb.gridY,
-      rotation: pb.rotation,
-      activeRecipeId: pb.activeRecipeId,
-      depotOutputItemId: pb.depotOutputItemId,
-      inputItemId: pb.inputItemId,
-      inputItemCount: pb.inputItemCount,
-      outputItems: remainingItems,
-      gridWidth: pb.gridWidth,
-      gridHeight: pb.gridHeight,
-      inputPorts: pb.inputPorts,
-      outputPorts: pb.outputPorts,
-      isPaused: pb.isPaused,
-    );
-  }
-
   // === 辅助方法 ===
 
   SimBuildingData? _findSourceBuilding(Offset worldPos) {
@@ -475,14 +409,6 @@ class _SimWorker {
     return Offset(
       belt.path.first.dx * _cellSize + _cellSize / 2,
       belt.path.first.dy * _cellSize + _cellSize / 2,
-    );
-  }
-
-  Offset _beltEnd(SimConveyorData belt) {
-    if (belt.path.isEmpty) return Offset.zero;
-    return Offset(
-      belt.path.last.dx * _cellSize + _cellSize / 2,
-      belt.path.last.dy * _cellSize + _cellSize / 2,
     );
   }
 }

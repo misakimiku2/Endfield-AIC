@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui';
 import 'building.dart';
 import '../constants/app_constants.dart';
+import '../constants/building_ids.dart';
 
 class PortState {
   final int index;
@@ -88,14 +89,14 @@ class PortState {
 }
 
 class PlacedBuilding {
-  static const int maxInputItemCount = 50;
-  static const int maxOutputItemCount = 50;
+  static const int maxInputItemCount = AppConstants.maxInputItemCount;
+  static const int maxOutputItemCount = AppConstants.maxOutputItemCount;
   /// 物流桥通道容量：传送带不再在物流桥处拆分，但以物流桥为终点/起点的
   /// 传送带仍通过通道机制中转。容量设为1确保反压快速传播。
   static const int maxBridgeLaneItemCount = 1;
-  static const String _beltBridgeId = 'belt_bridge_1x1';
-  static const String _splitterId = 'splitter_1x1';
-  static const String _convergerId = 'converger_1x1';
+  static const String _beltBridgeId = BuildingIds.beltBridge1x1;
+  static const String _splitterId = BuildingIds.splitter1x1;
+  static const String _convergerId = BuildingIds.converger1x1;
 
   final String id;
   final Building building;
