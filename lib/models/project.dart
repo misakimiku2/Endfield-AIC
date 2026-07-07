@@ -118,6 +118,30 @@ class PlacedBuilding {
   /// 记录下一个要分配的输出方向，实现 左→上→右 循环分配
   int splitterCycleIndex = 0;
 
+  /// 生产设备输出端口轮询索引。
+  ///
+  /// 当同一生产设备连接多条输出传送带（分别起始自不同输出端口）时，
+  /// 复用分流器的轮询模式：每产出一个物品，按输出传送带的"创建顺序"
+  /// （即 [ProjectState.conveyors] 列表顺序）轮询分配到下一条带，
+  /// 避免物品只走第一条输出带。详见 belt_simulation_logic 中的
+  /// `_getConnectedProducerOutputBelts`。
+  int producerOutputCycleIndex = 0;
+
+  /// 生产设备输入端轮询索引：设备消耗1个输入后，按输入传送带创建顺序
+  /// 轮流锁定1条带补货（其末端冻结物品解冻，走2秒到达补回）。
+  /// 详见 MainThreadSimulationBackend._lockNextInputBelt。
+  int producerInputCycleIndex = 0;
+
+  /// 当前被锁定用于补货的输入传送带 id（null=无锁定）。
+  ///
+  /// 后端在消耗输入（50→49）后按轮询选1条带并设置此字段（锁定）。
+  /// belt tick 据此只解冻该带（`_canBeltOutputEnterBuilding` 只对该带返回 true），
+  /// 其余带的末端物品继续冻结。被锁定带的物品走2秒到达设备后，补货完成
+  /// （49→50），清除锁定并推进 [producerInputCycleIndex] 到下一条。
+  ///
+  /// 期间后端不消耗下一个输入（等待补货完成），防止输入掉到 48。
+  String? lockedInputBeltId;
+
   /// 分流器内部缓冲槽位（至多 1 个物品）。null 表示槽位空。
   /// 当所有输出带满时，物品暂存于此，槽位满后输入端堵塞。
   String? splitterBufferedItemId;
@@ -660,8 +684,12 @@ class ConveyorBelt {
           : endLimit;
       if (first.fillCount >= limit) return false;
       final fp = first.freezeProgress;
-      final isFreezing = FreezeSentinels.isFreezing(fp);
-      if (isFreezing) return false;
+      // 冻结中（含过渡态 clearing）的段不在合段时推进 fillCount。
+      // 否则被锁定带解冻时，合段会把第2个物品压入末端（fillCount→path.length），
+      // 第1个被抽走后第2个留在 path.length-1，下一 tick 因 limit 收缩被重新冻结，
+      // 视觉表现为"物品走到输入端被刷新弹回"。clearing 态让 advanceItemSegments
+      // 在后续 tick 自然完成解冻→推进，避免一帧内合段过量压入。
+      if (fp != null) return false;
       first.fillCount++;
       first.freezeProgress = null;
       syncLegacyFromSegments();
@@ -754,6 +782,7 @@ class ConveyorBelt {
     String? activeSourceItemId,
     int? terminalLimit,
     bool sourceExtendedThisTick = false,
+    bool freezeSourceAdvance = false,
   }) {
     ensureItemSegmentsFromLegacy();
     if (itemSegments.isEmpty) {
@@ -795,14 +824,26 @@ class ConveyorBelt {
         }
       }
     } else {
-      for (final segment in itemSegments) {
+      for (int i = 0; i < itemSegments.length; i++) {
+        final segment = itemSegments[i];
         final isFedBySource = segment.drainCount == 0 &&
             activeSourceItemId != null &&
             segment.itemId == activeSourceItemId;
         final fp = segment.freezeProgress;
         final isFreezing = FreezeSentinels.isFreezing(fp);
         if (isFedBySource) {
-          final canAdvance = segment.fillCount < endLimit;
+          // 锁定带补货时不推进源段（不把第2个物品压向末端），避免第2个物品
+          // 走到输入端后被重新冻结的"弹回"。只有末段通过 clearing→null→drainCount++
+          // 自然前进进入设备。
+          if (freezeSourceAdvance) continue;
+          // 源段前进上界：下游段的 drainCount（若有），否则 endLimit。
+          // 这样末段冻结时，源段不会越过末段填补空隙——防止设备消耗后
+          // endLimit 放大导致"第2个物品"前进后被重新冻结（视觉"弹回"）。
+          // 只有当下游段真正推进（drainCount 增大）后，源段才跟着前进。
+          final advanceLimit = i + 1 < itemSegments.length
+              ? itemSegments[i + 1].drainCount.clamp(0, endLimit).toInt()
+              : endLimit;
+          final canAdvance = segment.fillCount < advanceLimit;
           if (canAdvance) {
             if (isFreezing) {
               segment.freezeProgress = FreezeSentinels.clearing;

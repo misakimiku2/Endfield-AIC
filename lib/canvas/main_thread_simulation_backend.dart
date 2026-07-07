@@ -2,10 +2,8 @@ import 'dart:async';
 import 'dart:ui';
 
 import '../constants/app_constants.dart';
-import '../constants/building_ids.dart';
 import '../data/data_loader.dart';
 import '../models/project.dart';
-import '../models/recipe.dart';
 import 'simulation_backend.dart';
 
 /// 主线程仿真后端（Web 平台 / Isolate 不可用时的回退）。
@@ -17,7 +15,6 @@ import 'simulation_backend.dart';
 /// 计算完成后通过 [onChanged] 回调通知 [SimulationEngine] 调用
 /// `notifyListeners()`，从而触发 UI 重建。
 class MainThreadSimulationBackend implements SimulationBackend {
-  final DataLoader _dataLoader;
   final void Function() _onChanged;
 
   ProjectState? _project;
@@ -29,7 +26,7 @@ class MainThreadSimulationBackend implements SimulationBackend {
   static const double _portConnectionThreshold =
       AppConstants.portConnectionThreshold;
 
-  MainThreadSimulationBackend(this._dataLoader, this._onChanged);
+  MainThreadSimulationBackend(DataLoader dataLoader, this._onChanged);
 
   @override
   bool get isReady => true;
@@ -81,7 +78,6 @@ class MainThreadSimulationBackend implements SimulationBackend {
   void debugTickForTesting(double dt) {
     if (_project == null) return;
     _updateConveyors(dt);
-    _updateBuildings(dt);
     _onChanged();
   }
 
@@ -90,7 +86,6 @@ class MainThreadSimulationBackend implements SimulationBackend {
     final dt = _speedMultiplier / _tickRate;
 
     _updateConveyors(dt);
-    _updateBuildings(dt);
 
     _onChanged();
   }
@@ -126,90 +121,6 @@ class MainThreadSimulationBackend implements SimulationBackend {
       }
     }
     return null;
-  }
-
-  void _updateBuildings(double dt) {
-    if (_project == null) return;
-    for (final pb in _project!.buildings) {
-      // 仓库取货口：仓库输出由 BeltSimulationLogic 主线程处理，此处跳过。
-      if (pb.building.id == BuildingIds.depotUnloader3x1) {
-        continue;
-      }
-
-      // 自动匹配配方：当建筑没有激活配方但有输入物品时，自动选择匹配的配方
-      if (pb.activeRecipeId == null &&
-          pb.inputItemId != null &&
-          pb.inputItemCount > 0) {
-        _autoSelectRecipe(pb);
-      }
-
-      if (pb.activeRecipeId == null) continue;
-      // 设备暂停时跳过生产
-      if (pb.isPaused) continue;
-      final recipe = _dataLoader.getRecipe(pb.activeRecipeId!);
-      if (recipe == null) continue;
-
-      // 进入新一轮生产前校验输入与输出空间
-      if (pb.productionProgress <= 0.0) {
-        if (!_canAcceptRecipeOutputs(pb, recipe)) {
-          pb.isBlocked = false;
-          pb.productionProgress = 0.0;
-          continue;
-        }
-
-        if (!_checkInputsAvailable(pb, recipe)) {
-          pb.isBlocked = false;
-          pb.productionProgress = 0.0;
-          continue;
-        }
-
-        _consumeInputs(pb, recipe);
-      }
-
-      pb.isBlocked = false;
-      final processTime =
-          recipe.processTimeSeconds <= 0 ? 1.0 : recipe.processTimeSeconds;
-      pb.productionProgress += dt / processTime;
-
-      if (pb.productionProgress >= 1.0) {
-        pb.productionProgress = 0.0;
-        // 产出物品放入输出库存
-        for (final output in recipe.outputs) {
-          pb.addOutputItem(output.itemId, output.amount);
-        }
-      }
-    }
-  }
-
-  /// 自动匹配配方：根据建筑类型和输入物品选择第一个匹配的配方。
-  void _autoSelectRecipe(PlacedBuilding pb) {
-    final recipes = _dataLoader.getRecipesForBuilding(pb.building.id);
-    for (final recipe in recipes) {
-      if (recipe.inputs.any((input) => input.itemId == pb.inputItemId)) {
-        pb.activeRecipeId = recipe.id;
-        return;
-      }
-    }
-  }
-
-  bool _checkInputsAvailable(PlacedBuilding pb, Recipe recipe) {
-    for (final input in recipe.inputs) {
-      if (!pb.hasInputItems(input.itemId, input.amount)) return false;
-    }
-    return true;
-  }
-
-  void _consumeInputs(PlacedBuilding pb, Recipe recipe) {
-    for (final input in recipe.inputs) {
-      pb.consumeInputItems(input.itemId, input.amount);
-    }
-  }
-
-  bool _canAcceptRecipeOutputs(PlacedBuilding pb, Recipe recipe) {
-    final outputAmount =
-        recipe.outputs.fold<int>(0, (sum, output) => sum + output.amount);
-    return pb.totalOutputCount + outputAmount <=
-        PlacedBuilding.maxOutputItemCount;
   }
 
   @override

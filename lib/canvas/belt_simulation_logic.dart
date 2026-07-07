@@ -5,6 +5,7 @@ import '../data/data_loader.dart';
 import '../state/project_notifier.dart';
 import '../constants/app_constants.dart';
 import '../AIC/equipment.dart';
+import '../utils/error_handler.dart';
 import 'canvas_editor.dart';
 
 mixin BeltSimulationLogic on State<CanvasEditor> {
@@ -128,8 +129,17 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
 
     final isDeadEnd =
         !TransportBeltRenderer.isInputPort(belt.path.last, buildings);
-    final inputBuilding =
+    var inputBuilding =
         isDeadEnd ? null : _findInputBuildingAtCell(belt.path.last);
+    // 生产建筑输入端按断头传送带处理：物品不进入建筑，填满到端口格子后自然停止
+    final bool isProductionDeadEnd = inputBuilding != null &&
+        !inputBuilding.isBeltBridge &&
+        !inputBuilding.isSplitter &&
+        !inputBuilding.isConverger &&
+        inputBuilding.building.id != DepotLoaderConfig.id;
+    if (isProductionDeadEnd) {
+      inputBuilding = null;
+    }
     final pendingOutputItemId =
         inputBuilding == null ? null : belt.downstreamItemId();
     final inputBlocked = inputBuilding != null &&
@@ -164,11 +174,20 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
     var inventoryChanged = false;
     belt.ensureItemSegmentsFromLegacy();
 
+    // 本带是否为被锁定补货带（后端消耗后按轮询锁定的那条输入带）。
+    // 锁定带补货时不合段（pushSourceItem）、不推进源段（advanceItemSegments
+    // freezeSourceAdvance），避免第2个物品被压向末端后因设备又满而被重新冻结
+    // （视觉"走到输入端被刷新弹回"）。只有末段通过 clearing→null→drainCount++
+    // 自然前进进入设备。
+    final isLockedRefill =
+        inputBuilding != null && inputBuilding.lockedInputBeltId == belt.id;
+
     // 输入端阻塞（inputBlocked）时，terminalLimit 已限制物品推进上限
     // （path.length-1），物品在端口前一格冻结。此时仍应从源推送，
     // 让物品在传送带上排队填满到 terminalLimit 为止，再自然停止。
     // 否则传送带上只有一个初始物品，不会形成满带队列。
-    if (isProducing) {
+    // 锁定带补货时跳过 pushSourceItem（不合段，不把第2个物品压入末端）。
+    if (isProducing && !isLockedRefill) {
       final pushed =
           belt.pushSourceItem(sourceItemId, terminalLimit: terminalLimit);
       if (pushed) {
@@ -179,10 +198,11 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
     }
 
     belt.advanceItemSegments(
-      isDeadEnd: isDeadEnd || inputBuilding != null || inputBlocked,
+      isDeadEnd: isDeadEnd || isProductionDeadEnd || inputBuilding != null || inputBlocked,
       activeSourceItemId: activeSourceItemId,
       terminalLimit: terminalLimit,
       sourceExtendedThisTick: sourceExtendedThisTick,
+      freezeSourceAdvance: isLockedRefill,
     );
 
     if (inputBuilding != null) {
@@ -192,12 +212,38 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
         belt,
         limit: terminalLimit ?? belt.path.length,
       );
-    } else if (isDeadEnd) {
+    } else if (isDeadEnd || isProductionDeadEnd) {
       belt.freezeDeadEndSegments();
     }
     _prevBeltItemIds[belt.id] = belt.itemId;
     _prevBeltLastItemIds[belt.id] = belt.lastItemId;
+    // 输出端诊断日志：当带的末端有冻结物品但本 tick 没有传输时，记录冻结状态，
+    // 用于诊断"延展断头带后物品不流动"等问题。仅在状态变化时输出（缓存防刷屏）。
+    _logBeltTerminalState(belt, isDeadEnd || isProductionDeadEnd, inputBuilding != null, inputBlocked,
+        terminalLimit);
     return inventoryChanged;
+  }
+
+  /// 输出端带末端状态诊断日志缓存（key=belt.id, value=状态签名）。
+  final Map<String, String> _beltTerminalStateCache = {};
+
+  void _logBeltTerminalState(ConveyorBelt belt, bool isDeadEnd,
+      bool hasInputBuilding, bool inputBlocked, int? terminalLimit) {
+    belt.ensureItemSegmentsFromLegacy();
+    if (belt.itemSegments.isEmpty) return;
+    final last = belt.itemSegments.last;
+    if (!last.hasItems) return;
+    final sig =
+        '${belt.path.length}|$isDeadEnd|$hasInputBuilding|$inputBlocked|$terminalLimit|'
+        '${last.fillCount}|${last.drainCount}|${last.freezeProgress}';
+    if (_beltTerminalStateCache[belt.id] == sig) return;
+    _beltTerminalStateCache[belt.id] = sig;
+    Logger.debug(
+        '[Prod] 带末端状态: belt=${belt.id}, pathLen=${belt.path.length}, '
+        'isDeadEnd=$isDeadEnd, hasInputBldg=$hasInputBuilding, '
+        'inputBlocked=$inputBlocked, terminalLimit=$terminalLimit, '
+        'lastSeg fill=${last.fillCount} drain=${last.drainCount} '
+        'freeze=${last.freezeProgress}');
   }
 
   bool _canBeltOutputEnterBuilding(
@@ -230,7 +276,8 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
     }
     // 仓库存货口始终可以接收物品（直接进入全局仓库库存）
     if (building.building.id == DepotLoaderConfig.id) return true;
-    return building.canAcceptInputItem(itemId);
+    // 生产建筑：不接收物品（生产逻辑已移除）
+    return false;
   }
 
   String? _beltExitDirection(ConveyorBelt belt) {
@@ -702,25 +749,8 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
       belt.removeOutputReadyItem();
       return true;
     }
-    if (!building.acceptInputItem(itemId)) return false;
-    // 自动匹配配方：当建筑没有激活配方时，根据输入物品自动选择匹配的配方
-    if (building.activeRecipeId == null) {
-      _autoSelectRecipe(building, itemId);
-    }
-    belt.removeOutputReadyItem();
-    return true;
-  }
-
-  /// 根据输入物品自动选择匹配的配方
-  void _autoSelectRecipe(PlacedBuilding building, String inputItemId) {
-    final recipes =
-        _dataLoader.getRecipesForBuilding(building.building.id);
-    for (final recipe in recipes) {
-      if (recipe.inputs.any((input) => input.itemId == inputItemId)) {
-        building.activeRecipeId = recipe.id;
-        return;
-      }
-    }
+    // 生产建筑：不接收物品（生产逻辑已移除）
+    return false;
   }
 
   void _freezeReadyOutputSegments(ConveyorBelt belt, {required int limit}) {
@@ -780,6 +810,25 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
       final outputIndex = _findOutputPortIndexAtCell(pb, start);
       if (outputIndex == null) continue;
 
+      // 生产设备输出端诊断日志：看输出带是否能从设备拉取物品。
+      if (!pb.isBeltBridge &&
+          !pb.isSplitter &&
+          !LogisticsUnitRenderer.isLogisticsUnit(pb.building.id) &&
+          pb.building.id != DepotUnloaderConfig.id) {
+        final recipe = pb.activeRecipeId != null
+            ? _dataLoader.getRecipe(pb.activeRecipeId!)
+            : null;
+        if (recipe != null && recipe.outputs.isNotEmpty) {
+          final output = recipe.outputs.length > outputIndex
+              ? recipe.outputs[outputIndex]
+              : recipe.outputs.first;
+          Logger.debug(
+              '[Prod] 输出带拉取检查: dev=${pb.id}, belt=${belt.id}, '
+              'outputItem=${output.itemId}, hasOutput=${pb.hasOutputItem(output.itemId)}, '
+              'outputTotal=${pb.totalOutputCount}');
+        }
+      }
+
       if (pb.isBeltBridge) {
         final outputDirection = _beltExitDirection(belt);
         return outputDirection == null
@@ -807,15 +856,8 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
         return itemId;
       }
 
-      final recipe = pb.activeRecipeId != null
-          ? _dataLoader.getRecipe(pb.activeRecipeId!)
-          : null;
-      if (recipe == null || recipe.outputs.isEmpty) return null;
-      final output = recipe.outputs.length > outputIndex
-          ? recipe.outputs[outputIndex]
-          : recipe.outputs.first;
-      if (!pb.hasOutputItem(output.itemId)) return null;
-      return output.itemId;
+      // 生产建筑：无产出（生产逻辑已移除）
+      return null;
     }
     return null;
   }
@@ -847,7 +889,8 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
         _project.decrementWarehouseItem(itemId);
         return false;
       }
-      return pb.consumeOutputItem(itemId, 1);
+      // 生产建筑：不消费（生产逻辑已移除）
+      return false;
     }
     return false;
   }
@@ -867,4 +910,6 @@ mixin BeltSimulationLogic on State<CanvasEditor> {
     }
     return null;
   }
+
 }
+

@@ -1,9 +1,6 @@
 import 'dart:async';
 import 'dart:isolate';
 
-import 'package:flutter/foundation.dart';
-
-import '../constants/app_constants.dart';
 import '../data/data_loader.dart';
 import '../models/project.dart';
 import '../utils/error_handler.dart';
@@ -38,10 +35,13 @@ class IsolateSimulationBackend implements SimulationBackend {
   /// 当前仿真速度倍率，由 [setSpeed] 维护，握手完成后的首次同步需要它。
   double _speedMultiplier = 1.0;
 
-  /// 跟踪上一次 Isolate 返回的建筑数据，用于计算增量而非直接覆盖。
-  final Map<String, _IsolateBuildingSnapshot> _prevSnapshots = {};
+  /// Isolate 握手完成（worker 首个 SendPort 到达）时触发的回调。
+  /// [SimulationEngine] 据此停止主线程回退后端，避免与 Isolate 同时驱动
+  /// 建筑生产导致 inputItemCount/outputItems 双重消耗。
+  final void Function()? _onReady;
 
-  IsolateSimulationBackend(this._dataLoader, this._onChanged);
+  IsolateSimulationBackend(this._dataLoader, this._onChanged, {void Function()? onReady})
+      : _onReady = onReady;
 
   @override
   bool get isReady => _isolateReady;
@@ -121,6 +121,8 @@ class IsolateSimulationBackend implements SimulationBackend {
       _isolateReady = true;
       // Isolate 就绪后同步当前状态
       _sendCurrentState(_dataLoader, _speedMultiplier);
+      // 通知引擎：Isolate 已接管生产，可停止主线程回退，避免双重消耗。
+      _onReady?.call();
       return;
     }
 
@@ -172,6 +174,7 @@ class IsolateSimulationBackend implements SimulationBackend {
                         ))
                     .toList(),
                 isPaused: pb.isPaused,
+                lockedInputBeltId: pb.lockedInputBeltId,
               ))
           .toList(),
       conveyors: _project!.conveyors
@@ -191,21 +194,6 @@ class IsolateSimulationBackend implements SimulationBackend {
                 lastItemFreezeProgress: c.lastItemFreezeProgress,
               ))
           .toList(),
-      recipes: loader.recipes.values
-          .map((r) => SimRecipeData(
-                id: r.id,
-                processTimeSeconds: r.processTimeSeconds,
-                inputs: r.inputs
-                    .map((io) =>
-                        SimRecipeIOData(itemId: io.itemId, amount: io.amount))
-                    .toList(),
-                outputs: r.outputs
-                    .map((io) =>
-                        SimRecipeIOData(itemId: io.itemId, amount: io.amount))
-                    .toList(),
-                allowedBuildings: r.allowedBuildings,
-              ))
-          .toList(),
       speedMultiplier: speedMultiplier,
     );
 
@@ -218,9 +206,7 @@ class IsolateSimulationBackend implements SimulationBackend {
 
   /// 将 tick 结果应用到主线程的 project 数据。
   ///
-  /// 使用增量（delta）方式更新 inputItemCount 和 outputItems，
-  /// 避免直接覆盖主线程上由 BeltSimulationLogic 在同一帧内新增/消费的值。
-  /// 直接覆盖会导致输入端溢出（Bug: Isolate 快照覆盖传送带仿真新增的物品）。
+  /// 仅同步传送带 flowProgress/isBlocked，不再处理建筑生产状态。
   void _applyTickResult(SimTickResult result) {
     if (_project == null) return;
 
@@ -229,47 +215,8 @@ class IsolateSimulationBackend implements SimulationBackend {
       if (pb != null) {
         // 物流设备状态由 canvas_editor 主线程管理，跳过 Isolate 覆盖
         if (pb.isBeltBridge || pb.isSplitter || pb.isConverger) continue;
-
+        // 生产建筑仅同步 isBlocked（始终 false，不再有生产阻塞）
         pb.isBlocked = br.isBlocked;
-        pb.productionProgress = br.productionProgress;
-        if (br.activeRecipeId != null) {
-          pb.activeRecipeId = br.activeRecipeId;
-        }
-
-        final prev = _prevSnapshots[pb.id];
-        if (prev != null) {
-          // 增量更新 inputItemCount：仅应用 Isolate 消耗的增量
-          final consumed = prev.inputItemCount - br.inputItemCount;
-          if (consumed > 0) {
-            pb.inputItemCount = (pb.inputItemCount - consumed)
-                .clamp(0, AppConstants.inputItemCountClampCeiling);
-            if (pb.inputItemCount <= 0) {
-              pb.inputItemCount = 0;
-              pb.inputItemId = null;
-            } else if (br.inputItemId.isNotEmpty) {
-              pb.inputItemId = br.inputItemId;
-            }
-          }
-
-          // 增量更新 outputItems：仅增加 Isolate 新产出的物品
-          for (final entry in br.outputItems.entries) {
-            final prevCount = prev.outputItems[entry.key] ?? 0;
-            final produced = entry.value - prevCount;
-            if (produced > 0) {
-              pb.addOutputItem(entry.key, produced);
-            }
-          }
-        } else {
-          // 首次同步：直接设置基准值
-          pb.inputItemId = br.inputItemId.isEmpty ? null : br.inputItemId;
-          pb.inputItemCount = br.inputItemCount;
-          pb.outputItems = Map<String, int>.from(br.outputItems);
-        }
-
-        _prevSnapshots[pb.id] = _IsolateBuildingSnapshot(
-          inputItemCount: br.inputItemCount,
-          outputItems: Map<String, int>.from(br.outputItems),
-        );
       }
     }
 
@@ -281,9 +228,6 @@ class IsolateSimulationBackend implements SimulationBackend {
           belt.isBlocked = cr.isBlocked;
           continue;
         }
-        // 只有当没有残留物品时才更新 lastItemId，避免覆盖残留物品的 ID
-        // 当 itemId 首次从空变为非空时，立即初始化第一格物品
-        // 避免等待下一个动画周期（最多 2 秒延迟）
         belt.flowProgress = cr.flowProgress;
         belt.isBlocked = cr.isBlocked;
       }
@@ -296,17 +240,4 @@ class IsolateSimulationBackend implements SimulationBackend {
     _mainReceivePort?.close();
     _isolate?.kill(priority: Isolate.immediate);
   }
-}
-
-/// Isolate 同步快照：记录上一次 Isolate 返回的建筑状态，用于增量（delta）计算。
-///
-/// 避免 [_applyTickResult] 直接覆盖主线程上的 inputItemCount 和 outputItems，
-/// 导致传送带仿真在同一帧内新增/消费的物品被丢弃。
-class _IsolateBuildingSnapshot {
-  final int inputItemCount;
-  final Map<String, int> outputItems;
-  const _IsolateBuildingSnapshot({
-    required this.inputItemCount,
-    required this.outputItems,
-  });
 }

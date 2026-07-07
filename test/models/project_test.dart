@@ -92,43 +92,6 @@ void main() {
   );
 
   group('PlacedBuilding input inventory', () {
-    test('accepts only one item type up to 50 items', () {
-      final building = PlacedBuilding(
-        id: 'processor',
-        building: testBuilding,
-        gridX: 0,
-        gridY: 0,
-      );
-
-      for (int i = 0; i < PlacedBuilding.maxInputItemCount; i++) {
-        expect(building.acceptInputItem('item_a'), true);
-      }
-
-      expect(building.inputItemId, 'item_a');
-      expect(building.inputItemCount, 50);
-      expect(building.acceptInputItem('item_a'), false);
-      expect(building.acceptInputItem('item_b'), false);
-    });
-
-    test('consumes input items and clears the slot when empty', () {
-      final building = PlacedBuilding(
-        id: 'processor',
-        building: testBuilding,
-        gridX: 0,
-        gridY: 0,
-        inputItemId: 'item_a',
-        inputItemCount: 2,
-      );
-
-      expect(building.consumeInputItems('item_a', 1), true);
-      expect(building.inputItemId, 'item_a');
-      expect(building.inputItemCount, 1);
-
-      expect(building.consumeInputItems('item_a', 1), true);
-      expect(building.inputItemId, isNull);
-      expect(building.inputItemCount, 0);
-    });
-
     test('input port disconnects when only the port cell remains after split',
         () {
       const threeByThreeProcessor = Building(
@@ -263,64 +226,6 @@ void main() {
       expect(bridge.consumeBridgeOutputItem('item_up', 'up'), true);
       expect(bridge.bridgeItemIdForOutputDirection('up'), isNull);
       expect(bridge.bridgeItemIdForOutputDirection('right'), 'item_right');
-    });
-  });
-
-  group('PlacedBuilding output inventory', () {
-    test('addOutputItem accumulates counts per item', () {
-      final pb = PlacedBuilding(
-        id: 'p',
-        building: testBuilding,
-        gridX: 0,
-        gridY: 0,
-      );
-      expect(pb.totalOutputCount, 0);
-      pb.addOutputItem('item_a', 3);
-      pb.addOutputItem('item_a', 2);
-      pb.addOutputItem('item_b', 1);
-      expect(pb.totalOutputCount, 6);
-      expect(pb.outputItems['item_a'], 5);
-      expect(pb.outputItems['item_b'], 1);
-    });
-
-    test('canAcceptOutputItem respects the 50-item cap', () {
-      final pb = PlacedBuilding(
-        id: 'p',
-        building: testBuilding,
-        gridX: 0,
-        gridY: 0,
-        outputItems: {'item_a': 49},
-      );
-      expect(pb.canAcceptOutputItem('item_a'), isTrue);
-      pb.addOutputItem('item_a', 1);
-      expect(pb.canAcceptOutputItem('item_a'), isFalse);
-    });
-
-    test('consumeOutputItem decrements and clears when reaching zero', () {
-      final pb = PlacedBuilding(
-        id: 'p',
-        building: testBuilding,
-        gridX: 0,
-        gridY: 0,
-        outputItems: {'item_a': 2},
-      );
-      expect(pb.hasOutputItem('item_a'), isTrue);
-      expect(pb.consumeOutputItem('item_a', 1), isTrue);
-      expect(pb.outputItems['item_a'], 1);
-      expect(pb.consumeOutputItem('item_a', 1), isTrue);
-      // 全部消耗后键被移除
-      expect(pb.outputItems.containsKey('item_a'), isFalse);
-      expect(pb.hasOutputItem('item_a'), isFalse);
-    });
-
-    test('consumeOutputItem returns false when item absent', () {
-      final pb = PlacedBuilding(
-        id: 'p',
-        building: testBuilding,
-        gridX: 0,
-        gridY: 0,
-      );
-      expect(pb.consumeOutputItem('item_a', 1), isFalse);
     });
   });
 

@@ -185,13 +185,13 @@ class _DefaultSynthesisPanelState extends State<DefaultSynthesisPanel> {
     final activeRecipe = _activeRecipe;
     final productionProgress =
         widget.placedBuilding.productionProgress.clamp(0.0, 1.0);
-    final isInputFull =
-        widget.placedBuilding.inputItemCount >=
-            PlacedBuilding.maxInputItemCount;
     final isOutputFull =
         widget.placedBuilding.totalOutputCount >=
             PlacedBuilding.maxOutputItemCount;
-    final isBlocked = isInputFull || isOutputFull;
+    // 阻塞仅由输出端满决定：输出满时无法产出，生产真正停滞。
+    // 输入端满是稳态正常态（输入带持续补货），不视为阻塞——后端实际只在
+    // 输出满时跳过生产推进，UI 与后端语义保持一致。
+    final isBlocked = isOutputFull;
     final isPaused = widget.placedBuilding.isPaused;
     final isProductionActive =
         activeRecipe != null && !isPaused && !isBlocked;

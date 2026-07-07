@@ -10,14 +10,12 @@ class SimSyncState {
   final int revision;
   final List<SimBuildingData> buildings;
   final List<SimConveyorData> conveyors;
-  final List<SimRecipeData> recipes;
   final double speedMultiplier;
 
   const SimSyncState({
     required this.revision,
     required this.buildings,
     required this.conveyors,
-    required this.recipes,
     required this.speedMultiplier,
   });
 
@@ -25,7 +23,6 @@ class SimSyncState {
         'revision': revision,
         'buildings': buildings.map((e) => e.toJson()).toList(),
         'conveyors': conveyors.map((e) => e.toJson()).toList(),
-        'recipes': recipes.map((e) => e.toJson()).toList(),
         'speedMultiplier': speedMultiplier,
       };
 
@@ -36,9 +33,6 @@ class SimSyncState {
             .toList(),
         conveyors: (json['conveyors'] as List)
             .map((e) => SimConveyorData.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        recipes: (json['recipes'] as List)
-            .map((e) => SimRecipeData.fromJson(e as Map<String, dynamic>))
             .toList(),
         speedMultiplier: json.getDouble('speedMultiplier'),
       );
@@ -61,6 +55,7 @@ class SimBuildingData {
   final List<SimPortData> inputPorts;
   final List<SimPortData> outputPorts;
   final bool isPaused;
+  final String? lockedInputBeltId;
 
   const SimBuildingData({
     required this.id,
@@ -78,6 +73,7 @@ class SimBuildingData {
     required this.inputPorts,
     required this.outputPorts,
     this.isPaused = false,
+    this.lockedInputBeltId,
   });
 
   Map<String, dynamic> toJson() => {
@@ -96,6 +92,7 @@ class SimBuildingData {
         'inputPorts': inputPorts.map((e) => e.toJson()).toList(),
         'outputPorts': outputPorts.map((e) => e.toJson()).toList(),
         'isPaused': isPaused,
+        'lockedInputBeltId': lockedInputBeltId,
       };
 
   factory SimBuildingData.fromJson(Map<String, dynamic> json) =>
@@ -121,6 +118,7 @@ class SimBuildingData {
             .map((e) => SimPortData.fromJson(e as Map<String, dynamic>))
             .toList(),
         isPaused: (json['isPaused'] as bool?) ?? false,
+        lockedInputBeltId: (json['lockedInputBeltId'] as String?),
       );
 }
 
@@ -226,62 +224,6 @@ class SimConveyorData {
         lastItemDrainCount: (json['lastItemDrainCount'] as num?)?.toInt() ?? 0,
         deadEndFreezeProgress: json.getDoubleOrNull('deadEndFreezeProgress'),
         lastItemFreezeProgress: json.getDoubleOrNull('lastItemFreezeProgress'),
-      );
-}
-
-/// 配方的可序列化数据
-class SimRecipeData {
-  final String id;
-  final double processTimeSeconds;
-  final List<SimRecipeIOData> inputs;
-  final List<SimRecipeIOData> outputs;
-  final List<String> allowedBuildings;
-
-  const SimRecipeData({
-    required this.id,
-    required this.processTimeSeconds,
-    required this.inputs,
-    required this.outputs,
-    this.allowedBuildings = const [],
-  });
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'processTimeSeconds': processTimeSeconds,
-        'inputs': inputs.map((e) => e.toJson()).toList(),
-        'outputs': outputs.map((e) => e.toJson()).toList(),
-        'allowedBuildings': allowedBuildings,
-      };
-
-  factory SimRecipeData.fromJson(Map<String, dynamic> json) => SimRecipeData(
-        id: json['id'] as String,
-        processTimeSeconds: json.getDouble('processTimeSeconds'),
-        inputs: (json['inputs'] as List)
-            .map((e) => SimRecipeIOData.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        outputs: (json['outputs'] as List)
-            .map((e) => SimRecipeIOData.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        allowedBuildings: (json['allowedBuildings'] as List?)
-                ?.map((e) => e as String)
-                .toList() ??
-            [],
-      );
-}
-
-/// 配方输入输出的可序列化数据
-class SimRecipeIOData {
-  final String itemId;
-  final int amount;
-
-  const SimRecipeIOData({required this.itemId, required this.amount});
-
-  Map<String, dynamic> toJson() => {'itemId': itemId, 'amount': amount};
-
-  factory SimRecipeIOData.fromJson(Map<String, dynamic> json) =>
-      SimRecipeIOData(
-        itemId: json['itemId'] as String,
-        amount: json['amount'] as int,
       );
 }
 

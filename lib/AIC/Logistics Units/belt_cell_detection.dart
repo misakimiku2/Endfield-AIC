@@ -308,6 +308,8 @@ extension _BeltCellDetection on TransportBeltController {
 
   /// 计算建筑在 gridPos 处的所有输出端口旋转后的世界方向集合。
   /// 用于限制传送带首段只能沿这些方向创建，阻止往输入端方向创建。
+  /// 只收集当前点击格子上的输出端口方向，而非建筑所有输出端口方向，
+  /// 避免多端口建筑（如精炼炉）中其他位置端口的方向干扰。
   Set<String>? _computeAllowedDirectionsForBuilding(Offset gridPos) {
     final gx = gridPos.dx.toInt();
     final gy = gridPos.dy.toInt();
@@ -320,9 +322,17 @@ extension _BeltCellDetection on TransportBeltController {
         continue;
       }
       final rot = pb.rotation;
+      final gw = pb.building.gridWidth;
+      final gh = pb.building.gridHeight;
       for (final port in pb.outputPorts) {
-        final worldDir = _rotateDirection(port.definition.direction, rot);
-        if (worldDir.isNotEmpty) dirs.add(worldDir);
+        // 只收集当前点击格子上的输出端口方向
+        final portGrid = port.gridPosition(pb.gridX, pb.gridY, gw, gh, rotation: rot);
+        final px = portGrid.dx.round();
+        final py = portGrid.dy.round();
+        if (px == gx && py == gy) {
+          final worldDir = _rotateDirection(port.definition.direction, rot);
+          if (worldDir.isNotEmpty) dirs.add(worldDir);
+        }
       }
     }
     return dirs.isNotEmpty ? dirs : null;
